@@ -6,6 +6,7 @@ import {
   createWorkspace,
   listWorkspaces,
   getWorkspace,
+  updateWorkspace,
   listUsers,
   createUser,
   updateUser,
@@ -24,6 +25,7 @@ workspaceRouter.post("/", superadminMiddleware, createWorkspace);
 // ── SPECIFIC Workspace Actions (Superadmin or Admin) ─────────
 // Must use workspaceAccessMiddleware to check permissions
 workspaceRouter.get("/:workspaceId", workspaceAccessMiddleware, getWorkspace);
+workspaceRouter.put("/:workspaceId", workspaceAccessMiddleware, updateWorkspace);
 
 // Users Management
 workspaceRouter.get("/:workspaceId/users", workspaceAccessMiddleware, listUsers);

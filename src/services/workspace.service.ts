@@ -51,6 +51,26 @@ export class WorkspaceService {
     return workspace;
   }
 
+  async updateWorkspaceName(workspaceId: string, name: string) {
+    if (!Types.ObjectId.isValid(workspaceId)) throw new Error("INVALID_ID");
+
+    const existing = await models.workspaces.findOne({
+      name: name.trim(),
+      _id: { $ne: new Types.ObjectId(workspaceId) },
+    }).lean();
+
+    if (existing) throw new Error("WORKSPACE_NAME_TAKEN");
+
+    const workspace = await models.workspaces.findByIdAndUpdate(
+      workspaceId,
+      { name: name.trim() },
+      { new: true }
+    ).lean();
+
+    if (!workspace) throw new Error("NOT_FOUND");
+    return workspace;
+  }
+
   // ── Users within a workspace ──────────────────────────────
 
   async listUsersByWorkspace(workspaceId: string) {

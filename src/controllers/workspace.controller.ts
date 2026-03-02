@@ -55,6 +55,33 @@ export async function getWorkspace(req: AuthRequest, res: Response, next: NextFu
   }
 }
 
+export async function updateWorkspace(req: AuthRequest, res: Response, next: NextFunction) {
+  try {
+    const workspaceId = req.params["workspaceId"] as string;
+    const { name } = req.body;
+
+    if (!name || typeof name !== "string" || !name.trim()) {
+      res.status(HttpStatusCode.BadRequest).send({ message: "Workspace name is required and cannot be empty." });
+      return;
+    }
+
+    const workspace = await workspaceService.updateWorkspaceName(workspaceId, name);
+    res.status(HttpStatusCode.Ok).send({ message: "Workspace updated successfully.", workspace });
+    return;
+  } catch (error: any) {
+    if (error.message === "INVALID_ID" || error.message === "NOT_FOUND") {
+      res.status(HttpStatusCode.NotFound).send({ message: "Workspace not found." });
+      return;
+    }
+    if (error.message === "WORKSPACE_NAME_TAKEN") {
+      res.status(HttpStatusCode.Conflict).send({ message: "A workspace with that name already exists." });
+      return;
+    }
+    console.error("updateWorkspace error:", error);
+    next(error);
+  }
+}
+
 // ── Users within a workspace ──────────────────────────────────
 
 export async function listUsers(req: AuthRequest, res: Response, next: NextFunction) {

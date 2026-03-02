@@ -14,4 +14,8 @@ metaRouter.post("/authenticate", metaController.authenticateMeta);
 // Endpoint to save selected page/account
 metaRouter.post("/save-integration", workspaceAccessMiddleware, metaController.saveMetaIntegration);
 
+// Read-only endpoints for Ads data
+metaRouter.get("/:workspaceId/adaccounts", workspaceAccessMiddleware, metaController.getAdAccounts);
+metaRouter.get("/:workspaceId/ads-insights", workspaceAccessMiddleware, metaController.getAdsInsights);
+
 export default metaRouter;

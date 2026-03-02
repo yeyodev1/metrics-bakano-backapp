@@ -74,6 +74,46 @@ export class MetaService {
     if (!workspace) throw new Error("Workspace not found.");
     return workspace;
   }
+
+  /**
+   * Lists ad accounts owned by the user/business
+   */
+  async listAdAccounts(accessToken: string) {
+    try {
+      const response = await axios.get(`${this.graphUrl}/me/adaccounts`, {
+        params: {
+          access_token: accessToken,
+          fields: "name,account_id,account_status,currency",
+        },
+      });
+      return response.data.data;
+    } catch (error: any) {
+      const metaError = error.response?.data || error.message;
+      console.error("Meta List AdAccounts Error:", metaError);
+      throw new Error(`Failed to list Facebook Ad Accounts. Meta Error: ${JSON.stringify(metaError)}`);
+    }
+  }
+
+  /**
+   * Gets ad-level insights (spend, clicks, etc)
+   */
+  async getAdInsights(adAccountId: string, accessToken: string) {
+    try {
+      const response = await axios.get(`${this.graphUrl}/act_${adAccountId}/insights`, {
+        params: {
+          access_token: accessToken,
+          level: "ad",
+          fields: "ad_id,ad_name,campaign_name,spend,impressions,clicks,cpc,cpm,reach",
+          date_preset: "last_30d",
+        },
+      });
+      return response.data.data;
+    } catch (error: any) {
+      const metaError = error.response?.data || error.message;
+      console.error("Meta Ads Insights Error:", metaError);
+      throw new Error(`Failed to fetch Ads insights. Meta Error: ${JSON.stringify(metaError)}`);
+    }
+  }
 }
 
 export const metaService = new MetaService();
