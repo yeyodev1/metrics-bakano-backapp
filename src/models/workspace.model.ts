@@ -5,7 +5,8 @@ export interface IWorkspace extends Document {
   adminId?: Types.ObjectId;
   isActive: boolean;
   metaAds?: {
-    accessToken: string; // Long-lived user/page token
+    accessToken: string; // Long-lived user token
+    pageAccessToken?: string; // Token específico de la página
     pageId: string;
     pageName: string;
     adAccountId?: string;
@@ -33,6 +34,7 @@ const WorkspaceSchema = new Schema<IWorkspace>(
     },
     metaAds: {
       accessToken: String,
+      pageAccessToken: String,
       pageId: String,
       pageName: String,
       adAccountId: String,

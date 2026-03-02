@@ -30,9 +30,22 @@ export async function createWorkspace(req: AuthRequest, res: Response, next: Nex
 
 export async function listWorkspaces(req: AuthRequest, res: Response, next: NextFunction) {
   try {
-    const workspaces = await workspaceService.listWorkspaces();
-    res.status(HttpStatusCode.Ok).send({ message: "Workspaces retrieved successfully.", workspaces });
-    return;
+    const role = req.user?.role;
+    const workspaceId = req.user?.workspaceId;
+
+    if (role === 'superadmin') {
+      const workspaces = await workspaceService.listWorkspaces();
+      res.status(HttpStatusCode.Ok).send({ message: "Workspaces retrieved successfully.", workspaces });
+      return;
+    } else {
+      if (!workspaceId) {
+        res.status(HttpStatusCode.Ok).send({ message: "No workspace assigned.", workspaces: [] });
+        return;
+      }
+      const workspace = await workspaceService.getWorkspaceById(workspaceId.toString());
+      res.status(HttpStatusCode.Ok).send({ message: "Workspaces retrieved successfully.", workspaces: [workspace] });
+      return;
+    }
   } catch (error) {
     console.error("listWorkspaces error:", error);
     next(error);

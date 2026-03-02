@@ -17,5 +17,6 @@ metaRouter.post("/save-integration", workspaceAccessMiddleware, metaController.s
 // Read-only endpoints for Ads data
 metaRouter.get("/:workspaceId/adaccounts", workspaceAccessMiddleware, metaController.getAdAccounts);
 metaRouter.get("/:workspaceId/ads-insights", workspaceAccessMiddleware, metaController.getAdsInsights);
+metaRouter.get("/:workspaceId/organic-insights", workspaceAccessMiddleware, metaController.getOrganicInsights);
 
 export default metaRouter;

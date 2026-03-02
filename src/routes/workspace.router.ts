@@ -18,8 +18,9 @@ const workspaceRouter = Router();
 // Base auth required for all
 workspaceRouter.use(authMiddleware);
 
-// ── GLOBAL Workspace Actions (Superadmin Only) ────────────────
-workspaceRouter.get("/", superadminMiddleware, listWorkspaces);
+// ── GLOBAL Workspace Actions ───────────────────────────────────
+// listWorkspaces maneja internamente los permisos basados en el rol
+workspaceRouter.get("/", listWorkspaces);
 workspaceRouter.post("/", superadminMiddleware, createWorkspace);
 
 // ── SPECIFIC Workspace Actions (Superadmin or Admin) ─────────

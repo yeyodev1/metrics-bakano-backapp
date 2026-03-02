@@ -55,6 +55,7 @@ export class MetaService {
    */
   async saveIntegration(workspaceId: string, data: {
     accessToken: string;
+    pageAccessToken: string;
     pageId: string;
     pageName: string;
     adAccountId?: string;
@@ -156,6 +157,38 @@ export class MetaService {
       const metaError = error.response?.data || error.message;
       console.error("Meta Ads Platform Spend Error:", metaError);
       throw new Error(`Failed to fetch Ads Platform Spend. Meta Error: ${JSON.stringify(metaError)}`);
+    }
+  }
+  /**
+   * Gets organic insights for the Facebook Page
+   */
+  async getOrganicInsights(pageId: string, accessToken: string) {
+    try {
+      // 1. Get basic page info (followers, likes)
+      const pageInfoResponse = await axios.get(`${this.graphUrl}/${pageId}`, {
+        params: {
+          access_token: accessToken,
+          fields: "fan_count,followers_count,name",
+        },
+      });
+
+      // 2. Get latest 5 posts
+      const postsResponse = await axios.get(`${this.graphUrl}/${pageId}/published_posts`, {
+        params: {
+          access_token: accessToken,
+          fields: "message,created_time,permalink_url,full_picture,shares,comments.summary(total_count),likes.summary(total_count)",
+          limit: 5,
+        },
+      });
+
+      return {
+        pageInfo: pageInfoResponse.data,
+        recentPosts: postsResponse.data.data || [],
+      };
+    } catch (error: any) {
+      const metaError = error.response?.data || error.message;
+      console.error("Meta Organic Insights Error:", metaError);
+      throw new Error(`Failed to fetch Organic Insights. Meta Error: ${JSON.stringify(metaError)}`);
     }
   }
 }
