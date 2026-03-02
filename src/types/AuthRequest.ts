@@ -1,9 +1,10 @@
 import { Request } from "express";
 
 export interface JwtPayload {
-  userId: string;
+  _id: string;
   email: string;
-  accountType: string;
+  role: "superadmin" | "admin" | "colaborador";
+  workspaceId?: string;
 }
 
 export interface AuthRequest extends Request {

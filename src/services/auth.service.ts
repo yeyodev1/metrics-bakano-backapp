@@ -37,7 +37,7 @@ export class AuthService {
         workspaceId: user.workspaceId
       },
       this.jwtSecret,
-      { expiresIn: "24h" }
+      { expiresIn: "14d" }
     );
 
     return {
