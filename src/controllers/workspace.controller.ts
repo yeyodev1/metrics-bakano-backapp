@@ -7,33 +7,20 @@ const workspaceService = new WorkspaceService();
 
 // ── Workspaces ────────────────────────────────────────────────
 
-export async function createWorkspace(
-  req: AuthRequest,
-  res: Response,
-  next: NextFunction
-) {
+export async function createWorkspace(req: AuthRequest, res: Response, next: NextFunction) {
   try {
     const { name } = req.body;
-
     if (!name || typeof name !== "string" || !name.trim()) {
-      res.status(HttpStatusCode.BadRequest).send({
-        message: "Workspace name is required.",
-      });
+      res.status(HttpStatusCode.BadRequest).send({ message: "Workspace name is required." });
       return;
     }
 
     const workspace = await workspaceService.createWorkspace({ name });
-
-    res.status(HttpStatusCode.Created).send({
-      message: "Workspace created successfully.",
-      workspace,
-    });
+    res.status(HttpStatusCode.Created).send({ message: "Workspace created successfully.", workspace });
     return;
   } catch (error: any) {
     if (error.message === "WORKSPACE_NAME_TAKEN") {
-      res.status(HttpStatusCode.Conflict).send({
-        message: "A workspace with that name already exists.",
-      });
+      res.status(HttpStatusCode.Conflict).send({ message: "A workspace with that name already exists." });
       return;
     }
     console.error("createWorkspace error:", error);
@@ -41,18 +28,10 @@ export async function createWorkspace(
   }
 }
 
-export async function listWorkspaces(
-  req: AuthRequest,
-  res: Response,
-  next: NextFunction
-) {
+export async function listWorkspaces(req: AuthRequest, res: Response, next: NextFunction) {
   try {
     const workspaces = await workspaceService.listWorkspaces();
-
-    res.status(HttpStatusCode.Ok).send({
-      message: "Workspaces retrieved successfully.",
-      workspaces,
-    });
+    res.status(HttpStatusCode.Ok).send({ message: "Workspaces retrieved successfully.", workspaces });
     return;
   } catch (error) {
     console.error("listWorkspaces error:", error);
@@ -60,20 +39,11 @@ export async function listWorkspaces(
   }
 }
 
-export async function getWorkspace(
-  req: AuthRequest,
-  res: Response,
-  next: NextFunction
-) {
+export async function getWorkspace(req: AuthRequest, res: Response, next: NextFunction) {
   try {
     const workspaceId = req.params["workspaceId"] as string;
-
     const workspace = await workspaceService.getWorkspaceById(workspaceId);
-
-    res.status(HttpStatusCode.Ok).send({
-      message: "Workspace retrieved successfully.",
-      workspace,
-    });
+    res.status(HttpStatusCode.Ok).send({ message: "Workspace retrieved successfully.", workspace });
     return;
   } catch (error: any) {
     if (error.message === "INVALID_ID" || error.message === "NOT_FOUND") {
@@ -85,37 +55,44 @@ export async function getWorkspace(
   }
 }
 
-// ── Admins ────────────────────────────────────────────────────
+// ── Users within a workspace ──────────────────────────────────
 
-export async function createAdmin(
-  req: AuthRequest,
-  res: Response,
-  next: NextFunction
-) {
+export async function listUsers(req: AuthRequest, res: Response, next: NextFunction) {
   try {
     const workspaceId = req.params["workspaceId"] as string;
-    const { email, password } = req.body;
+    const users = await workspaceService.listUsersByWorkspace(workspaceId);
+    res.status(HttpStatusCode.Ok).send({ message: "Users retrieved successfully.", users });
+    return;
+  } catch (error: any) {
+    if (error.message === "INVALID_ID") {
+      res.status(HttpStatusCode.BadRequest).send({ message: "Invalid workspace ID." });
+      return;
+    }
+    console.error("listUsers error:", error);
+    next(error);
+  }
+}
+
+export async function createUser(req: AuthRequest, res: Response, next: NextFunction) {
+  try {
+    const workspaceId = req.params["workspaceId"] as string;
+    const { name, email, password, role } = req.body;
 
     if (!email || !password) {
-      res.status(HttpStatusCode.BadRequest).send({
-        message: "Email and password are required.",
-      });
+      res.status(HttpStatusCode.BadRequest).send({ message: "Email and password are required." });
       return;
     }
-
     if (password.length < 8) {
-      res.status(HttpStatusCode.BadRequest).send({
-        message: "Password must be at least 8 characters.",
-      });
+      res.status(HttpStatusCode.BadRequest).send({ message: "Password must be at least 8 characters." });
+      return;
+    }
+    if (!["admin", "colaborador"].includes(role)) {
+      res.status(HttpStatusCode.BadRequest).send({ message: "Role must be 'admin' or 'colaborador'." });
       return;
     }
 
-    const admin = await workspaceService.createAdmin({ email, password, workspaceId });
-
-    res.status(HttpStatusCode.Created).send({
-      message: "Admin created successfully.",
-      admin,
-    });
+    const user = await workspaceService.createUser({ name, email, password, role, workspaceId });
+    res.status(HttpStatusCode.Created).send({ message: "User created successfully.", user });
     return;
   } catch (error: any) {
     if (error.message === "EMAIL_TAKEN") {
@@ -126,32 +103,57 @@ export async function createAdmin(
       res.status(HttpStatusCode.NotFound).send({ message: "Workspace not found." });
       return;
     }
-    console.error("createAdmin error:", error);
+    console.error("createUser error:", error);
     next(error);
   }
 }
 
-export async function listAdmins(
-  req: AuthRequest,
-  res: Response,
-  next: NextFunction
-) {
+export async function updateUser(req: AuthRequest, res: Response, next: NextFunction) {
   try {
     const workspaceId = req.params["workspaceId"] as string;
+    const userId = req.params["userId"] as string;
+    const { name, email, password } = req.body;
 
-    const admins = await workspaceService.listAdminsByWorkspace(workspaceId);
-
-    res.status(HttpStatusCode.Ok).send({
-      message: "Admins retrieved successfully.",
-      admins,
-    });
-    return;
-  } catch (error: any) {
-    if (error.message === "INVALID_ID") {
-      res.status(HttpStatusCode.BadRequest).send({ message: "Invalid workspace ID." });
+    if (!name && !email && !password) {
+      res.status(HttpStatusCode.BadRequest).send({ message: "At least one field is required to update." });
       return;
     }
-    console.error("listAdmins error:", error);
+    if (password && password.length < 8) {
+      res.status(HttpStatusCode.BadRequest).send({ message: "Password must be at least 8 characters." });
+      return;
+    }
+
+    const user = await workspaceService.updateUser(workspaceId, userId, { name, email, password });
+    res.status(HttpStatusCode.Ok).send({ message: "User updated successfully.", user });
+    return;
+  } catch (error: any) {
+    if (error.message === "EMAIL_TAKEN") {
+      res.status(HttpStatusCode.Conflict).send({ message: "Email is already in use." });
+      return;
+    }
+    if (error.message === "NOT_FOUND" || error.message === "INVALID_ID") {
+      res.status(HttpStatusCode.NotFound).send({ message: "User not found." });
+      return;
+    }
+    console.error("updateUser error:", error);
+    next(error);
+  }
+}
+
+export async function deleteUser(req: AuthRequest, res: Response, next: NextFunction) {
+  try {
+    const workspaceId = req.params["workspaceId"] as string;
+    const userId = req.params["userId"] as string;
+
+    await workspaceService.deleteUser(workspaceId, userId);
+    res.status(HttpStatusCode.Ok).send({ message: "User deleted successfully." });
+    return;
+  } catch (error: any) {
+    if (error.message === "NOT_FOUND" || error.message === "INVALID_ID") {
+      res.status(HttpStatusCode.NotFound).send({ message: "User not found." });
+      return;
+    }
+    console.error("deleteUser error:", error);
     next(error);
   }
 }

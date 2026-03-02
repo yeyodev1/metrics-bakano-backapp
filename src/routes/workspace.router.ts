@@ -1,26 +1,34 @@
 import { Router } from "express";
 import { authMiddleware } from "../middlewares/auth.middleware";
 import { superadminMiddleware } from "../middlewares/superadmin.middleware";
+import { workspaceAccessMiddleware } from "../middlewares/workspaceAccess.middleware";
 import {
   createWorkspace,
   listWorkspaces,
   getWorkspace,
-  createAdmin,
-  listAdmins,
+  listUsers,
+  createUser,
+  updateUser,
+  deleteUser,
 } from "../controllers/workspace.controller";
 
 const workspaceRouter = Router();
 
-// All workspace routes require: valid JWT + superadmin role
-workspaceRouter.use(authMiddleware, superadminMiddleware);
+// Base auth required for all
+workspaceRouter.use(authMiddleware);
 
-// Workspace CRUD
-workspaceRouter.post("/", createWorkspace);
-workspaceRouter.get("/", listWorkspaces);
-workspaceRouter.get("/:workspaceId", getWorkspace);
+// ── GLOBAL Workspace Actions (Superadmin Only) ────────────────
+workspaceRouter.get("/", superadminMiddleware, listWorkspaces);
+workspaceRouter.post("/", superadminMiddleware, createWorkspace);
 
-// Admins within a workspace
-workspaceRouter.post("/:workspaceId/admins", createAdmin);
-workspaceRouter.get("/:workspaceId/admins", listAdmins);
+// ── SPECIFIC Workspace Actions (Superadmin or Admin) ─────────
+// Must use workspaceAccessMiddleware to check permissions
+workspaceRouter.get("/:workspaceId", workspaceAccessMiddleware, getWorkspace);
+
+// Users Management
+workspaceRouter.get("/:workspaceId/users", workspaceAccessMiddleware, listUsers);
+workspaceRouter.post("/:workspaceId/users", workspaceAccessMiddleware, createUser);
+workspaceRouter.put("/:workspaceId/users/:userId", workspaceAccessMiddleware, updateUser);
+workspaceRouter.delete("/:workspaceId/users/:userId", workspaceAccessMiddleware, deleteUser);
 
 export default workspaceRouter;
