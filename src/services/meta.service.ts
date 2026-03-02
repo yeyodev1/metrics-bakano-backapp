@@ -95,7 +95,7 @@ export class MetaService {
   }
 
   /**
-   * Gets ad-level insights (spend, clicks, etc)
+   * Gets ad-level insights (spend, clicks, roas, etc)
    */
   async getAdInsights(adAccountId: string, accessToken: string) {
     try {
@@ -103,7 +103,7 @@ export class MetaService {
         params: {
           access_token: accessToken,
           level: "ad",
-          fields: "ad_id,ad_name,campaign_name,spend,impressions,clicks,cpc,cpm,reach",
+          fields: "ad_id,ad_name,campaign_name,spend,impressions,clicks,cpc,cpm,reach,actions,action_values,cost_per_action_type,purchase_roas",
           date_preset: "last_30d",
         },
       });
@@ -112,6 +112,50 @@ export class MetaService {
       const metaError = error.response?.data || error.message;
       console.error("Meta Ads Insights Error:", metaError);
       throw new Error(`Failed to fetch Ads insights. Meta Error: ${JSON.stringify(metaError)}`);
+    }
+  }
+
+  /**
+   * Gets spend by platform (Facebook vs Instagram) for the ad account
+   */
+  async getSpendByPlatform(adAccountId: string, accessToken: string) {
+    try {
+      const response = await axios.get(`${this.graphUrl}/act_${adAccountId}/insights`, {
+        params: {
+          access_token: accessToken,
+          level: "account",
+          fields: "spend",
+          breakdowns: "publisher_platform",
+          date_preset: "last_30d",
+        },
+      });
+      return response.data.data;
+    } catch (error: any) {
+      const metaError = error.response?.data || error.message;
+      console.error("Meta Platform Spend Error:", metaError);
+      throw new Error(`Failed to fetch Platform Spend. Meta Error: ${JSON.stringify(metaError)}`);
+    }
+  }
+
+  /**
+   * Gets spend by platform for each Ad
+   */
+  async getAdsSpendByPlatform(adAccountId: string, accessToken: string) {
+    try {
+      const response = await axios.get(`${this.graphUrl}/act_${adAccountId}/insights`, {
+        params: {
+          access_token: accessToken,
+          level: "ad",
+          fields: "ad_id,spend",
+          breakdowns: "publisher_platform",
+          date_preset: "last_30d",
+        },
+      });
+      return response.data.data;
+    } catch (error: any) {
+      const metaError = error.response?.data || error.message;
+      console.error("Meta Ads Platform Spend Error:", metaError);
+      throw new Error(`Failed to fetch Ads Platform Spend. Meta Error: ${JSON.stringify(metaError)}`);
     }
   }
 }

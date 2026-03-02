@@ -92,10 +92,17 @@ export async function getAdsInsights(req: Request, res: Response, next: NextFunc
       return;
     }
 
-    const insights = await metaService.getAdInsights(adAccountId, workspace.metaAds.accessToken);
+    const [insights, spendByPlatform, adsSpendByPlatform] = await Promise.all([
+      metaService.getAdInsights(adAccountId, workspace.metaAds.accessToken),
+      metaService.getSpendByPlatform(adAccountId, workspace.metaAds.accessToken).catch(() => []), // Prevenir falla si no hay datos
+      metaService.getAdsSpendByPlatform(adAccountId, workspace.metaAds.accessToken).catch(() => []),
+    ]);
+
     res.status(HttpStatusCode.Ok).send({
       message: "Ads insights retrieved successfully.",
       insights,
+      spendByPlatform,
+      adsSpendByPlatform,
     });
   } catch (error) {
     next(error);
