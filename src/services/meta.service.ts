@@ -101,12 +101,10 @@ export class MetaService {
     }
   }
 
-  /**
-   * Gets ad-level insights (spend, clicks, roas, etc)
-   */
   async getAdInsights(adAccountId: string, accessToken: string) {
     try {
-      const response = await axios.get(`${this.graphUrl}/act_${adAccountId}/insights`, {
+      // 1. Get Aggregated Insights (Already last_30d)
+      const aggregatedResponse = await axios.get(`${this.graphUrl}/act_${adAccountId}/insights`, {
         params: {
           access_token: accessToken,
           level: "ad",
@@ -114,7 +112,22 @@ export class MetaService {
           date_preset: "last_30d",
         },
       });
-      return response.data.data;
+
+      // 2. Get Daily Insights for Time Series Chart (last_30d daily)
+      const dailyResponse = await axios.get(`${this.graphUrl}/act_${adAccountId}/insights`, {
+        params: {
+          access_token: accessToken,
+          level: "account",
+          fields: "spend,date_start",
+          date_preset: "last_30d",
+          time_increment: 1,
+        },
+      });
+
+      return {
+        insights: aggregatedResponse.data.data,
+        dailySpend: dailyResponse.data.data || []
+      };
     } catch (error: any) {
       const metaError = error.response?.data || error.message;
       console.error("Meta Ads Insights Error:", metaError);
@@ -221,10 +234,29 @@ export class MetaService {
         }
       }
 
+      // 4. Get latest 5 Instagram posts (if IG is linked)
+      let recentPostsIg = [];
+      if (igInfo && pageInfoResponse.data.instagram_business_account) {
+        try {
+          const igId = pageInfoResponse.data.instagram_business_account.id;
+          const igMediaResponse = await axios.get(`${this.graphUrl}/${igId}/media`, {
+            params: {
+              access_token: finalToken,
+              fields: "id,caption,media_url,permalink,timestamp,like_count,comments_count",
+              limit: 5,
+            },
+          });
+          recentPostsIg = igMediaResponse.data?.data || [];
+        } catch (igMediaError: any) {
+          console.warn(`Could not fetch Instagram media for page ${pageId}`, igMediaError.response?.data || igMediaError.message);
+        }
+      }
+
       return {
         pageInfo: pageInfoResponse.data,
         igInfo: igInfo,
         recentPosts: postsResponse.data.data || [],
+        recentPostsIg,
       };
     } catch (error: any) {
       const metaError = error.response?.data || error.message;

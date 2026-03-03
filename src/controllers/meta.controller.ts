@@ -93,7 +93,7 @@ export async function getAdsInsights(req: Request, res: Response, next: NextFunc
       return;
     }
 
-    const [insights, spendByPlatform, adsSpendByPlatform] = await Promise.all([
+    const [insightsRes, spendByPlatform, adsSpendByPlatform] = await Promise.all([
       metaService.getAdInsights(adAccountId, workspace.metaAds.accessToken),
       metaService.getSpendByPlatform(adAccountId, workspace.metaAds.accessToken).catch(() => []), // Prevenir falla si no hay datos
       metaService.getAdsSpendByPlatform(adAccountId, workspace.metaAds.accessToken).catch(() => []),
@@ -101,7 +101,8 @@ export async function getAdsInsights(req: Request, res: Response, next: NextFunc
 
     res.status(HttpStatusCode.Ok).send({
       message: "Ads insights retrieved successfully.",
-      insights,
+      insights: insightsRes.insights,
+      dailySpend: insightsRes.dailySpend,
       spendByPlatform,
       adsSpendByPlatform,
     });
@@ -122,7 +123,7 @@ export async function getOrganicInsights(req: Request, res: Response, next: Next
       return;
     }
 
-    const { pageInfo, igInfo, recentPosts } = await metaService.getOrganicInsights(
+    const { pageInfo, igInfo, recentPosts, recentPostsIg } = await metaService.getOrganicInsights(
       workspace.metaAds.pageId,
       token
     );
@@ -132,6 +133,7 @@ export async function getOrganicInsights(req: Request, res: Response, next: Next
       pageInfo,
       igInfo,
       recentPosts,
+      recentPostsIg,
     });
   } catch (error) {
     next(error);
