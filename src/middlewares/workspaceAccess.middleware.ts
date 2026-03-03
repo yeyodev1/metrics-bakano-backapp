@@ -19,7 +19,8 @@ export function workspaceAccessMiddleware(
     return next();
   }
 
-  if (role === "admin" && userWsId && userWsId.toString() === paramWsId) {
+  const isAssigned = userWsId && userWsId.toString() === paramWsId;
+  if ((role === "admin" || role === "colaborador") && isAssigned) {
     return next();
   }
 

@@ -2,6 +2,7 @@ import { Router } from "express";
 import { authMiddleware } from "../middlewares/auth.middleware";
 import { superadminMiddleware } from "../middlewares/superadmin.middleware";
 import { workspaceAccessMiddleware } from "../middlewares/workspaceAccess.middleware";
+import { workspaceAdminMiddleware } from "../middlewares/workspaceAdmin.middleware";
 import {
   createWorkspace,
   listWorkspaces,
@@ -19,19 +20,20 @@ const workspaceRouter = Router();
 workspaceRouter.use(authMiddleware);
 
 // ── GLOBAL Workspace Actions ───────────────────────────────────
-// listWorkspaces maneja internamente los permisos basados en el rol
 workspaceRouter.get("/", listWorkspaces);
 workspaceRouter.post("/", superadminMiddleware, createWorkspace);
 
-// ── SPECIFIC Workspace Actions (Superadmin or Admin) ─────────
-// Must use workspaceAccessMiddleware to check permissions
+// ── SPECIFIC Workspace Actions (Superadmin, Admin or Collaborator) ─────────
+// Collaborators have read-only access (GET)
 workspaceRouter.get("/:workspaceId", workspaceAccessMiddleware, getWorkspace);
-workspaceRouter.put("/:workspaceId", workspaceAccessMiddleware, updateWorkspace);
+
+// Administrative actions (PUT, POST Users, etc.) require Admin/Superadmin
+workspaceRouter.put("/:workspaceId", workspaceAdminMiddleware, updateWorkspace);
 
 // Users Management
 workspaceRouter.get("/:workspaceId/users", workspaceAccessMiddleware, listUsers);
-workspaceRouter.post("/:workspaceId/users", workspaceAccessMiddleware, createUser);
-workspaceRouter.put("/:workspaceId/users/:userId", workspaceAccessMiddleware, updateUser);
-workspaceRouter.delete("/:workspaceId/users/:userId", workspaceAccessMiddleware, deleteUser);
+workspaceRouter.post("/:workspaceId/users", workspaceAdminMiddleware, createUser);
+workspaceRouter.put("/:workspaceId/users/:userId", workspaceAdminMiddleware, updateUser);
+workspaceRouter.delete("/:workspaceId/users/:userId", workspaceAdminMiddleware, deleteUser);
 
 export default workspaceRouter;
