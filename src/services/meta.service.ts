@@ -118,7 +118,7 @@ export class MetaService {
         params: {
           access_token: accessToken,
           level: "account",
-          fields: "spend,date_start",
+          fields: "spend,clicks,impressions,actions,date_start",
           date_preset: datePreset,
           time_increment: 1,
         },
