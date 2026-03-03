@@ -122,7 +122,7 @@ export async function getOrganicInsights(req: Request, res: Response, next: Next
       return;
     }
 
-    const { pageInfo, recentPosts } = await metaService.getOrganicInsights(
+    const { pageInfo, igInfo, recentPosts } = await metaService.getOrganicInsights(
       workspace.metaAds.pageId,
       token
     );
@@ -130,6 +130,7 @@ export async function getOrganicInsights(req: Request, res: Response, next: Next
     res.status(HttpStatusCode.Ok).send({
       message: "Organic insights retrieved successfully.",
       pageInfo,
+      igInfo,
       recentPosts,
     });
   } catch (error) {

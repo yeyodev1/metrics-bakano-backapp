@@ -191,7 +191,7 @@ export class MetaService {
       const pageInfoResponse = await axios.get(`${this.graphUrl}/${pageId}`, {
         params: {
           access_token: finalToken,
-          fields: "fan_count,followers_count,name",
+          fields: "fan_count,followers_count,name,instagram_business_account",
         },
       });
 
@@ -199,13 +199,31 @@ export class MetaService {
       const postsResponse = await axios.get(`${this.graphUrl}/${pageId}/published_posts`, {
         params: {
           access_token: finalToken,
-          fields: "message,created_time,permalink_url,full_picture,shares,comments.summary(total_count),likes.summary(total_count)",
+          fields: "message,created_time,permalink_url,full_picture,shares",
           limit: 5,
         },
       });
 
+      // 3. Get Instagram Info if linked
+      let igInfo = null;
+      if (pageInfoResponse.data.instagram_business_account) {
+        try {
+          const igId = pageInfoResponse.data.instagram_business_account.id;
+          const igResponse = await axios.get(`${this.graphUrl}/${igId}`, {
+            params: {
+              access_token: finalToken,
+              fields: "followers_count,media_count,username,profile_picture_url"
+            }
+          });
+          igInfo = igResponse.data;
+        } catch (igError) {
+          console.warn(`Could not fetch Instagram data for page ${pageId}`);
+        }
+      }
+
       return {
         pageInfo: pageInfoResponse.data,
+        igInfo: igInfo,
         recentPosts: postsResponse.data.data || [],
       };
     } catch (error: any) {
