@@ -93,10 +93,13 @@ export async function getAdsInsights(req: Request, res: Response, next: NextFunc
       return;
     }
 
+    // Date preset from query (e.g. this_month, last_30d)
+    const datePreset = (req.query.datePreset as string) || "this_month";
+
     const [insightsRes, spendByPlatform, adsSpendByPlatform] = await Promise.all([
-      metaService.getAdInsights(adAccountId, workspace.metaAds.accessToken),
-      metaService.getSpendByPlatform(adAccountId, workspace.metaAds.accessToken).catch(() => []), // Prevenir falla si no hay datos
-      metaService.getAdsSpendByPlatform(adAccountId, workspace.metaAds.accessToken).catch(() => []),
+      metaService.getAdInsights(adAccountId, workspace.metaAds.accessToken, datePreset),
+      metaService.getSpendByPlatform(adAccountId, workspace.metaAds.accessToken, datePreset).catch(() => []),
+      metaService.getAdsSpendByPlatform(adAccountId, workspace.metaAds.accessToken, datePreset).catch(() => []),
     ]);
 
     res.status(HttpStatusCode.Ok).send({
