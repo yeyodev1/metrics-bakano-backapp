@@ -31,7 +31,7 @@ export function createApp() {
   app.use(express.json({ limit: "50mb" }));
 
   app.get("/", (_req, res) => {
-    res.send("Server is alive");
+    res.send("metrics bakano backapp is alive");
   });
 
   routerApi(app);
