@@ -36,7 +36,7 @@ export async function saveMetaIntegration(req: Request, res: Response, next: Nex
   try {
     const { workspaceId, pageId, pageName, accessToken, pageAccessToken, adAccountId, adAccountName } = req.body;
 
-    if (!workspaceId || !pageId || !accessToken || !pageAccessToken) {
+    if (!workspaceId || !pageId || !accessToken) {
       res.status(HttpStatusCode.BadRequest).send({ message: "Invalid integration data provided." });
       return;
     }
@@ -115,14 +115,16 @@ export async function getOrganicInsights(req: Request, res: Response, next: Next
     const { workspaceId } = req.params;
     const workspace = await models.workspaces.findById(workspaceId);
 
-    if (!workspace || !workspace.metaAds?.pageAccessToken || !workspace.metaAds?.pageId) {
+    const token = workspace?.metaAds?.pageAccessToken || workspace?.metaAds?.accessToken;
+
+    if (!workspace || !token || !workspace.metaAds?.pageId) {
       res.status(HttpStatusCode.BadRequest).send({ message: "Meta integration missing or no Page connected." });
       return;
     }
 
     const { pageInfo, recentPosts } = await metaService.getOrganicInsights(
       workspace.metaAds.pageId,
-      workspace.metaAds.pageAccessToken
+      token
     );
 
     res.status(HttpStatusCode.Ok).send({

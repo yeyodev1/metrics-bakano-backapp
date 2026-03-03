@@ -55,20 +55,26 @@ export class MetaService {
    */
   async saveIntegration(workspaceId: string, data: {
     accessToken: string;
-    pageAccessToken: string;
+    pageAccessToken?: string;
     pageId: string;
     pageName: string;
     adAccountId?: string;
     adAccountName?: string;
   }) {
+    // Dynamically build the update object to only update provided fields
+    const updateQuery: Record<string, any> = {
+      "metaAds.lastSyncedAt": new Date(),
+    };
+
+    for (const [key, value] of Object.entries(data)) {
+      if (value !== undefined) {
+        updateQuery[`metaAds.${key}`] = value;
+      }
+    }
+
     const workspace = await models.workspaces.findByIdAndUpdate(
       workspaceId,
-      {
-        metaAds: {
-          ...data,
-          lastSyncedAt: new Date(),
-        },
-      },
+      { $set: updateQuery },
       { new: true }
     );
 
@@ -164,10 +170,27 @@ export class MetaService {
    */
   async getOrganicInsights(pageId: string, accessToken: string) {
     try {
+      let finalToken = accessToken;
+
+      // Intentar obtener el page_access_token por si el token provisto es de usuario antiguo
+      try {
+        const tokenCheck = await axios.get(`${this.graphUrl}/${pageId}`, {
+          params: {
+            access_token: accessToken,
+            fields: "access_token"
+          }
+        });
+        if (tokenCheck.data?.access_token) {
+          finalToken = tokenCheck.data.access_token;
+        }
+      } catch (e) {
+        console.warn(`Could not verify page_access_token for page ${pageId}, proceeding with original token.`);
+      }
+
       // 1. Get basic page info (followers, likes)
       const pageInfoResponse = await axios.get(`${this.graphUrl}/${pageId}`, {
         params: {
-          access_token: accessToken,
+          access_token: finalToken,
           fields: "fan_count,followers_count,name",
         },
       });
@@ -175,7 +198,7 @@ export class MetaService {
       // 2. Get latest 5 posts
       const postsResponse = await axios.get(`${this.graphUrl}/${pageId}/published_posts`, {
         params: {
-          access_token: accessToken,
+          access_token: finalToken,
           fields: "message,created_time,permalink_url,full_picture,shares,comments.summary(total_count),likes.summary(total_count)",
           limit: 5,
         },
