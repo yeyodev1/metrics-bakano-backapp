@@ -54,11 +54,29 @@ export class WorkspaceService {
 
     if (workspaceIds.length === 0) return [];
 
-    return models.workspaces
+    const workspaces = await models.workspaces
       .find({ _id: { $in: workspaceIds }, isActive: true })
       .populate("adminId", "email role name")
       .sort({ createdAt: -1 })
       .lean();
+
+    // Inyectar el rol del usuario que está solicitando la lista en cada workspace objeto
+    return workspaces.map((ws: any) => {
+      let userRole: "admin" | "colaborador" = "colaborador";
+
+      const wsAccess = user.workspaces?.find((w: any) => w.workspaceId.toString() === ws._id.toString());
+      if (wsAccess) {
+        userRole = wsAccess.role;
+      } else if (user.workspaceId && user.workspaceId.toString() === ws._id.toString()) {
+        // Fallback para legacy
+        userRole = (user.role === "admin") ? "admin" : "colaborador";
+      }
+
+      return {
+        ...ws,
+        userRole
+      };
+    });
   }
 
   async getWorkspaceById(workspaceId: string) {
