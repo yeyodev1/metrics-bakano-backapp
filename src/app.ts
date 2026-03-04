@@ -10,7 +10,8 @@ const whitelist = [
   "http://localhost:5173",
   "http://localhost:5174",
   "http://localhost:8101",
-  "https://testing-storybrand-frontend.bakano.ec"
+  "https://testing-storybrand-frontend.bakano.ec",
+  "https://metrics.bakano.ec"
 ];
 
 const corsOptions: cors.CorsOptions = {
