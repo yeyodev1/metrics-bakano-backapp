@@ -3,10 +3,10 @@ import jwt from "jsonwebtoken";
 import models from "../models";
 
 export class AuthService {
-  private readonly jwtSecret: string;
-
-  constructor() {
-    this.jwtSecret = process.env.JWT_SECRET || "default_jwt_secret_key";
+  // Instead of caching in the constructor, we will read it dynamically
+  // to ensure process.env.JWT_SECRET is loaded by dotenv before usage.
+  private get jwtSecret(): string {
+    return process.env.JWT_SECRET || "default_jwt_secret_key";
   }
 
   public async login(email: string, passwordString: string) {
