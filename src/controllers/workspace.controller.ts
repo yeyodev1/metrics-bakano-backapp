@@ -31,19 +31,19 @@ export async function createWorkspace(req: AuthRequest, res: Response, next: Nex
 export async function listWorkspaces(req: AuthRequest, res: Response, next: NextFunction) {
   try {
     const role = req.user?.role;
-    const workspaceId = req.user?.workspaceId;
+    const userId = req.user?._id;
 
     if (role === 'superadmin') {
       const workspaces = await workspaceService.listWorkspaces();
       res.status(HttpStatusCode.Ok).send({ message: "Workspaces retrieved successfully.", workspaces });
       return;
     } else {
-      if (!workspaceId) {
-        res.status(HttpStatusCode.Ok).send({ message: "No workspace assigned.", workspaces: [] });
+      if (!userId) {
+        res.status(HttpStatusCode.Unauthorized).send({ message: "No user assigned.", workspaces: [] });
         return;
       }
-      const workspace = await workspaceService.getWorkspaceById(workspaceId.toString());
-      res.status(HttpStatusCode.Ok).send({ message: "Workspaces retrieved successfully.", workspaces: [workspace] });
+      const workspaces = await workspaceService.listWorkspacesForUser(userId);
+      res.status(HttpStatusCode.Ok).send({ message: "Workspaces retrieved successfully.", workspaces });
       return;
     }
   } catch (error) {
@@ -118,11 +118,11 @@ export async function createUser(req: AuthRequest, res: Response, next: NextFunc
     const workspaceId = req.params["workspaceId"] as string;
     const { name, email, password, role } = req.body;
 
-    if (!email || !password) {
-      res.status(HttpStatusCode.BadRequest).send({ message: "Email and password are required." });
+    if (!email) {
+      res.status(HttpStatusCode.BadRequest).send({ message: "Email is required." });
       return;
     }
-    if (password.length < 8) {
+    if (password && password.length < 8) {
       res.status(HttpStatusCode.BadRequest).send({ message: "Password must be at least 8 characters." });
       return;
     }
@@ -135,8 +135,12 @@ export async function createUser(req: AuthRequest, res: Response, next: NextFunc
     res.status(HttpStatusCode.Created).send({ message: "User created successfully.", user });
     return;
   } catch (error: any) {
+    if (error.message === "PASSWORD_REQUIRED") {
+      res.status(HttpStatusCode.BadRequest).send({ message: "La contraseña es requerida para usuarios nuevos." });
+      return;
+    }
     if (error.message === "EMAIL_TAKEN") {
-      res.status(HttpStatusCode.Conflict).send({ message: "Email is already in use." });
+      res.status(HttpStatusCode.Conflict).send({ message: "El usuario ya existe en este entorno." });
       return;
     }
     if (error.message === "WORKSPACE_NOT_FOUND" || error.message === "INVALID_ID") {

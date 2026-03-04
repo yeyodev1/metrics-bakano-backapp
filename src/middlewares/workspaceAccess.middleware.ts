@@ -1,30 +1,51 @@
 import { Response, NextFunction } from "express";
 import { HttpStatusCode } from "axios";
 import { AuthRequest } from "../types/AuthRequest";
+import models from "../models";
 
 /**
  * Validates that the user has access to the workspace in req.params.
  * Superadmin can access any workspace.
- * Admin can only access their own workspace.
+ * Admin or Colaborador can only access workspaces they belong to.
  */
-export function workspaceAccessMiddleware(
+export async function workspaceAccessMiddleware(
   req: AuthRequest,
   res: Response,
   next: NextFunction
-) {
-  const { role, workspaceId: userWsId } = req.user || {};
+): Promise<void> {
+  const { role, _id } = req.user || {};
   const { workspaceId: paramWsId } = req.params;
 
   if (role === "superadmin") {
-    return next();
+    next();
+    return;
   }
 
-  const isAssigned = userWsId && userWsId.toString() === paramWsId;
-  if ((role === "admin" || role === "colaborador") && isAssigned) {
-    return next();
+  if (!_id) {
+    res.status(HttpStatusCode.Unauthorized).send({ message: "No user ID found." });
+    return;
   }
 
-  res.status(HttpStatusCode.Forbidden).send({
-    message: "Access denied. You don't have permission for this workspace.",
-  });
+  try {
+    const user = await models.users.findById(_id).lean();
+    if (!user || !user.isActive) {
+      res.status(HttpStatusCode.Forbidden).send({ message: "User not found or inactive." });
+      return;
+    }
+
+    const hasAccess = user.workspaces?.some(
+      (ws) => ws.workspaceId.toString() === paramWsId
+    ) || (user.workspaceId && user.workspaceId.toString() === paramWsId);
+
+    if (hasAccess) {
+      next();
+      return;
+    }
+
+    res.status(HttpStatusCode.Forbidden).send({
+      message: "Access denied. You don't have permission for this workspace.",
+    });
+  } catch (error) {
+    res.status(HttpStatusCode.InternalServerError).send({ message: "Error verifying access" });
+  }
 }
