@@ -18,6 +18,7 @@ export interface UpdateUserPayload {
   name?: string;
   email?: string;
   password?: string;
+  role?: "admin" | "colaborador";
 }
 
 export class WorkspaceService {
@@ -99,7 +100,10 @@ export class WorkspaceService {
 
     const users = await models.users
       .find({
-        "workspaces.workspaceId": new Types.ObjectId(workspaceId)
+        $or: [
+          { "workspaces.workspaceId": new Types.ObjectId(workspaceId) },
+          { workspaceId: new Types.ObjectId(workspaceId) }
+        ]
       })
       .select("-password")
       .sort({ createdAt: -1 })
@@ -110,7 +114,7 @@ export class WorkspaceService {
       const wsAccess = user.workspaces?.find(w => w.workspaceId.toString() === workspaceId);
       return {
         ...user,
-        role: wsAccess?.role || user.role, // show the workspace role specifically
+        role: wsAccess?.role || (user.role === 'superadmin' || user.role === 'user' ? 'colaborador' : user.role), // show the workspace role specifically, or falcback
         workspaceId // append workspaceId
       };
     });
@@ -192,7 +196,10 @@ export class WorkspaceService {
 
     const user = await models.users.findOne({
       _id: new Types.ObjectId(userId),
-      "workspaces.workspaceId": new Types.ObjectId(workspaceId)
+      $or: [
+        { "workspaces.workspaceId": new Types.ObjectId(workspaceId) },
+        { workspaceId: new Types.ObjectId(workspaceId) }
+      ]
     });
     if (!user) throw new Error("NOT_FOUND");
 
@@ -208,8 +215,49 @@ export class WorkspaceService {
     if (payload.name !== undefined) user.name = payload.name.trim() || undefined;
     if (payload.password) user.password = await bcrypt.hash(payload.password, 10);
 
-    // If role updating was supported, we would map over user.workspaces and update it.
+    if (payload.role) {
+      let roleApplied = false;
+
+      // 1. Try updating the array if it exists
+      if (user.workspaces && user.workspaces.length > 0) {
+        const wsAccess = user.workspaces.find((w: any) => w.workspaceId.toString() === workspaceId);
+        if (wsAccess) {
+          wsAccess.role = payload.role;
+          roleApplied = true;
+        }
+      }
+
+      // 2. If not in array or array is missing, but matches legacy workspaceId
+      if (user.workspaceId && user.workspaceId.toString() === workspaceId) {
+        user.role = payload.role;
+        roleApplied = true;
+
+        // Proactive migration: if they have a legacy workspace matches, add them to the array too
+        if (!user.workspaces) user.workspaces = [];
+        const hasWorkspacesArrayAccess = user.workspaces.some((w: any) => w.workspaceId.toString() === workspaceId);
+
+        if (!hasWorkspacesArrayAccess) {
+          user.workspaces.push({
+            workspaceId: new Types.ObjectId(workspaceId),
+            role: payload.role
+          });
+          // Set global role to 'user' to indicate they are now using the array logic
+          user.role = 'user';
+        }
+      }
+
+      // 3. Fallback for manual role sync if we didn't migrate yet
+      if (!roleApplied && (user.role === 'admin' || user.role === 'colaborador')) {
+        user.role = payload.role;
+      }
+    }
+
     await user.save();
+
+    // Sync adminId in workspace if role changed to admin (backward compatibility)
+    if (payload.role === "admin") {
+      await models.workspaces.findByIdAndUpdate(workspaceId, { adminId: user._id });
+    }
 
     const updated = user.toObject();
     const wsAccess = updated.workspaces?.find((w: any) => w.workspaceId.toString() === workspaceId);
@@ -217,7 +265,7 @@ export class WorkspaceService {
     const { password, ...withoutPassword } = updated;
     return {
       ...withoutPassword,
-      role: wsAccess?.role || updated.role,
+      role: wsAccess?.role || (updated.role === 'superadmin' || updated.role === 'user' ? 'colaborador' : updated.role),
       workspaceId
     };
   }
@@ -227,23 +275,31 @@ export class WorkspaceService {
       throw new Error("INVALID_ID");
     }
 
-    // Instead of deleting the user, remove the workspaceId from their workspaces array
-    const user = await models.users.findOneAndUpdate(
-      {
-        _id: new Types.ObjectId(userId),
-        "workspaces.workspaceId": new Types.ObjectId(workspaceId),
-        role: { $ne: "superadmin" }
-      },
-      {
-        $pull: { workspaces: { workspaceId: new Types.ObjectId(workspaceId) } }
-      },
-      { new: true }
-    );
+    // Find user by either the new workspaces array or the legacy workspaceId
+    const user = await models.users.findOne({
+      _id: new Types.ObjectId(userId),
+      $or: [
+        { "workspaces.workspaceId": new Types.ObjectId(workspaceId) },
+        { workspaceId: new Types.ObjectId(workspaceId) }
+      ],
+      role: { $ne: "superadmin" }
+    });
 
     if (!user) throw new Error("NOT_FOUND");
 
-    // If the workspace array is now empty, fully delete the user to save DB space
-    if (!user.workspaces || user.workspaces.length === 0) {
+    if (user.workspaces && user.workspaces.length > 0) {
+      // New array logic: pull the workspace
+      user.workspaces = user.workspaces.filter(w => w.workspaceId.toString() !== workspaceId);
+
+      // If array is empty, we can choose to delete or keep as 'zombie'. 
+      // Existing logic was to delete if empty.
+      if (user.workspaces.length === 0) {
+        await models.users.findByIdAndDelete(userId);
+      } else {
+        await user.save();
+      }
+    } else {
+      // Legacy user found via workspaceId fallback: just delete since they only had this one
       await models.users.findByIdAndDelete(userId);
     }
 

@@ -156,9 +156,9 @@ export async function updateUser(req: AuthRequest, res: Response, next: NextFunc
   try {
     const workspaceId = req.params["workspaceId"] as string;
     const userId = req.params["userId"] as string;
-    const { name, email, password } = req.body;
+    const { name, email, password, role } = req.body;
 
-    if (!name && !email && !password) {
+    if (!name && !email && !password && !role) {
       res.status(HttpStatusCode.BadRequest).send({ message: "At least one field is required to update." });
       return;
     }
@@ -166,8 +166,12 @@ export async function updateUser(req: AuthRequest, res: Response, next: NextFunc
       res.status(HttpStatusCode.BadRequest).send({ message: "Password must be at least 8 characters." });
       return;
     }
+    if (role && !["admin", "colaborador"].includes(role)) {
+      res.status(HttpStatusCode.BadRequest).send({ message: "Role must be 'admin' or 'colaborador'." });
+      return;
+    }
 
-    const user = await workspaceService.updateUser(workspaceId, userId, { name, email, password });
+    const user = await workspaceService.updateUser(workspaceId, userId, { name, email, password, role });
     res.status(HttpStatusCode.Ok).send({ message: "User updated successfully.", user });
     return;
   } catch (error: any) {
