@@ -7,7 +7,7 @@ import models from "../models";
 export class MetaService {
   private get appId() { return process.env.META_APP_ID; }
   private get appSecret() { return process.env.META_APP_SECRET; }
-  private readonly graphUrl = "https://graph.facebook.com/v19.0";
+  private readonly graphUrl = "https://graph.facebook.com/v22.0";
 
   /**
    * Exchanges a short-lived user token for a long-lived one (60 days)
@@ -181,80 +181,139 @@ export class MetaService {
   /**
    * Gets organic insights for the Facebook Page
    */
-  async getOrganicInsights(pageId: string, accessToken: string) {
+  async getOrganicInsights(pageId: string, userAccessToken: string, pageAccessToken?: string) {
     try {
-      let finalToken = accessToken;
+      // Determine which token to use for Facebook Page calls.
+      // The stored pageAccessToken is preferred; if not available, derive it from the user token.
+      let pageToken = pageAccessToken || null;
 
-      // Intentar obtener el page_access_token por si el token provisto es de usuario antiguo
-      try {
-        const tokenCheck = await axios.get(`${this.graphUrl}/${pageId}`, {
-          params: {
-            access_token: accessToken,
-            fields: "access_token"
+      if (!pageToken) {
+        try {
+          const tokenCheck = await axios.get(`${this.graphUrl}/${pageId}`, {
+            params: { access_token: userAccessToken, fields: "access_token" }
+          });
+          if (tokenCheck.data?.access_token) {
+            pageToken = tokenCheck.data.access_token;
           }
-        });
-        if (tokenCheck.data?.access_token) {
-          finalToken = tokenCheck.data.access_token;
+        } catch (e) {
+          console.warn(`[MetaService] Could not derive page access token for page ${pageId}. Using user token for page calls.`);
         }
-      } catch (e) {
-        console.warn(`Could not verify page_access_token for page ${pageId}, proceeding with original token.`);
       }
+
+      // Final FB page token: prefer derived/stored page token, fallback to user token
+      const fbToken = pageToken || userAccessToken;
 
       // 1. Get basic page info (followers, likes)
       const pageInfoResponse = await axios.get(`${this.graphUrl}/${pageId}`, {
         params: {
-          access_token: finalToken,
+          access_token: fbToken,
           fields: "fan_count,followers_count,name,instagram_business_account",
         },
       });
 
-      // 2. Get latest 5 posts
+      // 2. Get latest 5 Facebook posts
       const postsResponse = await axios.get(`${this.graphUrl}/${pageId}/published_posts`, {
         params: {
-          access_token: finalToken,
+          access_token: fbToken,
           fields: "message,created_time,permalink_url,full_picture,shares",
           limit: 5,
         },
       });
 
-      // 3. Get Instagram Info if linked
+      // 3. Get Instagram basic info if linked
       let igInfo = null;
       if (pageInfoResponse.data.instagram_business_account) {
+        const igId = pageInfoResponse.data.instagram_business_account.id;
+        const igFields = "followers_count,media_count,username,profile_picture_url";
+
+        // Try with user token first (IG permissions are tied to user, not page token)
+        let igFetched = false;
         try {
-          const igId = pageInfoResponse.data.instagram_business_account.id;
           const igResponse = await axios.get(`${this.graphUrl}/${igId}`, {
-            params: {
-              access_token: finalToken,
-              fields: "followers_count,media_count,username,profile_picture_url"
-            }
+            params: { access_token: userAccessToken, fields: igFields }
           });
           igInfo = igResponse.data;
-        } catch (igError) {
-          console.warn(`Could not fetch Instagram data for page ${pageId}`);
+          igFetched = true;
+        } catch (e) {
+          console.warn(`[MetaService] IG info fetch with user token failed. Trying page token...`);
+        }
+
+        if (!igFetched) {
+          try {
+            const igResponse = await axios.get(`${this.graphUrl}/${igId}`, {
+              params: { access_token: fbToken, fields: igFields }
+            });
+            igInfo = igResponse.data;
+          } catch (igError: any) {
+            console.error(`[MetaService] All IG info fetches failed for page ${pageId}:`, igError.response?.data || igError.message);
+          }
         }
       }
 
-      // 4. Get latest 5 Instagram posts (if IG is linked)
-      let recentPostsIg = [];
-      if (igInfo && pageInfoResponse.data.instagram_business_account) {
-        try {
-          const igId = pageInfoResponse.data.instagram_business_account.id;
-          const igMediaResponse = await axios.get(`${this.graphUrl}/${igId}/media`, {
-            params: {
-              access_token: finalToken,
-              fields: "id,caption,media_url,permalink,timestamp,like_count,comments_count",
-              limit: 5,
-            },
+      // 4. Get latest 5 Instagram media posts (if IG is linked)
+      // IMPORTANT: Instagram Graph API permissions (instagram_basic) are tied to the User Access Token.
+      // The Page Access Token often lacks these scopes. Always try User Token first.
+      let recentPostsIg: any[] = [];
+      if (pageInfoResponse.data.instagram_business_account) {
+        const igId = pageInfoResponse.data.instagram_business_account.id;
+        const mediaFields = "id,caption,media_url,permalink,timestamp,like_count,comments_count";
+        const minimalFields = "id,caption,media_url,permalink,timestamp";
+
+        const tryFetchMedia = async (token: string, fields: string) => {
+          const res = await axios.get(`${this.graphUrl}/${igId}/media`, {
+            params: { access_token: token, fields, limit: 5 },
           });
-          recentPostsIg = igMediaResponse.data?.data || [];
-        } catch (igMediaError: any) {
-          console.warn(`Could not fetch Instagram media for page ${pageId}`, igMediaError.response?.data || igMediaError.message);
+          return res.data?.data || [];
+        };
+
+        let success = false;
+
+        // Strategy 1: User Access Token with full fields (most likely to have IG permissions)
+        try {
+          recentPostsIg = await tryFetchMedia(userAccessToken, mediaFields);
+          success = true;
+          console.log(`[MetaService] IG media fetched successfully via user token for page ${pageId}.`);
+        } catch (e) {
+          console.warn(`[MetaService] IG media fetch (user token, full fields) failed. Trying next strategy...`);
+        }
+
+        // Strategy 2: User Access Token with minimal fields
+        if (!success) {
+          try {
+            recentPostsIg = await tryFetchMedia(userAccessToken, minimalFields);
+            success = true;
+            console.log(`[MetaService] IG media fetched via user token (minimal fields) for page ${pageId}.`);
+          } catch (e) {
+            console.warn(`[MetaService] IG media fetch (user token, minimal fields) failed. Trying page token...`);
+          }
+        }
+
+        // Strategy 3: Page Access Token with full fields
+        if (!success) {
+          try {
+            recentPostsIg = await tryFetchMedia(fbToken, mediaFields);
+            success = true;
+            console.log(`[MetaService] IG media fetched via page token for page ${pageId}.`);
+          } catch (e) {
+            console.warn(`[MetaService] IG media fetch (page token, full fields) failed. Trying minimal fields...`);
+          }
+        }
+
+        // Strategy 4: Page Access Token with minimal fields
+        if (!success) {
+          try {
+            recentPostsIg = await tryFetchMedia(fbToken, minimalFields);
+            success = true;
+            console.log(`[MetaService] IG media fetched via page token (minimal fields) for page ${pageId}.`);
+          } catch (lastError: any) {
+            console.error(`[MetaService] All IG media strategies failed for page ${pageId}:`, lastError.response?.data || lastError.message);
+          }
         }
       }
 
       return {
         pageInfo: pageInfoResponse.data,
-        igInfo: igInfo,
+        igInfo,
         recentPosts: postsResponse.data.data || [],
         recentPostsIg,
       };

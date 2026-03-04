@@ -119,16 +119,18 @@ export async function getOrganicInsights(req: Request, res: Response, next: Next
     const { workspaceId } = req.params;
     const workspace = await models.workspaces.findById(workspaceId);
 
-    const token = workspace?.metaAds?.pageAccessToken || workspace?.metaAds?.accessToken;
+    const userAccessToken = workspace?.metaAds?.accessToken;
+    const pageAccessToken = workspace?.metaAds?.pageAccessToken;
 
-    if (!workspace || !token || !workspace.metaAds?.pageId) {
+    if (!workspace || !userAccessToken || !workspace.metaAds?.pageId) {
       res.status(HttpStatusCode.BadRequest).send({ message: "Meta integration missing or no Page connected." });
       return;
     }
 
     const { pageInfo, igInfo, recentPosts, recentPostsIg } = await metaService.getOrganicInsights(
       workspace.metaAds.pageId,
-      token
+      userAccessToken,
+      pageAccessToken
     );
 
     res.status(HttpStatusCode.Ok).send({
