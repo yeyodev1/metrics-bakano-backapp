@@ -79,7 +79,7 @@ export class WorkspaceService {
     });
   }
 
-  async getWorkspaceById(workspaceId: string) {
+  async getWorkspaceById(workspaceId: string, userId?: string) {
     if (!Types.ObjectId.isValid(workspaceId)) throw new Error("INVALID_ID");
 
     const workspace = await models.workspaces
@@ -88,7 +88,25 @@ export class WorkspaceService {
       .lean();
 
     if (!workspace) throw new Error("NOT_FOUND");
-    return workspace;
+
+    // Inject user role if userId is provided
+    let userRole: "admin" | "colaborador" | undefined;
+    if (userId && Types.ObjectId.isValid(userId)) {
+      const user = await models.users.findById(userId).lean();
+      if (user) {
+        const wsAccess = user.workspaces?.find((w: any) => w.workspaceId.toString() === workspaceId);
+        if (wsAccess) {
+          userRole = wsAccess.role;
+        } else if (user.workspaceId && user.workspaceId.toString() === workspaceId) {
+          userRole = user.role === "admin" ? "admin" : "colaborador";
+        }
+      }
+    }
+
+    return {
+      ...workspace,
+      userRole
+    };
   }
 
   async updateWorkspaceName(workspaceId: string, name: string) {

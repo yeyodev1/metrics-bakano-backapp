@@ -55,7 +55,8 @@ export async function listWorkspaces(req: AuthRequest, res: Response, next: Next
 export async function getWorkspace(req: AuthRequest, res: Response, next: NextFunction) {
   try {
     const workspaceId = req.params["workspaceId"] as string;
-    const workspace = await workspaceService.getWorkspaceById(workspaceId);
+    const userId = req.user?._id;
+    const workspace = await workspaceService.getWorkspaceById(workspaceId, userId);
     res.status(HttpStatusCode.Ok).send({ message: "Workspace retrieved successfully.", workspace });
     return;
   } catch (error: any) {
