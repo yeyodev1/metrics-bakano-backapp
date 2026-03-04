@@ -368,4 +368,49 @@ export class WorkspaceService {
 
     return true;
   }
+
+  // ── Global Superadmin Management ─────────────────────────────
+  // These methods operate on users with role="superadmin" and are NOT
+  // scoped to any workspace. They have full system access.
+
+  async listSuperadmins() {
+    const admins = await models.users
+      .find({ role: "superadmin" })
+      .select("-password")
+      .sort({ createdAt: -1 })
+      .lean();
+    return admins;
+  }
+
+  async createSuperadmin(payload: { name?: string; email: string; password: string }) {
+    const existing = await models.users.findOne({ email: payload.email.toLowerCase().trim() }).lean();
+    if (existing) throw new Error("EMAIL_TAKEN");
+
+    const hashed = await bcrypt.hash(payload.password, 10);
+    const user = await models.users.create({
+      name: payload.name?.trim(),
+      email: payload.email.toLowerCase().trim(),
+      password: hashed,
+      role: "superadmin",
+      workspaces: [],
+      isActive: true,
+    });
+
+    const { password, ...withoutPassword } = user.toObject();
+    return withoutPassword;
+  }
+
+  async deleteSuperadmin(requestingUserId: string, targetUserId: string) {
+    if (!Types.ObjectId.isValid(targetUserId)) throw new Error("INVALID_ID");
+
+    // Cannot delete yourself
+    if (requestingUserId === targetUserId) throw new Error("CANNOT_DELETE_SELF");
+
+    const user = await models.users.findOne({ _id: targetUserId, role: "superadmin" });
+    if (!user) throw new Error("NOT_FOUND");
+
+    await models.users.findByIdAndDelete(targetUserId);
+    return true;
+  }
 }
+
