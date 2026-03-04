@@ -32,12 +32,33 @@ export class WorkspaceService {
     return workspace;
   }
 
-  async listWorkspaces() {
-    return models.workspaces
-      .find({ isActive: true })
-      .populate("adminId", "email role name")
-      .sort({ createdAt: -1 })
-      .lean();
+  async listWorkspaces(options: { search?: string; page?: number; limit?: number } = {}) {
+    const { search, page = 1, limit = 10 } = options;
+    const skip = (page - 1) * limit;
+
+    const query: any = { isActive: true };
+    if (search) {
+      query.name = { $regex: search, $options: "i" };
+    }
+
+    const [workspaces, total] = await Promise.all([
+      models.workspaces
+        .find(query)
+        .populate("adminId", "email role name")
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      models.workspaces.countDocuments(query)
+    ]);
+
+    return {
+      workspaces,
+      total,
+      page,
+      limit,
+      hasMore: total > skip + workspaces.length
+    };
   }
 
   async listWorkspacesForUser(userId: string) {

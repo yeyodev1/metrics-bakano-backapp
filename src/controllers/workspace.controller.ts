@@ -33,15 +33,30 @@ export async function listWorkspaces(req: AuthRequest, res: Response, next: Next
     const role = req.user?.role;
     const userId = req.user?._id;
 
+    // Extract search and pagination params
+    const search = req.query["search"] as string;
+    const page = parseInt(req.query["page"] as string) || 1;
+    const limit = parseInt(req.query["limit"] as string) || 10;
+
     if (role === 'superadmin') {
-      const workspaces = await workspaceService.listWorkspaces();
-      res.status(HttpStatusCode.Ok).send({ message: "Workspaces retrieved successfully.", workspaces });
+      const data = await workspaceService.listWorkspaces({ search, page, limit });
+      res.status(HttpStatusCode.Ok).send({
+        message: "Workspaces retrieved successfully.",
+        workspaces: data.workspaces,
+        metadata: {
+          total: data.total,
+          page: data.page,
+          limit: data.limit,
+          hasMore: data.hasMore
+        }
+      });
       return;
     } else {
       if (!userId) {
         res.status(HttpStatusCode.Unauthorized).send({ message: "No user assigned.", workspaces: [] });
         return;
       }
+      // For now, we'll keep the standard list for non-superadmins or update if needed
       const workspaces = await workspaceService.listWorkspacesForUser(userId);
       res.status(HttpStatusCode.Ok).send({ message: "Workspaces retrieved successfully.", workspaces });
       return;
