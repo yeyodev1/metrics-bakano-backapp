@@ -36,17 +36,43 @@ export class MetaService {
   }
 
   /**
+   * Internal helper to fetch all pages of a Meta Graph API collection
+   */
+  private async fetchAllPaginated<T>(url: string, params: Record<string, any>): Promise<T[]> {
+    let allData: T[] = [];
+    let nextUrl: string | null = null;
+
+    try {
+      // First page
+      const response = await axios.get(url, { params });
+      allData = [...allData, ...response.data.data];
+      nextUrl = response.data.paging?.next || null;
+
+      // Subsequent pages
+      while (nextUrl) {
+        const nextResponse = await axios.get(nextUrl);
+        allData = [...allData, ...nextResponse.data.data];
+        nextUrl = nextResponse.data.paging?.next || null;
+      }
+
+      return allData;
+    } catch (error: any) {
+      console.error(`Meta Pagination Error for URL ${url}:`, error.response?.data || error.message);
+      throw error;
+    }
+  }
+
+  /**
    * Lists pages owned by the user
    */
   async listUserPages(userAccessToken: string) {
     try {
-      const response = await axios.get(`${this.graphUrl}/me/accounts`, {
-        params: {
-          access_token: userAccessToken,
-          fields: "id,name,access_token,category,category_list,tasks,picture{url}",
-        },
+      const pages = await this.fetchAllPaginated<any>(`${this.graphUrl}/me/accounts`, {
+        access_token: userAccessToken,
+        fields: "id,name,access_token,category,category_list,tasks,picture{url}",
+        limit: 100
       });
-      return response.data.data; // Array of pages with their own access_tokens
+      return pages;
     } catch (error: any) {
       console.error("Meta List Pages Error:", error.response?.data || error.message);
       throw new Error("Failed to list Facebook Pages.");
@@ -90,13 +116,12 @@ export class MetaService {
    */
   async listAdAccounts(accessToken: string) {
     try {
-      const response = await axios.get(`${this.graphUrl}/me/adaccounts`, {
-        params: {
-          access_token: accessToken,
-          fields: "name,account_id,account_status,currency",
-        },
+      const accounts = await this.fetchAllPaginated<any>(`${this.graphUrl}/me/adaccounts`, {
+        access_token: accessToken,
+        fields: "name,account_id,account_status,currency",
+        limit: 100
       });
-      return response.data.data;
+      return accounts;
     } catch (error: any) {
       const metaError = error.response?.data || error.message;
       console.error("Meta List AdAccounts Error:", metaError);
