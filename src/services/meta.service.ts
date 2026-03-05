@@ -41,7 +41,10 @@ export class MetaService {
   async listUserPages(userAccessToken: string) {
     try {
       const response = await axios.get(`${this.graphUrl}/me/accounts`, {
-        params: { access_token: userAccessToken },
+        params: {
+          access_token: userAccessToken,
+          fields: "id,name,access_token,category,category_list,tasks,picture{url}",
+        },
       });
       return response.data.data; // Array of pages with their own access_tokens
     } catch (error: any) {
@@ -196,7 +199,7 @@ export class MetaService {
             pageToken = tokenCheck.data.access_token;
           }
         } catch (e) {
-          console.warn(`[MetaService] Could not derive page access token for page ${pageId}. Using user token for page calls.`);
+          // No log needed, will fallback to user token
         }
       }
 
@@ -235,7 +238,7 @@ export class MetaService {
           igInfo = igResponse.data;
           igFetched = true;
         } catch (e) {
-          console.warn(`[MetaService] IG info fetch with user token failed. Trying page token...`);
+          // Try page token next
         }
 
         if (!igFetched) {
@@ -272,9 +275,8 @@ export class MetaService {
         try {
           recentPostsIg = await tryFetchMedia(userAccessToken, mediaFields);
           success = true;
-          console.log(`[MetaService] IG media fetched successfully via user token for page ${pageId}.`);
         } catch (e) {
-          console.warn(`[MetaService] IG media fetch (user token, full fields) failed. Trying next strategy...`);
+          // Try next strategy
         }
 
         // Strategy 2: User Access Token with minimal fields
@@ -282,9 +284,8 @@ export class MetaService {
           try {
             recentPostsIg = await tryFetchMedia(userAccessToken, minimalFields);
             success = true;
-            console.log(`[MetaService] IG media fetched via user token (minimal fields) for page ${pageId}.`);
           } catch (e) {
-            console.warn(`[MetaService] IG media fetch (user token, minimal fields) failed. Trying page token...`);
+            // Try page token
           }
         }
 
@@ -293,9 +294,8 @@ export class MetaService {
           try {
             recentPostsIg = await tryFetchMedia(fbToken, mediaFields);
             success = true;
-            console.log(`[MetaService] IG media fetched via page token for page ${pageId}.`);
           } catch (e) {
-            console.warn(`[MetaService] IG media fetch (page token, full fields) failed. Trying minimal fields...`);
+            // Try minimal fields
           }
         }
 
@@ -304,7 +304,6 @@ export class MetaService {
           try {
             recentPostsIg = await tryFetchMedia(fbToken, minimalFields);
             success = true;
-            console.log(`[MetaService] IG media fetched via page token (minimal fields) for page ${pageId}.`);
           } catch (lastError: any) {
             console.error(`[MetaService] All IG media strategies failed for page ${pageId}:`, lastError.response?.data || lastError.message);
           }
