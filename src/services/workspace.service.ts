@@ -12,6 +12,8 @@ export interface CreateUserPayload {
   password: string;
   role: "admin" | "colaborador";
   workspaceId: string;
+  phoneNumber?: string;
+  phoneExtension?: string;
 }
 
 export interface UpdateUserPayload {
@@ -19,6 +21,8 @@ export interface UpdateUserPayload {
   email?: string;
   password?: string;
   role?: "admin" | "colaborador";
+  phoneNumber?: string;
+  phoneExtension?: string;
 }
 
 export class WorkspaceService {
@@ -213,6 +217,10 @@ export class WorkspaceService {
         workspaceId: new Types.ObjectId(payload.workspaceId),
         role: payload.role as "admin" | "colaborador"
       });
+
+      if (payload.phoneNumber !== undefined) user.phoneNumber = payload.phoneNumber;
+      if (payload.phoneExtension !== undefined) user.phoneExtension = payload.phoneExtension;
+
       await user.save();
     } else {
       // Si no existe, creamos el usuario base
@@ -228,6 +236,8 @@ export class WorkspaceService {
           role: payload.role as "admin" | "colaborador"
         }],
         isActive: true,
+        phoneNumber: payload.phoneNumber,
+        phoneExtension: payload.phoneExtension,
       });
     }
 
@@ -271,6 +281,8 @@ export class WorkspaceService {
 
     if (payload.name !== undefined) user.name = payload.name.trim() || undefined;
     if (payload.password) user.password = await bcrypt.hash(payload.password, 10);
+    if (payload.phoneNumber !== undefined) user.phoneNumber = payload.phoneNumber;
+    if (payload.phoneExtension !== undefined) user.phoneExtension = payload.phoneExtension;
 
     if (payload.role) {
       let roleApplied = false;

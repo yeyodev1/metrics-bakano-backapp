@@ -132,7 +132,7 @@ export async function listUsers(req: AuthRequest, res: Response, next: NextFunct
 export async function createUser(req: AuthRequest, res: Response, next: NextFunction) {
   try {
     const workspaceId = req.params["workspaceId"] as string;
-    const { name, email, password, role } = req.body;
+    const { name, email, password, role, phoneNumber, phoneExtension } = req.body;
 
     if (!email) {
       res.status(HttpStatusCode.BadRequest).send({ message: "Email is required." });
@@ -147,7 +147,7 @@ export async function createUser(req: AuthRequest, res: Response, next: NextFunc
       return;
     }
 
-    const user = await workspaceService.createUser({ name, email, password, role, workspaceId });
+    const user = await workspaceService.createUser({ name, email, password, role, workspaceId, phoneNumber, phoneExtension });
     res.status(HttpStatusCode.Created).send({ message: "User created successfully.", user });
     return;
   } catch (error: any) {
@@ -172,7 +172,7 @@ export async function updateUser(req: AuthRequest, res: Response, next: NextFunc
   try {
     const workspaceId = req.params["workspaceId"] as string;
     const userId = req.params["userId"] as string;
-    const { name, email, password, role } = req.body;
+    const { name, email, password, role, phoneNumber, phoneExtension } = req.body;
 
     if (!name && !email && !password && !role) {
       res.status(HttpStatusCode.BadRequest).send({ message: "At least one field is required to update." });
@@ -187,7 +187,7 @@ export async function updateUser(req: AuthRequest, res: Response, next: NextFunc
       return;
     }
 
-    const user = await workspaceService.updateUser(workspaceId, userId, { name, email, password, role });
+    const user = await workspaceService.updateUser(workspaceId, userId, { name, email, password, role, phoneNumber, phoneExtension });
     res.status(HttpStatusCode.Ok).send({ message: "User updated successfully.", user });
     return;
   } catch (error: any) {

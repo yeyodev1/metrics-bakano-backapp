@@ -13,6 +13,8 @@ export interface IUser extends Document {
   workspaceId?: Types.ObjectId;
   workspaces: IUserWorkspaceAccess[];
   isActive: boolean;
+  phoneNumber?: string;
+  phoneExtension?: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -60,6 +62,14 @@ const UserSchema = new Schema<IUser>(
     isActive: {
       type: Boolean,
       default: true,
+    },
+    phoneNumber: {
+      type: String,
+      trim: true,
+    },
+    phoneExtension: {
+      type: String,
+      trim: true,
     },
   },
   {
