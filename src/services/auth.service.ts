@@ -34,6 +34,7 @@ export class AuthService {
         _id: user._id,
         email: user.email,
         role: user.role,
+        isInternal: user.isInternal ?? false,
       },
       this.jwtSecret,
       { expiresIn: "14d" }
