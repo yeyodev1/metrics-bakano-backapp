@@ -33,6 +33,11 @@ export async function workspaceAccessMiddleware(
       return;
     }
 
+    if (user.isInternal) {
+      next();
+      return;
+    }
+
     const hasAccess = user.workspaces?.some(
       (ws) => ws.workspaceId.toString() === paramWsId
     ) || (user.workspaceId && user.workspaceId.toString() === paramWsId);

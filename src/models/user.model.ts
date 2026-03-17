@@ -5,6 +5,17 @@ export interface IUserWorkspaceAccess {
   role: "admin" | "colaborador";
 }
 
+export type InternalRole =
+  | 'director'
+  | 'estratega'
+  | 'community_manager'
+  | 'productor'
+  | 'disenador'
+  | 'copywriter'
+  | 'analista'
+  | 'desarrollador'
+  | 'account_manager'
+
 export interface IUser extends Document {
   name?: string;
   email: string;
@@ -12,6 +23,8 @@ export interface IUser extends Document {
   role: "superadmin" | "user" | "admin" | "colaborador";
   workspaceId?: Types.ObjectId;
   workspaces: IUserWorkspaceAccess[];
+  isInternal: boolean;
+  internalRole?: InternalRole;
   isActive: boolean;
   phoneNumber?: string;
   phoneExtension?: string;
@@ -19,7 +32,7 @@ export interface IUser extends Document {
   updatedAt: Date;
 }
 
-const UserSchema = new Schema<IUser>(
+export const UserSchema = new Schema<IUser>(
   {
     name: {
       type: String,
@@ -59,6 +72,15 @@ const UserSchema = new Schema<IUser>(
         },
       }
     ],
+    isInternal: {
+      type: Boolean,
+      default: false,
+    },
+    internalRole: {
+      type: String,
+      enum: ['director', 'estratega', 'community_manager', 'productor', 'disenador', 'copywriter', 'analista', 'desarrollador', 'account_manager'],
+      default: null,
+    },
     isActive: {
       type: Boolean,
       default: true,

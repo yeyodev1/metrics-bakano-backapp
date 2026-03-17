@@ -33,6 +33,11 @@ export async function workspaceAdminMiddleware(
       return;
     }
 
+    if (user.isInternal) {
+      next();
+      return;
+    }
+
     const isLegacyAdmin = user.role === "superadmin" || user.role === "admin";
     const hasAdminAccess = user.workspaces?.some(
       (ws) => ws.workspaceId.toString() === paramWsId && ws.role === "admin"

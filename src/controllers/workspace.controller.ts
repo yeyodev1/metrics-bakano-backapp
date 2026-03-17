@@ -111,6 +111,19 @@ export async function updateWorkspace(req: AuthRequest, res: Response, next: Nex
   }
 }
 
+export async function listAllCollaborators(req: AuthRequest, res: Response, next: NextFunction) {
+  try {
+    const search = req.query["search"] as string;
+    const workspaceId = req.query["workspaceId"] as string;
+    const users = await workspaceService.listAllCollaborators(search, workspaceId);
+    res.status(HttpStatusCode.Ok).send({ message: "Collaborators retrieved successfully.", users });
+    return;
+  } catch (error) {
+    console.error("listAllUsers error:", error);
+    next(error);
+  }
+}
+
 // ── Users within a workspace ──────────────────────────────────
 
 export async function listUsers(req: AuthRequest, res: Response, next: NextFunction) {
@@ -218,6 +231,78 @@ export async function deleteUser(req: AuthRequest, res: Response, next: NextFunc
       return;
     }
     console.error("deleteUser error:", error);
+    next(error);
+  }
+}
+
+export async function createGlobalUser(req: AuthRequest, res: Response, next: NextFunction) {
+  try {
+    const { name, email, password, workspaces, phoneNumber, phoneExtension, isInternal, internalRole } = req.body;
+
+    if (!email || !workspaces || !Array.isArray(workspaces)) {
+      res.status(HttpStatusCode.BadRequest).send({ message: "Email and workspaces array are required." });
+      return;
+    }
+
+    const user = await workspaceService.createGlobalUser({
+      name,
+      email,
+      password,
+      workspaces,
+      phoneNumber,
+      phoneExtension,
+      isInternal,
+      internalRole
+    });
+
+    res.status(HttpStatusCode.Created).send({ message: "Global user created/updated successfully.", user });
+    return;
+  } catch (error: any) {
+    if (error.message === "PASSWORD_REQUIRED") {
+      res.status(HttpStatusCode.BadRequest).send({ message: "Password is required for new users." });
+      return;
+    }
+    if (error.message === "CANNOT_MOD_SUPERADMIN") {
+      res.status(HttpStatusCode.Forbidden).send({ message: "Cannot modify superadmin users globally." });
+      return;
+    }
+    console.error("createGlobalUser error:", error);
+    next(error);
+  }
+}
+
+export async function updateGlobalUser(req: AuthRequest, res: Response, next: NextFunction) {
+  try {
+    const userId = req.params["userId"] as string;
+    const { name, email, password, workspaces, phoneNumber, phoneExtension, isInternal, internalRole } = req.body;
+
+    const user = await workspaceService.updateGlobalUser(userId, {
+      name,
+      email,
+      password,
+      workspaces,
+      phoneNumber,
+      phoneExtension,
+      isInternal,
+      internalRole
+    });
+
+    res.status(HttpStatusCode.Ok).send({ message: "User updated successfully.", user });
+    return;
+  } catch (error: any) {
+    if (error.message === "NOT_FOUND" || error.message === "INVALID_ID") {
+      res.status(HttpStatusCode.NotFound).send({ message: "User not found." });
+      return;
+    }
+    if (error.message === "EMAIL_TAKEN") {
+      res.status(HttpStatusCode.Conflict).send({ message: "Email is already in use by another user." });
+      return;
+    }
+    if (error.message === "CANNOT_MOD_SUPERADMIN") {
+      res.status(HttpStatusCode.Forbidden).send({ message: "Cannot modify superadmin users." });
+      return;
+    }
+    console.error("updateGlobalUser error:", error);
     next(error);
   }
 }

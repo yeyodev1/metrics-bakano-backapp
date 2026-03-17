@@ -3,6 +3,7 @@ import authRouter from "./auth.router";
 import workspaceRouter from "./workspace.router";
 import metaRouter from "./meta.router";
 import adminRouter from "./admin.router";
+import planningRouter from "./planning.router";
 
 function routerApi(app: Application) {
   const router = express.Router();
@@ -12,6 +13,7 @@ function routerApi(app: Application) {
   router.use("/workspaces", workspaceRouter);
   router.use("/meta", metaRouter);
   router.use("/admin", adminRouter);
+  router.use("/planning", planningRouter);
 }
 
 export default routerApi;

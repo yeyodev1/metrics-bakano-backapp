@@ -16,6 +16,34 @@ export interface CreateUserPayload {
   phoneExtension?: string;
 }
 
+export interface CreateGlobalUserPayload {
+  name?: string;
+  email: string;
+  password?: string;
+  workspaces: {
+    workspaceId: string;
+    role: "admin" | "colaborador";
+  }[];
+  phoneNumber?: string;
+  phoneExtension?: string;
+  isInternal?: boolean;
+  internalRole?: string | null;
+}
+
+export interface UpdateGlobalUserPayload {
+  name?: string;
+  email?: string;
+  password?: string;
+  workspaces?: {
+    workspaceId: string;
+    role: "admin" | "colaborador";
+  }[];
+  phoneNumber?: string;
+  phoneExtension?: string;
+  isInternal?: boolean;
+  internalRole?: string | null;
+}
+
 export interface UpdateUserPayload {
   name?: string;
   email?: string;
@@ -179,6 +207,48 @@ export class WorkspaceService {
         workspaceId // append workspaceId
       };
     });
+  }
+
+  async listAllCollaborators(search?: string, workspaceId?: string) {
+    // Only users who are not superadmins and have workspaces assigned or were legacy workspace owners
+    const query: any = { 
+      role: { $ne: "superadmin" },
+      $or: [
+        { workspaces: { $exists: true, $not: { $size: 0 } } },
+        { workspaceId: { $exists: true } }
+      ]
+    };
+
+    if (search) {
+      const searchRegex = new RegExp(search, "i");
+      query.$and = query.$and || [];
+      query.$and.push({
+        $or: [
+          { name: searchRegex },
+          { email: searchRegex }
+        ]
+      });
+    }
+
+    if (workspaceId && Types.ObjectId.isValid(workspaceId)) {
+      const wsId = new Types.ObjectId(workspaceId);
+      query.$and = query.$and || [];
+      query.$and.push({
+        $or: [
+          { "workspaces.workspaceId": wsId },
+          { workspaceId: wsId }
+        ]
+      });
+    }
+
+    const users = await models.users
+      .find(query)
+      .populate("workspaces.workspaceId", "name")
+      .select("-password")
+      .sort({ createdAt: -1 })
+      .lean();
+      
+    return users;
   }
 
   async createUser(payload: CreateUserPayload) {
@@ -423,6 +493,95 @@ export class WorkspaceService {
 
     await models.users.findByIdAndDelete(targetUserId);
     return true;
+  }
+
+  // ── Global User Management (Multi-workspace) ─────────────────
+
+  async createGlobalUser(payload: CreateGlobalUserPayload) {
+    let user = await models.users.findOne({ email: payload.email.toLowerCase().trim() });
+
+    if (user) {
+      if (user.role === "superadmin") throw new Error("CANNOT_MOD_SUPERADMIN");
+
+      // Update basic info
+      if (payload.name !== undefined) user.name = payload.name.trim();
+      if (payload.password) user.password = await bcrypt.hash(payload.password, 10);
+      if (payload.phoneNumber !== undefined) user.phoneNumber = payload.phoneNumber;
+      if (payload.phoneExtension !== undefined) user.phoneExtension = payload.phoneExtension;
+      if (payload.isInternal !== undefined) user.isInternal = payload.isInternal;
+      if (payload.internalRole !== undefined) (user as any).internalRole = payload.internalRole;
+
+      // Ensure user role is 'user' for multi-workspace logic
+      user.role = "user";
+
+      // Replace or update workspaces
+      user.workspaces = payload.workspaces.map(ws => ({
+        workspaceId: new Types.ObjectId(ws.workspaceId),
+        role: ws.role
+      }));
+
+      await user.save();
+      await user.populate("workspaces.workspaceId", "name");
+    } else {
+      if (!payload.password) throw new Error("PASSWORD_REQUIRED");
+      const hashed = await bcrypt.hash(payload.password, 10);
+
+      user = await models.users.create({
+        name: payload.name?.trim(),
+        email: payload.email.toLowerCase().trim(),
+        password: hashed,
+        role: "user",
+        workspaces: payload.workspaces.map(ws => ({
+          workspaceId: new Types.ObjectId(ws.workspaceId),
+          role: ws.role
+        })),
+        isActive: true,
+        phoneNumber: payload.phoneNumber,
+        phoneExtension: payload.phoneExtension,
+        isInternal: payload.isInternal || false,
+        internalRole: payload.internalRole || null,
+      });
+      await user.populate("workspaces.workspaceId", "name");
+    }
+
+    const { password, ...withoutPassword } = user.toObject();
+    return withoutPassword;
+  }
+
+  async updateGlobalUser(userId: string, payload: UpdateGlobalUserPayload) {
+    if (!Types.ObjectId.isValid(userId)) throw new Error("INVALID_ID");
+
+    const user = await models.users.findById(userId);
+    if (!user) throw new Error("NOT_FOUND");
+    if (user.role === "superadmin") throw new Error("CANNOT_MOD_SUPERADMIN");
+
+    if (payload.email) {
+      const emailTaken = await models.users.findOne({
+        email: payload.email.toLowerCase(),
+        _id: { $ne: new Types.ObjectId(userId) },
+      }).lean();
+      if (emailTaken) throw new Error("EMAIL_TAKEN");
+      user.email = payload.email.toLowerCase().trim();
+    }
+
+    if (payload.name !== undefined) user.name = payload.name.trim();
+    if (payload.password) user.password = await bcrypt.hash(payload.password, 10);
+    if (payload.phoneNumber !== undefined) user.phoneNumber = payload.phoneNumber;
+    if (payload.phoneExtension !== undefined) user.phoneExtension = payload.phoneExtension;
+    if (payload.isInternal !== undefined) user.isInternal = payload.isInternal;
+    if (payload.internalRole !== undefined) (user as any).internalRole = payload.internalRole;
+
+    if (payload.workspaces) {
+      user.workspaces = payload.workspaces.map(ws => ({
+        workspaceId: new Types.ObjectId(ws.workspaceId),
+        role: ws.role
+      }));
+    }
+
+    await user.save();
+    await user.populate("workspaces.workspaceId", "name");
+    const { password, ...withoutPassword } = user.toObject();
+    return withoutPassword;
   }
 }
 
