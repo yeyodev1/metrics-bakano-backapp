@@ -5,6 +5,7 @@ import metaRouter from "./meta.router";
 import adminRouter from "./admin.router";
 import planningRouter from "./planning.router";
 import surveyRouter from "./survey.router";
+import { planningEntriesRouter, videoPlanningRouter } from "./videoPlanning.router";
 
 function routerApi(app: Application) {
   const router = express.Router();
@@ -16,6 +17,8 @@ function routerApi(app: Application) {
   router.use("/admin", adminRouter);
   router.use("/planning", planningRouter);
   router.use("/surveys", surveyRouter);
+  router.use("/planning-entries", planningEntriesRouter);
+  router.use("/video-planning", videoPlanningRouter);
 }
 
 export default routerApi;
