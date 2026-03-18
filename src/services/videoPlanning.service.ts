@@ -86,6 +86,7 @@ export class VideoPlanningService {
       "tema", "descripcion", "tipo", "linkEjemplo", "recursos",
       "lugarGrabacion", "guion", "estadoIdea", "estadoProduccion",
       "edicion", "estadoPublicacion", "comentario", "motivoRechazo",
+      "linkVideo", "fechaPublicacion",
     ];
 
     for (const [key, value] of Object.entries(fields)) {
@@ -166,5 +167,49 @@ export class VideoPlanningService {
 
     await planning.save();
     return planning.toObject() as IVideoPlanning;
+  }
+
+  // ── CALENDAR ITEMS (GET) ──────────────────────────────────────────────────
+  async getCalendarItems(
+    workspaceId: string,
+    startDate: Date,
+    endDate: Date
+  ): Promise<object[]> {
+    if (!Types.ObjectId.isValid(workspaceId)) throw new Error("INVALID_ID");
+
+    const plannings = await models.videoPlanning
+      .find({
+        workspaceId: new Types.ObjectId(workspaceId),
+        "items.fechaPublicacion": { $gte: startDate, $lte: endDate },
+      })
+      .lean<IVideoPlanning[]>();
+
+    const result: object[] = [];
+    for (const p of plannings) {
+      for (const item of p.items) {
+        if (
+          item.fechaPublicacion &&
+          item.fechaPublicacion >= startDate &&
+          item.fechaPublicacion <= endDate
+        ) {
+          result.push({
+            _id: item._id,
+            planningId: p._id,
+            entryId: p.planningEntryId,
+            workspaceId: p.workspaceId,
+            numero: item.numero,
+            tema: item.tema,
+            tipo: item.tipo,
+            estadoPublicacion: item.estadoPublicacion,
+            edicion: item.edicion,
+            estadoProduccion: item.estadoProduccion,
+            clienteAprobacion: item.clienteAprobacion,
+            linkVideo: item.linkVideo,
+            fechaPublicacion: item.fechaPublicacion,
+          });
+        }
+      }
+    }
+    return result;
   }
 }

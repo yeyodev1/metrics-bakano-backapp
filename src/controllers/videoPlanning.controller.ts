@@ -201,3 +201,37 @@ export async function reopenPlanning(
     next(error);
   }
 }
+
+// ── GET /video-planning/calendar?workspaceId=X&startDate=X&endDate=X ──────
+export async function getCalendarItems(
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+) {
+  try {
+    const { workspaceId, startDate, endDate } = req.query as {
+      workspaceId: string;
+      startDate: string;
+      endDate: string;
+    };
+
+    if (!workspaceId || !startDate || !endDate) {
+      res.status(HttpStatusCode.BadRequest).json({ message: "workspaceId, startDate, endDate are required." });
+      return;
+    }
+
+    const items = await service.getCalendarItems(
+      workspaceId,
+      new Date(startDate),
+      new Date(endDate)
+    );
+    res.status(HttpStatusCode.Ok).json({ items });
+  } catch (error: any) {
+    if (error.message === "INVALID_ID") {
+      res.status(HttpStatusCode.BadRequest).json({ message: "Invalid workspace ID." });
+      return;
+    }
+    console.error("getCalendarItems error:", error);
+    next(error);
+  }
+}

@@ -25,6 +25,8 @@ export interface IVideoItem {
   comentario?: string;
   clienteAprobacion: ClienteAprobacion;
   motivoRechazo?: string;
+  linkVideo?: string;
+  fechaPublicacion?: Date;
   order: number;
 }
 
@@ -65,6 +67,8 @@ const VideoItemSchema = new Schema<IVideoItem>(
       default: "PENDIENTE",
     },
     motivoRechazo: { type: String, trim: true },
+    linkVideo: { type: String, trim: true },
+    fechaPublicacion: { type: Date },
     order: { type: Number, default: 0 },
   },
   { _id: true }
@@ -108,6 +112,7 @@ const VideoPlanningSchema = new Schema<IVideoPlanning>(
 
 VideoPlanningSchema.index({ planningEntryId: 1 });
 VideoPlanningSchema.index({ workspaceId: 1 });
+VideoPlanningSchema.index({ workspaceId: 1, "items.fechaPublicacion": 1 });
 
 export const VideoPlanningModel = model<IVideoPlanning>(
   "VideoPlanning",

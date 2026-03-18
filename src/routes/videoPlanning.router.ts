@@ -8,6 +8,7 @@ import {
   updateItem,
   submitClientApproval,
   reopenPlanning,
+  getCalendarItems,
 } from "../controllers/videoPlanning.controller";
 
 // ── Router A: mounted at /api/planning-entries ────────────────────────────
@@ -55,6 +56,11 @@ videoPlanningRouter.post(
   authMiddleware,
   internalOrSuperadminMiddleware,
   reopenPlanning
+);
+videoPlanningRouter.get(
+  "/calendar",
+  authMiddleware,
+  getCalendarItems
 );
 
 export { planningEntriesRouter, videoPlanningRouter };
