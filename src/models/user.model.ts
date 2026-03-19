@@ -8,6 +8,7 @@ export interface IUserWorkspaceAccess {
 export type InternalRole =
   | 'director'
   | 'estratega'
+  | 'project_manager'
   | 'content_manager'
   | 'account_manager'
   | 'community_manager'
@@ -79,7 +80,7 @@ export const UserSchema = new Schema<IUser>(
     },
     internalRole: {
       type: String,
-      enum: ['director', 'estratega', 'content_manager', 'account_manager', 'community_manager', 'productor', 'disenador', 'copywriter', 'analista', 'desarrollador'],
+      enum: ['director', 'estratega', 'project_manager', 'content_manager', 'account_manager', 'community_manager', 'productor', 'disenador', 'copywriter', 'analista', 'desarrollador'],
       default: null,
     },
     isActive: {

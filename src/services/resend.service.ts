@@ -34,7 +34,7 @@ export class ResendService {
     const firstName = recipientName ? recipientName.split(' ')[0] : 'nuevo integrante';
 
     const roleLabels: Record<string, string> = {
-      director: 'Director', estratega: 'Estratega', content_manager: 'Content Manager',
+      director: 'Director', estratega: 'Estratega', project_manager: 'Project Manager', content_manager: 'Content Manager',
       account_manager: 'Account Manager', community_manager: 'Community Manager',
       productor: 'Productor', editor: 'Editor', disenador: 'Diseñador',
       copywriter: 'Copywriter', analista: 'Analista', desarrollador: 'Desarrollador',
