@@ -8,13 +8,14 @@ export interface IUserWorkspaceAccess {
 export type InternalRole =
   | 'director'
   | 'estratega'
+  | 'content_manager'
+  | 'account_manager'
   | 'community_manager'
   | 'productor'
   | 'disenador'
   | 'copywriter'
   | 'analista'
   | 'desarrollador'
-  | 'account_manager'
 
 export interface IUser extends Document {
   name?: string;
@@ -78,7 +79,7 @@ export const UserSchema = new Schema<IUser>(
     },
     internalRole: {
       type: String,
-      enum: ['director', 'estratega', 'community_manager', 'productor', 'disenador', 'copywriter', 'analista', 'desarrollador', 'account_manager'],
+      enum: ['director', 'estratega', 'content_manager', 'account_manager', 'community_manager', 'productor', 'disenador', 'copywriter', 'analista', 'desarrollador'],
       default: null,
     },
     isActive: {
