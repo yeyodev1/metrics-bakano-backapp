@@ -2,6 +2,7 @@ import type { Response, NextFunction } from "express";
 import { HttpStatusCode } from "axios";
 import { AuthRequest } from "../types/AuthRequest";
 import { surveyService } from "../services/survey.service";
+import cloudinary from "../config/cloudinary";
 
 // ── Helpers ───────────────────────────────────────────────────
 
@@ -24,7 +25,7 @@ function userId(req: AuthRequest): string {
 
 export async function createSurvey(req: AuthRequest, res: Response, next: NextFunction) {
   try {
-    const { title, description, questions } = req.body;
+    const { title, description, coverImage, questions } = req.body;
 
     if (!title || typeof title !== "string" || !title.trim()) {
       res.status(HttpStatusCode.BadRequest).send({ message: "Survey title is required." });
@@ -35,7 +36,7 @@ export async function createSurvey(req: AuthRequest, res: Response, next: NextFu
       return;
     }
 
-    const survey = await surveyService.createSurvey({ title, description, questions, createdBy: userId(req) });
+    const survey = await surveyService.createSurvey({ title, description, coverImage, questions, createdBy: userId(req) });
     res.status(HttpStatusCode.Created).send({ message: "Survey created successfully.", survey });
   } catch (error) {
     console.error("createSurvey error:", error);
@@ -82,8 +83,8 @@ export async function getSurvey(req: AuthRequest, res: Response, next: NextFunct
 export async function updateSurvey(req: AuthRequest, res: Response, next: NextFunction) {
   try {
     const surveyId = req.params["id"] as string;
-    const { title, description, questions } = req.body;
-    const survey = await surveyService.updateSurvey(surveyId, { title, description, questions }, userId(req), isSuperadmin(req));
+    const { title, description, coverImage, questions } = req.body;
+    const survey = await surveyService.updateSurvey(surveyId, { title, description, coverImage, questions }, userId(req), isSuperadmin(req));
     res.status(HttpStatusCode.Ok).send({ message: "Survey updated successfully.", survey });
   } catch (error: any) {
     if (error.message === "NOT_FOUND") {
@@ -356,6 +357,33 @@ export async function getMySurveys(req: AuthRequest, res: Response, next: NextFu
     res.status(HttpStatusCode.Ok).send({ message: "Surveys retrieved.", ...data });
   } catch (error) {
     console.error("getMySurveys error:", error);
+    next(error);
+  }
+}
+
+// ── Image upload ───────────────────────────────────────────────
+
+export async function uploadSurveyImage(req: AuthRequest, res: Response, next: NextFunction) {
+  try {
+    if (!req.file) {
+      res.status(HttpStatusCode.BadRequest).send({ message: "No image file provided." });
+      return;
+    }
+
+    const result = await new Promise<{ secure_url: string }>((resolve, reject) => {
+      const stream = cloudinary.uploader.upload_stream(
+        { folder: "surveys", resource_type: "image" },
+        (error, result) => {
+          if (error || !result) return reject(error || new Error("Upload failed"));
+          resolve(result as { secure_url: string });
+        }
+      );
+      stream.end(req.file!.buffer);
+    });
+
+    res.status(HttpStatusCode.Ok).send({ url: result.secure_url });
+  } catch (error) {
+    console.error("uploadSurveyImage error:", error);
     next(error);
   }
 }

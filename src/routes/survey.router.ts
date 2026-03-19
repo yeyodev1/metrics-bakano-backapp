@@ -18,7 +18,9 @@ import {
   listInternalUsers,
   sendSurveyToInternals,
   assignInternalSenders,
+  uploadSurveyImage,
 } from "../controllers/survey.controller";
+import { upload } from "../middlewares/upload.middleware";
 
 const router = Router();
 
@@ -34,14 +36,17 @@ router.post("/fill/:token/submit", authMiddleware, submitSurveyResponse);
 // ── Superadmin: internal users for survey sending ──────────────
 router.get("/internal-users", authMiddleware, superadminMiddleware, listInternalUsers);
 
-// ── Internal / Superadmin: survey management ───────────────────
-router.post("/", authMiddleware, internalOrSuperadminMiddleware, createSurvey);
-router.get("/", authMiddleware, internalOrSuperadminMiddleware, listSurveys);
-router.get("/:id", authMiddleware, internalOrSuperadminMiddleware, getSurvey);
-router.patch("/:id", authMiddleware, internalOrSuperadminMiddleware, updateSurvey);
-router.patch("/:id/status", authMiddleware, internalOrSuperadminMiddleware, updateSurveyStatus);
-router.delete("/:id", authMiddleware, internalOrSuperadminMiddleware, deleteSurvey);
-router.post("/:id/send", authMiddleware, internalOrSuperadminMiddleware, sendSurvey);
+// ── Image upload ────────────────────────────────────────────────
+router.post("/upload-image", authMiddleware, upload.single("image"), uploadSurveyImage);
+
+// ── Any authenticated user: survey management ──────────────────
+router.post("/", authMiddleware, createSurvey);
+router.get("/", authMiddleware, listSurveys);
+router.get("/:id", authMiddleware, getSurvey);
+router.patch("/:id", authMiddleware, updateSurvey);
+router.patch("/:id/status", authMiddleware, updateSurveyStatus);
+router.delete("/:id", authMiddleware, deleteSurvey);
+router.post("/:id/send", authMiddleware, sendSurvey);
 router.post("/:id/send-internal", authMiddleware, superadminMiddleware, sendSurveyToInternals);
 router.post("/:id/assign-senders", authMiddleware, superadminMiddleware, assignInternalSenders);
 

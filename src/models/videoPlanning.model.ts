@@ -110,7 +110,6 @@ const VideoPlanningSchema = new Schema<IVideoPlanning>(
   }
 );
 
-VideoPlanningSchema.index({ planningEntryId: 1 });
 VideoPlanningSchema.index({ workspaceId: 1 });
 VideoPlanningSchema.index({ workspaceId: 1, "items.fechaPublicacion": 1 });
 

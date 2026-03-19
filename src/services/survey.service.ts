@@ -12,12 +12,14 @@ export class SurveyService {
   async createSurvey(data: {
     title: string;
     description?: string;
+    coverImage?: string;
     questions: IQuestion[];
     createdBy: string;
   }): Promise<ISurvey> {
     const survey = await models.surveys.create({
       title: data.title,
       description: data.description,
+      coverImage: data.coverImage,
       questions: data.questions,
       createdBy: new mongoose.Types.ObjectId(data.createdBy),
       status: "draft",
@@ -48,10 +50,13 @@ export class SurveyService {
     const survey = await models.surveys.findById(surveyId).populate("createdBy", "name email").lean();
     if (!survey) throw new Error("NOT_FOUND");
 
+    // createdBy is populated → extract _id; authorizedSenders are plain ObjectIds
+    const creatorId = (survey.createdBy as any)?._id?.toString() ?? survey.createdBy?.toString();
+
     const isAuthorized =
       isSuperadmin ||
-      survey.createdBy.toString() === userId ||
-      (survey.authorizedSenders ?? []).some((s: any) => s.toString() === userId);
+      creatorId === userId ||
+      (survey.authorizedSenders ?? []).some((s: any) => s?.toString() === userId);
 
     if (!isAuthorized) throw new Error("FORBIDDEN");
 
@@ -62,7 +67,7 @@ export class SurveyService {
 
   async updateSurvey(
     surveyId: string,
-    data: Partial<Pick<ISurvey, "title" | "description" | "questions">>,
+    data: Partial<Pick<ISurvey, "title" | "description" | "coverImage" | "questions">>,
     userId: string,
     isSuperadmin: boolean
   ): Promise<ISurvey> {
@@ -105,7 +110,6 @@ export class SurveyService {
     const survey = await models.surveys.findById(surveyId);
     if (!survey) throw new Error("NOT_FOUND");
     if (!isSuperadmin && survey.createdBy.toString() !== userId) throw new Error("FORBIDDEN");
-    if (survey.status !== "draft") throw new Error("NOT_DRAFT");
 
     await models.surveys.deleteOne({ _id: surveyId });
   }

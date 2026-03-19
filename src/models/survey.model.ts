@@ -10,6 +10,18 @@ export type QuestionType =
   | "nps"
   | "yes_no"
   | "dropdown"
+  | "date"
+  | "image_question";
+
+export type ImageAnswerType =
+  | "yes_no"
+  | "rating"
+  | "nps"
+  | "short_text"
+  | "long_text"
+  | "multiple_choice"
+  | "checkbox"
+  | "dropdown"
   | "date";
 
 export interface IQuestion {
@@ -22,11 +34,14 @@ export interface IQuestion {
   max?: number;
   minLabel?: string;
   maxLabel?: string;
+  imageUrl?: string;
+  imageAnswerType?: ImageAnswerType;
 }
 
 export interface ISurvey extends Document {
   title: string;
   description?: string;
+  coverImage?: string;
   questions: IQuestion[];
   createdBy: Types.ObjectId;
   authorizedSenders: Types.ObjectId[];
@@ -43,7 +58,7 @@ const QuestionSchema = new Schema<IQuestion>(
     },
     type: {
       type: String,
-      enum: ["short_text", "long_text", "multiple_choice", "checkbox", "rating", "nps", "yes_no", "dropdown", "date"],
+      enum: ["short_text", "long_text", "multiple_choice", "checkbox", "rating", "nps", "yes_no", "dropdown", "date", "image_question"],
       required: true,
     },
     label: {
@@ -60,6 +75,11 @@ const QuestionSchema = new Schema<IQuestion>(
     max: { type: Number },
     minLabel: { type: String, trim: true },
     maxLabel: { type: String, trim: true },
+    imageUrl: { type: String },
+    imageAnswerType: {
+      type: String,
+      enum: ["yes_no", "rating", "nps", "short_text", "long_text", "multiple_choice", "checkbox", "dropdown", "date"],
+    },
   },
   { _id: false }
 );
@@ -75,6 +95,7 @@ const SurveySchema = new Schema<ISurvey>(
       type: String,
       trim: true,
     },
+    coverImage: { type: String },
     questions: [QuestionSchema],
     createdBy: {
       type: Schema.Types.ObjectId,
