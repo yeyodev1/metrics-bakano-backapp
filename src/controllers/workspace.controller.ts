@@ -2,6 +2,7 @@ import type { Response, NextFunction } from "express";
 import { HttpStatusCode } from "axios";
 import { AuthRequest } from "../types/AuthRequest";
 import { WorkspaceService } from "../services/workspace.service";
+import { resendService } from "../services/resend.service";
 
 const workspaceService = new WorkspaceService();
 
@@ -145,7 +146,7 @@ export async function listUsers(req: AuthRequest, res: Response, next: NextFunct
 export async function createUser(req: AuthRequest, res: Response, next: NextFunction) {
   try {
     const workspaceId = req.params["workspaceId"] as string;
-    const { name, email, password, role, phoneNumber, phoneExtension } = req.body;
+    const { name, email, password, role, phoneNumber, phoneExtension, sendWelcomeEmail } = req.body;
 
     if (!email) {
       res.status(HttpStatusCode.BadRequest).send({ message: "Email is required." });
@@ -161,6 +162,11 @@ export async function createUser(req: AuthRequest, res: Response, next: NextFunc
     }
 
     const user = await workspaceService.createUser({ name, email, password, role, workspaceId, phoneNumber, phoneExtension });
+
+    if (sendWelcomeEmail && password) {
+      resendService.sendWelcomeEmail({ to: email, recipientName: name, email, password, isInternal: false }).catch(() => {});
+    }
+
     res.status(HttpStatusCode.Created).send({ message: "User created successfully.", user });
     return;
   } catch (error: any) {
@@ -237,7 +243,7 @@ export async function deleteUser(req: AuthRequest, res: Response, next: NextFunc
 
 export async function createGlobalUser(req: AuthRequest, res: Response, next: NextFunction) {
   try {
-    const { name, email, password, workspaces, phoneNumber, phoneExtension, isInternal, internalRole } = req.body;
+    const { name, email, password, workspaces, phoneNumber, phoneExtension, isInternal, internalRole, sendWelcomeEmail } = req.body;
 
     if (!email || !workspaces || !Array.isArray(workspaces)) {
       res.status(HttpStatusCode.BadRequest).send({ message: "Email and workspaces array are required." });
@@ -254,6 +260,10 @@ export async function createGlobalUser(req: AuthRequest, res: Response, next: Ne
       isInternal,
       internalRole
     });
+
+    if (sendWelcomeEmail && password) {
+      resendService.sendWelcomeEmail({ to: email, recipientName: name, email, password, isInternal: !!isInternal, internalRole }).catch(() => {});
+    }
 
     res.status(HttpStatusCode.Created).send({ message: "Global user created/updated successfully.", user });
     return;
