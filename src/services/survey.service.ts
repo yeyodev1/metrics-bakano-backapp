@@ -76,7 +76,6 @@ export class SurveyService {
     const survey = await models.surveys.findById(surveyId);
     if (!survey) throw new Error("NOT_FOUND");
     if (!isSuperadmin && survey.createdBy.toString() !== userId) throw new Error("FORBIDDEN");
-    if (survey.status !== "draft") throw new Error("NOT_DRAFT");
 
     Object.assign(survey, data);
     await survey.save();
@@ -187,10 +186,11 @@ export class SurveyService {
         continue;
       }
 
-      // Skip if already assigned
+      // Skip only if there's a pending assignment (not yet answered)
       const existing = await models.surveyAssignments.findOne({
         surveyId: new mongoose.Types.ObjectId(surveyId),
         recipientId: new mongoose.Types.ObjectId(userId),
+        status: "pending",
       });
 
       if (existing) {
@@ -274,6 +274,7 @@ export class SurveyService {
       const existing = await models.surveyAssignments.findOne({
         surveyId: new mongoose.Types.ObjectId(surveyId),
         recipientId: new mongoose.Types.ObjectId(uid),
+        status: "pending",
       });
       if (existing) { skipped++; continue; }
 
