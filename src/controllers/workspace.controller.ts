@@ -164,7 +164,8 @@ export async function createUser(req: AuthRequest, res: Response, next: NextFunc
     const user = await workspaceService.createUser({ name, email, password, role, workspaceId, phoneNumber, phoneExtension });
 
     if (sendWelcomeEmail && password) {
-      resendService.sendWelcomeEmail({ to: email, recipientName: name, email, password, isInternal: false }).catch(() => {});
+      resendService.sendWelcomeEmail({ to: email, recipientName: name, email, password, isInternal: false })
+        .catch((err) => console.error('[welcome-email] workspace createUser failed:', err?.message));
     }
 
     res.status(HttpStatusCode.Created).send({ message: "User created successfully.", user });
@@ -262,7 +263,8 @@ export async function createGlobalUser(req: AuthRequest, res: Response, next: Ne
     });
 
     if (sendWelcomeEmail && password) {
-      resendService.sendWelcomeEmail({ to: email, recipientName: name, email, password, isInternal: !!isInternal, internalRole }).catch(() => {});
+      resendService.sendWelcomeEmail({ to: email, recipientName: name, email, password, isInternal: !!isInternal, internalRole })
+        .catch((err) => console.error('[welcome-email] createGlobalUser failed:', err?.message));
     }
 
     res.status(HttpStatusCode.Created).send({ message: "Global user created/updated successfully.", user });
@@ -313,6 +315,42 @@ export async function updateGlobalUser(req: AuthRequest, res: Response, next: Ne
       return;
     }
     console.error("updateGlobalUser error:", error);
+    next(error);
+  }
+}
+
+export async function resendInvite(req: AuthRequest, res: Response, next: NextFunction) {
+  try {
+    const userId = req.params["userId"] as string;
+    const { password } = req.body;
+
+    if (!password || password.length < 8) {
+      res.status(HttpStatusCode.BadRequest).send({ message: "La contraseña debe tener mínimo 8 caracteres." });
+      return;
+    }
+
+    const user = await workspaceService.updateGlobalUser(userId, { password });
+    if (!user) {
+      res.status(HttpStatusCode.NotFound).send({ message: "Usuario no encontrado." });
+      return;
+    }
+
+    await resendService.sendWelcomeEmail({
+      to: user.email as string,
+      recipientName: user.name as string,
+      email: user.email as string,
+      password,
+      isInternal: !!(user as any).isInternal,
+      internalRole: (user as any).internalRole,
+    });
+
+    res.status(HttpStatusCode.Ok).send({ message: "Invitación reenviada correctamente." });
+  } catch (error: any) {
+    if (error.message === "NOT_FOUND" || error.message === "INVALID_ID") {
+      res.status(HttpStatusCode.NotFound).send({ message: "Usuario no encontrado." });
+      return;
+    }
+    console.error("resendInvite error:", error);
     next(error);
   }
 }

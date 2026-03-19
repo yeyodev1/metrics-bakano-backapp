@@ -15,6 +15,7 @@ import {
   listAllCollaborators,
   createGlobalUser,
   updateGlobalUser,
+  resendInvite,
 } from "../controllers/workspace.controller";
 
 const workspaceRouter = Router();
@@ -27,6 +28,7 @@ workspaceRouter.get("/", listWorkspaces);
 workspaceRouter.get("/all-users", superadminMiddleware, listAllCollaborators);
 workspaceRouter.post("/global-users", superadminMiddleware, createGlobalUser);
 workspaceRouter.put("/global-users/:userId", superadminMiddleware, updateGlobalUser);
+workspaceRouter.post("/global-users/:userId/resend-invite", superadminMiddleware, resendInvite);
 workspaceRouter.post("/", superadminMiddleware, createWorkspace);
 
 // ── SPECIFIC Workspace Actions (Superadmin, Admin or Collaborator) ─────────
