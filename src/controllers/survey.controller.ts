@@ -9,6 +9,13 @@ function isSuperadmin(req: AuthRequest): boolean {
   return req.user?.role === "superadmin";
 }
 
+function isPrivilegedInternal(req: AuthRequest): boolean {
+  return (
+    req.user?.isInternal === true &&
+    ["project_manager", "content_manager"].includes(req.user?.internalRole ?? "")
+  );
+}
+
 function userId(req: AuthRequest): string {
   return req.user!._id;
 }
@@ -38,7 +45,10 @@ export async function createSurvey(req: AuthRequest, res: Response, next: NextFu
 
 export async function listSurveys(req: AuthRequest, res: Response, next: NextFunction) {
   try {
-    const surveys = await surveyService.listSurveys({ userId: userId(req), isSuperadmin: isSuperadmin(req) });
+    const surveys = await surveyService.listSurveys({
+      userId: userId(req),
+      isSuperadmin: isSuperadmin(req) || isPrivilegedInternal(req),
+    });
     res.status(HttpStatusCode.Ok).send({ message: "Surveys retrieved successfully.", surveys });
   } catch (error) {
     console.error("listSurveys error:", error);

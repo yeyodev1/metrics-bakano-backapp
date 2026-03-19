@@ -5,6 +5,7 @@ export interface JwtPayload {
   email: string;
   role: "superadmin" | "user" | "admin" | "colaborador";
   isInternal?: boolean;
+  internalRole?: string;
 }
 
 export interface AuthRequest extends Request {

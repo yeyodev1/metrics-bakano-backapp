@@ -2,6 +2,7 @@ import { Router } from "express";
 import { authMiddleware } from "../middlewares/auth.middleware";
 import { superadminMiddleware } from "../middlewares/superadmin.middleware";
 import { internalOrSuperadminMiddleware } from "../middlewares/internalOrSuperadmin.middleware";
+import { projectManagerOrSuperadminMiddleware } from "../middlewares/projectManagerOrSuperadmin.middleware";
 import {
   createSurvey,
   listSurveys,
@@ -44,7 +45,7 @@ router.post("/:id/send", authMiddleware, internalOrSuperadminMiddleware, sendSur
 router.post("/:id/send-internal", authMiddleware, superadminMiddleware, sendSurveyToInternals);
 router.post("/:id/assign-senders", authMiddleware, superadminMiddleware, assignInternalSenders);
 
-// ── Results: superadmin only ───────────────────────────────────
-router.get("/:id/results", authMiddleware, superadminMiddleware, getSurveyResults);
+// ── Results: superadmin + project_manager ─────────────────────
+router.get("/:id/results", authMiddleware, projectManagerOrSuperadminMiddleware, getSurveyResults);
 
 export default router;
