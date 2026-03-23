@@ -57,9 +57,17 @@ export async function listWorkspaces(req: AuthRequest, res: Response, next: Next
         res.status(HttpStatusCode.Unauthorized).send({ message: "No user assigned.", workspaces: [] });
         return;
       }
-      // For now, we'll keep the standard list for non-superadmins or update if needed
-      const workspaces = await workspaceService.listWorkspacesForUser(userId);
-      res.status(HttpStatusCode.Ok).send({ message: "Workspaces retrieved successfully.", workspaces });
+      const data = await workspaceService.listWorkspacesForUser(userId, { search, page, limit });
+      res.status(HttpStatusCode.Ok).send({
+        message: "Workspaces retrieved successfully.",
+        workspaces: data.workspaces,
+        metadata: {
+          total: data.total,
+          page: data.page,
+          limit: data.limit,
+          hasMore: data.hasMore
+        }
+      });
       return;
     }
   } catch (error) {

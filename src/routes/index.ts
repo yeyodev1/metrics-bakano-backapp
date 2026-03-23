@@ -6,6 +6,8 @@ import adminRouter from "./admin.router";
 import planningRouter from "./planning.router";
 import surveyRouter from "./survey.router";
 import { planningEntriesRouter, videoPlanningRouter } from "./videoPlanning.router";
+import clientMeetingRouter from "./clientMeeting.router";
+import notificationRouter from "./notification.router";
 
 function routerApi(app: Application) {
   const router = express.Router();
@@ -19,6 +21,8 @@ function routerApi(app: Application) {
   router.use("/surveys", surveyRouter);
   router.use("/planning-entries", planningEntriesRouter);
   router.use("/video-planning", videoPlanningRouter);
+  router.use("/meetings", clientMeetingRouter);
+  router.use("/notifications", notificationRouter);
 }
 
 export default routerApi;

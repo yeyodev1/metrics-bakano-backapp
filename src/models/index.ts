@@ -5,6 +5,8 @@ import { SurveyModel } from "./survey.model";
 import { SurveyAssignmentModel } from "./surveyAssignment.model";
 import { SurveyResponseModel } from "./surveyResponse.model";
 import { VideoPlanningModel } from "./videoPlanning.model";
+import { ClientMeetingModel } from "./clientMeeting.model";
+import { NotificationModel } from "./notification.model";
 
 const models = {
   users: UserModel,
@@ -14,6 +16,8 @@ const models = {
   surveyAssignments: SurveyAssignmentModel,
   surveyResponses: SurveyResponseModel,
   videoPlanning: VideoPlanningModel,
+  clientMeetings: ClientMeetingModel,
+  notifications: NotificationModel,
 };
 
 export default models;

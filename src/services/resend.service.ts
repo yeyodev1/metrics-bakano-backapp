@@ -246,6 +246,137 @@ export class ResendService {
       html,
     });
   }
+
+  async sendMeetingInviteEmail(params: {
+    to: string;
+    contactName: string;
+    pmName: string;
+    workspaceName: string;
+    meetingDate: Date;
+    agenda?: string;
+    meetingLink?: string;
+  }): Promise<void> {
+    const { to, contactName, pmName, workspaceName, meetingDate, agenda, meetingLink } = params;
+    const firstName = contactName.split(' ')[0];
+
+    const dateLabel = meetingDate.toLocaleDateString('es-EC', {
+      weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
+    });
+
+    const html = `
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Reunión de performance agendada</title>
+</head>
+<body style="margin:0;padding:0;background-color:#f0f2f5;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f0f2f5;padding:40px 16px;">
+    <tr>
+      <td align="center">
+        <table width="580" cellpadding="0" cellspacing="0" style="max-width:580px;width:100%;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.10);">
+
+          <!-- Header -->
+          <tr>
+            <td style="background:linear-gradient(135deg,#0f1117 0%,#1e293b 100%);padding:36px 40px 32px;text-align:center;">
+              <p style="margin:0 0 16px;color:#ffffff;font-size:22px;font-weight:800;letter-spacing:-0.5px;">Bakano Ads</p>
+              <div style="display:inline-block;width:64px;height:64px;background:rgba(255,255,255,0.08);border-radius:50%;text-align:center;line-height:64px;font-size:30px;margin-bottom:16px;">📅</div>
+              <h1 style="margin:0;color:#ffffff;font-size:24px;font-weight:700;line-height:1.3;">Reunión de performance agendada</h1>
+              <p style="margin:8px 0 0;color:rgba(255,255,255,0.65);font-size:14px;">Hola ${firstName}, tienes una reunión programada</p>
+            </td>
+          </tr>
+
+          <!-- Meeting details card -->
+          <tr>
+            <td style="padding:32px 40px 0;">
+              <table width="100%" cellpadding="0" cellspacing="0" style="background:#f8fafc;border:1.5px solid #e2e8f0;border-radius:12px;overflow:hidden;">
+                <tr>
+                  <td style="padding:10px 20px;background:#e2e8f0;">
+                    <p style="margin:0;color:#64748b;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.6px;">Detalles de la reunión</p>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding:20px;">
+                    <table width="100%" cellpadding="0" cellspacing="0">
+                      <tr>
+                        <td style="padding-bottom:14px;">
+                          <p style="margin:0 0 3px;color:#94a3b8;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;">Cliente</p>
+                          <p style="margin:0;color:#0f172a;font-size:15px;font-weight:700;">${workspaceName}</p>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style="border-top:1px solid #e2e8f0;padding:14px 0;">
+                          <p style="margin:0 0 3px;color:#94a3b8;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;">Fecha</p>
+                          <p style="margin:0;color:#0f172a;font-size:15px;font-weight:600;text-transform:capitalize;">${dateLabel}</p>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style="border-top:1px solid #e2e8f0;padding-top:14px;">
+                          <p style="margin:0 0 3px;color:#94a3b8;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;">Coordinado por</p>
+                          <p style="margin:0;color:#0f172a;font-size:15px;font-weight:600;">${pmName}</p>
+                        </td>
+                      </tr>
+                      ${agenda ? `
+                      <tr>
+                        <td style="border-top:1px solid #e2e8f0;padding-top:14px;">
+                          <p style="margin:0 0 6px;color:#94a3b8;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;">Agenda</p>
+                          <p style="margin:0;color:#374151;font-size:14px;line-height:1.6;">${agenda}</p>
+                        </td>
+                      </tr>` : ''}
+                    </table>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- CTA -->
+          ${meetingLink ? `
+          <tr>
+            <td style="padding:24px 40px 0;text-align:center;">
+              <a href="${meetingLink}"
+                 style="display:inline-block;background:linear-gradient(135deg,#0f1117 0%,#1e293b 100%);color:#ffffff;text-decoration:none;font-size:15px;font-weight:700;padding:14px 36px;border-radius:10px;letter-spacing:0.2px;box-shadow:0 4px 14px rgba(15,17,23,0.25);">
+                Unirse a la reunión →
+              </a>
+            </td>
+          </tr>` : ''}
+
+          <!-- Body -->
+          <tr>
+            <td style="padding:28px 40px 32px;">
+              <p style="margin:0;color:#374151;font-size:14px;line-height:1.7;text-align:center;">
+                Nuestro equipo se pondrá en contacto contigo para confirmar cualquier detalle adicional.<br/>
+                Si tienes alguna pregunta, responde directamente a este correo.
+              </p>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="background:#f8fafc;padding:20px 40px;border-top:1px solid #e2e8f0;text-align:center;">
+              <p style="margin:0;color:#94a3b8;font-size:12px;line-height:1.6;">
+                Este correo fue enviado por <strong>Bakano Ads</strong> en nombre de ${pmName}.<br/>
+                Si no esperabas este correo, por favor ignóralo.
+              </p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+
+    await this.client.emails.send({
+      from: this.from,
+      to,
+      subject: `📅 Reunión de performance agendada · ${workspaceName}`,
+      html,
+    });
+  }
 }
 
 export const resendService = new ResendService();
+

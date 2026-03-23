@@ -1,6 +1,7 @@
 import { Types } from "mongoose";
 import models from "../models";
 import type { IVideoPlanning, IVideoItem, ClienteAprobacion } from "../models/videoPlanning.model";
+import { notificationService } from "./notification.service";
 
 // Fields an editor (internalRole=editor) is allowed to modify
 const EDITOR_ALLOWED_FIELDS = new Set(["estadoProduccion", "edicion"]);
@@ -44,6 +45,18 @@ export class VideoPlanningService {
 
       existing.items = normalised as IVideoItem[];
       await existing.save();
+
+      // Notify non-internal workspace users that planning was re-sent
+      notificationService
+        .createForWorkspaceUsers(
+          existing.workspaceId.toString(),
+          true,
+          "video_planning_resent",
+          "Planificación actualizada",
+          "Se ha actualizado la planificación de videos de tu entorno."
+        )
+        .catch(() => {});
+
       return existing.toObject() as IVideoPlanning;
     }
 
@@ -89,6 +102,8 @@ export class VideoPlanningService {
       "linkVideo", "fechaPublicacion",
     ];
 
+    const wasPublicado = item.estadoPublicacion === "PUBLICADO";
+
     for (const [key, value] of Object.entries(fields)) {
       if (!MUTABLE_FIELDS.includes(key)) continue;
       if (allowedKeys && !allowedKeys.has(key)) continue;
@@ -98,6 +113,21 @@ export class VideoPlanningService {
     }
 
     await planning.save();
+
+    // Notify non-internal workspace users when a video reaches PUBLICADO
+    const isNowPublicado = item.estadoPublicacion === "PUBLICADO";
+    if (!wasPublicado && isNowPublicado) {
+      notificationService
+        .createForWorkspaceUsers(
+          planning.workspaceId.toString(),
+          true,
+          "video_status_changed",
+          "Video publicado",
+          `Un video de tu planificación ha sido publicado: "${(item as any).tema || "sin título"}".`
+        )
+        .catch(() => {});
+    }
+
     return planning.toObject() as IVideoPlanning;
   }
 
