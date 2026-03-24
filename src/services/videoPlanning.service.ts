@@ -90,25 +90,20 @@ export class VideoPlanningService {
     const isEditor = internalRole === "editor";
     const allowedKeys = isEditor ? EDITOR_ALLOWED_FIELDS : null;
 
-    // When client has approved (locked), only operational tracking fields are editable
-    const OPERATIONAL_FIELDS = new Set([
-      "estadoProduccion", "edicion", "estadoPublicacion", "comentario",
-    ]);
-
-    const MUTABLE_FIELDS = [
+    // All content fields are mutable via PATCH — the lock (clienteAprobado) only prevents
+    // replacing ALL items via PUT/POST. Individual item edits are always allowed for internal team.
+    const MUTABLE_FIELDS = new Set([
       "tema", "descripcion", "tipo", "linkEjemplo", "recursos",
       "lugarGrabacion", "guion", "estadoIdea", "estadoProduccion",
       "edicion", "estadoPublicacion", "comentario", "motivoRechazo",
       "linkVideo", "fechaPublicacion",
-    ];
+    ]);
 
     const wasPublicado = item.estadoPublicacion === "PUBLICADO";
 
     for (const [key, value] of Object.entries(fields)) {
-      if (!MUTABLE_FIELDS.includes(key)) continue;
+      if (!MUTABLE_FIELDS.has(key)) continue;
       if (allowedKeys && !allowedKeys.has(key)) continue;
-      // When locked, only operational tracking fields can be updated
-      if (planning.clienteAprobado && !OPERATIONAL_FIELDS.has(key)) continue;
       (item as any)[key] = value;
     }
 
