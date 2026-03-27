@@ -96,7 +96,7 @@ export class VideoPlanningService {
       "tema", "descripcion", "tipo", "linkEjemplo", "recursos",
       "lugarGrabacion", "guion", "estadoIdea", "estadoProduccion",
       "edicion", "estadoPublicacion", "comentario", "motivoRechazo",
-      "linkVideo", "fechaPublicacion",
+      "linkVideo", "fechaPublicacion", "copyPublicacion",
     ]);
 
     const wasPublicado = item.estadoPublicacion === "PUBLICADO";
@@ -231,6 +231,7 @@ export class VideoPlanningService {
             clienteAprobacion: item.clienteAprobacion,
             linkVideo: item.linkVideo,
             fechaPublicacion: item.fechaPublicacion,
+            copyPublicacion: item.copyPublicacion,
           });
         }
       }

@@ -27,6 +27,7 @@ export interface IVideoItem {
   motivoRechazo?: string;
   linkVideo?: string;
   fechaPublicacion?: Date;
+  copyPublicacion?: string;
   order: number;
 }
 
@@ -69,6 +70,7 @@ const VideoItemSchema = new Schema<IVideoItem>(
     motivoRechazo: { type: String, trim: true },
     linkVideo: { type: String, trim: true },
     fechaPublicacion: { type: Date },
+    copyPublicacion: { type: String, trim: true },
     order: { type: Number, default: 0 },
   },
   { _id: true }
