@@ -23,7 +23,7 @@ export async function createBillingEntry(req: AuthRequest, res: Response): Promi
       return;
     }
 
-    const entry = await billingService.createEntry(workspaceId, userId, amount, notes);
+    const entry = await billingService.createEntry(workspaceId as string, userId as string, amount, notes);
 
     res.status(201).json({ message: "Entrada de facturación registrada exitosamente.", entry });
   } catch (error: any) {
@@ -60,7 +60,7 @@ export async function getMonthBilling(req: AuthRequest, res: Response): Promise<
       return;
     }
 
-    const result = await billingService.getMonthEntries(workspaceId, year, month);
+    const result = await billingService.getMonthEntries(workspaceId as string, year, month);
 
     res.status(200).json({ message: "Facturación del mes obtenida.", ...result });
   } catch (error: any) {
@@ -90,7 +90,7 @@ export async function getDayBilling(req: AuthRequest, res: Response): Promise<vo
       return;
     }
 
-    const summary = await billingService.getDaySummary(workspaceId, parsed);
+    const summary = await billingService.getDaySummary(workspaceId as string, parsed);
 
     res.status(200).json({ message: "Resumen del día obtenido.", ...summary });
   } catch (error: any) {
@@ -120,7 +120,7 @@ export async function updateBillingEntry(req: AuthRequest, res: Response): Promi
       return;
     }
 
-    const entry = await billingService.updateEntry(entryId, requesterId, requesterRole, amount, notes);
+    const entry = await billingService.updateEntry(entryId as string, requesterId as string, requesterRole as string, amount, notes);
 
     res.status(200).json({ message: "Entrada de facturación actualizada.", entry });
   } catch (error: any) {
@@ -146,7 +146,7 @@ export async function getMyEntryToday(req: AuthRequest, res: Response): Promise<
     const { workspaceId } = req.params;
     const userId = req.user!._id;
 
-    const entry = await billingService.getUserEntryForDay(userId, workspaceId, new Date());
+    const entry = await billingService.getUserEntryForDay(userId as string, workspaceId as string, new Date());
 
     res.status(200).json({
       message: entry ? "Entrada encontrada para hoy." : "No tienes entrada registrada para hoy.",
