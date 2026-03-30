@@ -55,6 +55,41 @@ Gancho: "El error número uno de los emprendedores en Ecuador es pagar el súper
 Cuerpo: "Cuando mezclas tus cuentas, pierdes el rastro de tu rentabilidad y le das al SRI una razón para auditarte. Si no es del negocio, no es deducible. Asígnate un sueldo. Págate a tu cuenta personal y desde ahí gasta en lo que quieras. Así tu contabilidad queda blindada ante cualquier revisión."
 CTA: "Soy Helen Bermeo y te ayudo a separar tus finanzas para que crezcas de verdad. Haz clic en el link de mi bio y pongamos orden a ese flujo de caja."
 
+EJEMPLO 6 (BOFU — Lanzamiento de producto con edición limitada):
+Gancho: "Abril acaba de mejorar con esta combinación: Ferrero y Canela."
+Cuerpo: "Presentamos el sabor del mes de ABRIL, con nuestra masa muy esponjosita, pero esta vez bañada con una crema de avellanas, chocolate crujiente y ese toque de Ferrero que ya conoces. Es edición limitada, así que si eres amante del chocolate, este es el momento de decir: hoy me lo merezco. Disponible solo por el mes de abril. Lo puedes pedir en tu cajita y en cualquier tamaño."
+CTA: "No te quedes sin probarlo. Pide el tuyo por WhatsApp antes de que se agoten los de hoy haciendo clic aquí abajo."
+
+EJEMPLO 7 (BOFU — Producto para reuniones y ocasiones sociales):
+Gancho: "Ven que te resuelvo el postre o los bites de tu próxima reunión."
+Cuerpo: "Ideal si tienes un cumpleaños, una tarde con amigas o quieres ser el favorito de la oficina. Nuestro Combo de 12 Minis es la solución. Son doce rollitos ultra suaves, recién horneados y con el balance perfecto de canela. Son ideales porque todos alcanzan, puedes probar distintos toppings y, aceptémoslo, también se ven hermosos."
+CTA: "Comenta DOCENA y te envío el menú para tu próxima reunión por mensaje directo."
+
+EJEMPLO 8 (TOFU — Humor + identificación de audiencia):
+Gancho: "Cuando dicen que escuche a mi cuerpo... pero mi cuerpo solo me pide ROLKI."
+Cuerpo: "Y sabes qué, esta vez le voy a hacer caso. Porque la vida es muy corta para resistirse a un rollito recién horneado, con ese olor a canela que te llega desde la cocina. No hay dieta que valga cuando el corazón sabe lo que quiere."
+CTA: "Síguenos y no te pierdas de nada con los rollitos más ricos de todo Guayaquil y Samborondón."
+
+EJEMPLO 9 (BOFU — Urgencia con cuenta regresiva):
+Gancho: "Si no pruebas esto hoy, te vas a arrepentir todo el mes."
+Cuerpo: "Quedan exactamente 15 días para que el sabor Ferrero se despida de nuestro menú. Y que no se diga que no te estamos avisando. Recuerda que puedes pedirlo en cualquier tamaño y en cualquiera de nuestras cajitas: de 4, de 6 y de 12."
+CTA: "Escríbenos ahora por WhatsApp para que no te lo pierdas."
+
+EJEMPLO 10 (TOFU — Derribo de mitos del producto):
+Gancho: "3 Mentiras que te dijeron sobre los rollos de canela."
+Cuerpo: "Uno: Que son mejores fríos. FALSÍSIMO. Pero 30 segunditos en el microondas y solucionado. Dos: Que todos son iguales. JAMÁS. La mayoría son industriales —aunque te digan que no—, en ROLKI los encuentras 100% artesanales. Y tres: Que solo se comen de postre. Te digo un secretito: son el mejor desayuno del mundo."
+CTA: "Síguenos para que no te pierdas de nada con los rollitos más ricos de todo Guayaquil y Samborondón."
+
+EJEMPLO 11 (MOFU — Q&A con presentadora / credibilidad + producto estrella):
+Gancho: "Giuli, ¿cuál es la cajita más pedida de ROLKI?"
+Cuerpo: "El rollito más pedido es el de canela clásico — es el favorito de todos. ¡Vamos a prepararlo! [muestra proceso de preparación en cocina, masa esponjosa, cobertura derritiéndose]. Hecho con ingredientes frescos, sin conservantes, directamente desde nuestra cocina hasta tus manos."
+CTA: "Haz tu pedido por WhatsApp o déjanos un mensajito por Instagram y te lo llevamos donde estás."
+
+EJEMPLO 12 (BOFU — Estacional / Semana Santa):
+Gancho: "Lo que NO se te puede olvidar en este viaje de Semana Santa."
+Cuerpo: "¿Qué va a ser de tu viaje si no llevas a ROLKI contigo? Nuestros rollitos aguantan el viaje perfecto y son el snack ideal para compartir —o no compartir— con tus amigos en este feriado. Asegura tu caja de 6 o de 12."
+CTA: "No olvides escribirnos al WhatsApp para hacer tu pedido o solo déjanos un mensajito por Instagram."
+
 --- FIN DE EJEMPLOS ---
 
 IMPORTANTE: Responde ÚNICAMENTE con un JSON válido, sin markdown, sin explicaciones extra.`;
