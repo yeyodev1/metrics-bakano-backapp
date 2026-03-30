@@ -7,6 +7,7 @@ import { SurveyResponseModel } from "./surveyResponse.model";
 import { VideoPlanningModel } from "./videoPlanning.model";
 import { ClientMeetingModel } from "./clientMeeting.model";
 import { NotificationModel } from "./notification.model";
+import { DailyBillingEntryModel } from "./dailyBilling.model";
 
 const models = {
   users: UserModel,
@@ -18,6 +19,7 @@ const models = {
   videoPlanning: VideoPlanningModel,
   clientMeetings: ClientMeetingModel,
   notifications: NotificationModel,
+  dailyBilling: DailyBillingEntryModel,
 };
 
 export default models;

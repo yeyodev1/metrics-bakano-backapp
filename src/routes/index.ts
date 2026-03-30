@@ -8,6 +8,7 @@ import surveyRouter from "./survey.router";
 import { planningEntriesRouter, videoPlanningRouter } from "./videoPlanning.router";
 import clientMeetingRouter from "./clientMeeting.router";
 import notificationRouter from "./notification.router";
+import billingRouter from "./billing.router";
 
 function routerApi(app: Application) {
   const router = express.Router();
@@ -23,6 +24,7 @@ function routerApi(app: Application) {
   router.use("/video-planning", videoPlanningRouter);
   router.use("/meetings", clientMeetingRouter);
   router.use("/notifications", notificationRouter);
+  router.use("/billing", billingRouter);
 }
 
 export default routerApi;
