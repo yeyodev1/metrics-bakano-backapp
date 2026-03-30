@@ -8,6 +8,8 @@ import { VideoPlanningModel } from "./videoPlanning.model";
 import { ClientMeetingModel } from "./clientMeeting.model";
 import { NotificationModel } from "./notification.model";
 import { DailyBillingEntryModel } from "./dailyBilling.model";
+import { TeamKpiRecordModel } from "./teamKpiRecord.model";
+import { VisitLogModel } from "./visitLog.model";
 
 const models = {
   users: UserModel,
@@ -20,6 +22,8 @@ const models = {
   clientMeetings: ClientMeetingModel,
   notifications: NotificationModel,
   dailyBilling: DailyBillingEntryModel,
+  teamKpiRecords: TeamKpiRecordModel,
+  visitLogs: VisitLogModel,
 };
 
 export default models;

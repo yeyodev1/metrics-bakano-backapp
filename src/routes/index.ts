@@ -9,6 +9,8 @@ import { planningEntriesRouter, videoPlanningRouter } from "./videoPlanning.rout
 import clientMeetingRouter from "./clientMeeting.router";
 import notificationRouter from "./notification.router";
 import billingRouter from "./billing.router";
+import teamKpiRouter from "./teamKpi.router";
+import visitLogRouter from "./visitLog.router";
 
 function routerApi(app: Application) {
   const router = express.Router();
@@ -25,6 +27,8 @@ function routerApi(app: Application) {
   router.use("/meetings", clientMeetingRouter);
   router.use("/notifications", notificationRouter);
   router.use("/billing", billingRouter);
+  router.use("/team-kpis", teamKpiRouter);
+  router.use("/visit-logs", visitLogRouter);
 }
 
 export default routerApi;
