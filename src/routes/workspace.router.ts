@@ -1,8 +1,10 @@
 import { Router } from "express";
 import { authMiddleware } from "../middlewares/auth.middleware";
 import { superadminMiddleware } from "../middlewares/superadmin.middleware";
+import { internalOrSuperadminMiddleware } from "../middlewares/internalOrSuperadmin.middleware";
 import { workspaceAccessMiddleware } from "../middlewares/workspaceAccess.middleware";
 import { workspaceAdminMiddleware } from "../middlewares/workspaceAdmin.middleware";
+import { uploadDocument } from "../middlewares/upload.middleware";
 import {
   createWorkspace,
   listWorkspaces,
@@ -17,6 +19,12 @@ import {
   updateGlobalUser,
   resendInvite,
 } from "../controllers/workspace.controller";
+import {
+  getBrandProfile,
+  upsertBrandProfile,
+  uploadBrandProfileFile,
+  deleteBrandProfileFile,
+} from "../controllers/brandProfile.controller";
 
 const workspaceRouter = Router();
 
@@ -30,6 +38,21 @@ workspaceRouter.post("/global-users", superadminMiddleware, createGlobalUser);
 workspaceRouter.put("/global-users/:userId", superadminMiddleware, updateGlobalUser);
 workspaceRouter.post("/global-users/:userId/resend-invite", superadminMiddleware, resendInvite);
 workspaceRouter.post("/", superadminMiddleware, createWorkspace);
+
+// ── Brand Profile ──────────────────────────────────────────────
+workspaceRouter.get("/:id/brand-profile", internalOrSuperadminMiddleware, getBrandProfile);
+workspaceRouter.patch("/:id/brand-profile", internalOrSuperadminMiddleware, upsertBrandProfile);
+workspaceRouter.post(
+  "/:id/brand-profile/files",
+  internalOrSuperadminMiddleware,
+  uploadDocument.single("file"),
+  uploadBrandProfileFile
+);
+workspaceRouter.delete(
+  "/:id/brand-profile/files/:publicId",
+  internalOrSuperadminMiddleware,
+  deleteBrandProfileFile
+);
 
 // ── SPECIFIC Workspace Actions (Superadmin, Admin or Collaborator) ─────────
 // Collaborators have read-only access (GET)

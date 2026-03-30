@@ -3,7 +3,8 @@ import { Schema, model, Document, Types } from "mongoose";
 export type NotificationType =
   | "new_client_assigned"
   | "video_status_changed"
-  | "video_planning_resent";
+  | "video_planning_resent"
+  | "brand_profile_missing";
 
 export interface INotification extends Document {
   userId: Types.ObjectId;
@@ -26,7 +27,12 @@ const NotificationSchema = new Schema<INotification>(
     },
     type: {
       type: String,
-      enum: ["new_client_assigned", "video_status_changed", "video_planning_resent"],
+      enum: [
+        "new_client_assigned",
+        "video_status_changed",
+        "video_planning_resent",
+        "brand_profile_missing",
+      ],
       required: true,
     },
     title: {

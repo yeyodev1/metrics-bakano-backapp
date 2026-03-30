@@ -10,6 +10,7 @@ import {
   reopenPlanning,
   getCalendarItems,
 } from "../controllers/videoPlanning.controller";
+import { generateScript, generateScriptQuick, getLLMStatus } from "../controllers/scriptGeneration.controller";
 
 // ── Router A: mounted at /api/planning-entries ────────────────────────────
 // GET  /api/planning-entries/:entryId/video-planning
@@ -36,8 +37,11 @@ planningEntriesRouter.put(
 );
 
 // ── Router B: mounted at /api/video-planning ──────────────────────────────
-// PATCH /api/video-planning/:planningId/items/:itemId
-// POST  /api/video-planning/:planningId/client-approval
+// PATCH  /api/video-planning/:planningId/items/:itemId
+// POST   /api/video-planning/:planningId/client-approval
+// POST   /api/video-planning/:planningId/reopen
+// GET    /api/video-planning/calendar
+// POST   /api/video-planning/:videoItemId/generate-script
 const videoPlanningRouter = Router();
 
 videoPlanningRouter.patch(
@@ -61,6 +65,25 @@ videoPlanningRouter.get(
   "/calendar",
   authMiddleware,
   getCalendarItems
+);
+// LLM health check — registered first to avoid param route collision
+videoPlanningRouter.get(
+  "/llm-status",
+  authMiddleware,
+  getLLMStatus
+);
+// Must be registered before /:videoItemId/generate-script to avoid route collision
+videoPlanningRouter.post(
+  "/generate-script-quick",
+  authMiddleware,
+  internalOrSuperadminMiddleware,
+  generateScriptQuick
+);
+videoPlanningRouter.post(
+  "/:videoItemId/generate-script",
+  authMiddleware,
+  internalOrSuperadminMiddleware,
+  generateScript
 );
 
 export { planningEntriesRouter, videoPlanningRouter };

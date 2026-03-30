@@ -6,6 +6,23 @@ export type EstadoProduccion = "GRABADO" | "POR_GRABAR" | "RECHAZADO";
 export type EstadoEdicion = "EDITADO" | "POR_EDITAR" | "RECHAZADO";
 export type EstadoPublicacion = "PROGRAMADO" | "PUBLICADO" | "POR_PUBLICAR" | "-";
 export type ClienteAprobacion = "PENDIENTE" | "APROBADO" | "RECHAZADO";
+export type TipoGuion = "TOFU" | "MOFU" | "BOFU";
+
+// ── GuionIA subdocument ────────────────────────────────────────────────────
+export interface IGuionIA {
+  conceptoVisual: string;
+  gancho: string;
+  textoPantalla: string;
+  cuerpo: string;
+  cta: string;
+  broll: string;
+  generadoEn?: Date;
+  contextoMes?: {
+    productoMes?: string;
+    ofertaEspecial?: string;
+    referenciasAdicionales?: string;
+  };
+}
 
 // ── VideoItem subdocument ──────────────────────────────────────────────────
 export interface IVideoItem {
@@ -18,6 +35,8 @@ export interface IVideoItem {
   recursos?: string;
   lugarGrabacion?: string;
   guion?: string;
+  tipoGuion?: TipoGuion;
+  guionIA?: IGuionIA;
   estadoIdea: EstadoIdea;
   estadoProduccion: EstadoProduccion;
   edicion: EstadoEdicion;
@@ -31,6 +50,24 @@ export interface IVideoItem {
   order: number;
 }
 
+const GuionIASchema = new Schema(
+  {
+    conceptoVisual: { type: String, trim: true, default: "" },
+    gancho: { type: String, trim: true, default: "" },
+    textoPantalla: { type: String, trim: true, default: "" },
+    cuerpo: { type: String, trim: true, default: "" },
+    cta: { type: String, trim: true, default: "" },
+    broll: { type: String, trim: true, default: "" },
+    generadoEn: { type: Date },
+    contextoMes: {
+      productoMes: { type: String, trim: true },
+      ofertaEspecial: { type: String, trim: true },
+      referenciasAdicionales: { type: String, trim: true },
+    },
+  },
+  { _id: false }
+);
+
 const VideoItemSchema = new Schema<IVideoItem>(
   {
     numero: { type: Number, required: true },
@@ -41,6 +78,11 @@ const VideoItemSchema = new Schema<IVideoItem>(
     recursos: { type: String, trim: true },
     lugarGrabacion: { type: String, trim: true },
     guion: { type: String },
+    tipoGuion: {
+      type: String,
+      enum: ["TOFU", "MOFU", "BOFU"],
+    },
+    guionIA: { type: GuionIASchema },
     estadoIdea: {
       type: String,
       enum: ["APROBADO", "POR_REVISAR", "RECHAZADO"],

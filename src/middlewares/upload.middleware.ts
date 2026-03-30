@@ -13,3 +13,21 @@ export const upload = multer({
     }
   },
 });
+
+export const uploadDocument = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB max
+  fileFilter: (_req, file, cb) => {
+    const allowed = [
+      "application/pdf",
+      "image/jpeg",
+      "image/png",
+      "image/webp",
+    ];
+    if (allowed.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error("Solo se permiten PDF e imágenes"));
+    }
+  },
+});
