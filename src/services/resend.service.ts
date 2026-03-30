@@ -259,8 +259,11 @@ export class ResendService {
     const { to, contactName, pmName, workspaceName, meetingDate, agenda, meetingLink } = params;
     const firstName = contactName.split(' ')[0];
 
-    const dateLabel = meetingDate.toLocaleDateString('es-EC', {
+    const mStr = meetingDate.toISOString().split('T')[0];
+    const forceDate = new Date(`${mStr}T12:00:00Z`);
+    const dateLabel = forceDate.toLocaleDateString('es-EC', {
       weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
+      timeZone: 'UTC',
     });
 
     const html = `

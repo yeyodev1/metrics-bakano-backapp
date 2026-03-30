@@ -186,29 +186,32 @@ export class SurveyService {
         continue;
       }
 
-      // Skip only if there's a pending assignment (not yet answered)
+      // Instead of skipping, we reuse the pending assignment to resend the mail
       const existing = await models.surveyAssignments.findOne({
         surveyId: new mongoose.Types.ObjectId(surveyId),
         recipientId: new mongoose.Types.ObjectId(userId),
         status: "pending",
       });
 
+      let token: string;
+
       if (existing) {
-        skipped++;
-        continue;
+        token = existing.token;
+        existing.sentAt = new Date();
+        await existing.save();
+      } else {
+        token = crypto.randomBytes(32).toString("hex");
+
+        await models.surveyAssignments.create({
+          surveyId: new mongoose.Types.ObjectId(surveyId),
+          workspaceId: new mongoose.Types.ObjectId(workspaceId),
+          recipientId: new mongoose.Types.ObjectId(userId),
+          sentBy: new mongoose.Types.ObjectId(sentBy),
+          token,
+          status: "pending",
+          sentAt: new Date(),
+        });
       }
-
-      const token = crypto.randomBytes(32).toString("hex");
-
-      await models.surveyAssignments.create({
-        surveyId: new mongoose.Types.ObjectId(surveyId),
-        workspaceId: new mongoose.Types.ObjectId(workspaceId),
-        recipientId: new mongoose.Types.ObjectId(userId),
-        sentBy: new mongoose.Types.ObjectId(sentBy),
-        token,
-        status: "pending",
-        sentAt: new Date(),
-      });
 
       const surveyLink = `https://metrics.bakano.ec/app/survey/${token}`;
 
@@ -276,18 +279,24 @@ export class SurveyService {
         recipientId: new mongoose.Types.ObjectId(uid),
         status: "pending",
       });
-      if (existing) { skipped++; continue; }
 
-      const token = crypto.randomBytes(32).toString("hex");
+      let token: string;
+      if (existing) {
+        token = existing.token;
+        existing.sentAt = new Date();
+        await existing.save();
+      } else {
+        token = crypto.randomBytes(32).toString("hex");
 
-      await models.surveyAssignments.create({
-        surveyId: new mongoose.Types.ObjectId(surveyId),
-        recipientId: new mongoose.Types.ObjectId(uid),
-        sentBy: new mongoose.Types.ObjectId(sentBy),
-        token,
-        status: "pending",
-        sentAt: new Date(),
-      });
+        await models.surveyAssignments.create({
+          surveyId: new mongoose.Types.ObjectId(surveyId),
+          recipientId: new mongoose.Types.ObjectId(uid),
+          sentBy: new mongoose.Types.ObjectId(sentBy),
+          token,
+          status: "pending",
+          sentAt: new Date(),
+        });
+      }
 
       const surveyLink = `https://metrics.bakano.ec/app/survey/${token}`;
 

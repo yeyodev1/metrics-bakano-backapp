@@ -104,11 +104,14 @@ export class ClientMeetingService {
 
     if (!meeting) throw new Error("NOT_FOUND");
 
-    const now = new Date();
-    const nextDate = new Date(now);
-    nextDate.setDate(nextDate.getDate() + meeting.intervalDays);
+    const formatter = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Guayaquil' });
+    const ecTodayStr = formatter.format(new Date()); 
+    const ecDate = new Date(`${ecTodayStr}T00:00:00.000Z`);
 
-    meeting.lastMeetingDate = now;
+    const nextDate = new Date(ecDate);
+    nextDate.setUTCDate(nextDate.getUTCDate() + meeting.intervalDays);
+
+    meeting.lastMeetingDate = ecDate;
     meeting.nextMeetingDate = nextDate;
     if (opts.notes !== undefined) meeting.notes = opts.notes;
     if (opts.recordingLink !== undefined) meeting.recordingLink = opts.recordingLink;
