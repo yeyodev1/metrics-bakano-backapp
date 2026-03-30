@@ -347,6 +347,128 @@ export class MetaService {
       throw new Error(`Failed to fetch Organic Insights. Meta Error: ${JSON.stringify(metaError)}`);
     }
   }
+
+  /**
+   * Schedules an Instagram post (image or Reel) via Content Publishing API.
+   * scheduledAt must be >= 10 min and <= 75 days from now.
+   * Returns the IG media container ID.
+   */
+  async scheduleInstagramPost(params: {
+    pageId: string;
+    userAccessToken: string;
+    pageAccessToken?: string;
+    mediaUrl: string;
+    caption: string;
+    scheduledAt: Date;
+  }): Promise<{ containerId: string; igUserId: string }> {
+    // 1. Resolve IG Business Account ID from the linked page
+    const token = params.pageAccessToken || params.userAccessToken;
+    const pageRes = await axios.get(`${this.graphUrl}/${params.pageId}`, {
+      params: { fields: "instagram_business_account", access_token: token },
+    });
+    const igUserId: string | undefined = pageRes.data.instagram_business_account?.id;
+    if (!igUserId) throw new Error("NO_IG_ACCOUNT");
+
+    // 2. Validate scheduled time window
+    const nowMs = Date.now();
+    const scheduledMs = params.scheduledAt.getTime();
+    if (scheduledMs < nowMs + 10 * 60 * 1000) throw new Error("SCHEDULE_TOO_SOON");
+    if (scheduledMs > nowMs + 75 * 24 * 60 * 60 * 1000) throw new Error("SCHEDULE_TOO_FAR");
+    const scheduledUnix = Math.floor(scheduledMs / 1000);
+
+    // 3. Detect media type from URL
+    const isVideo =
+      /\/video\/upload\//i.test(params.mediaUrl) ||
+      /\.(mp4|mov|avi|mkv|webm)(\?|$)/i.test(params.mediaUrl);
+
+    // 4. Build container params
+    const containerParams: Record<string, any> = {
+      caption: params.caption || "",
+      published: false,
+      scheduled_publish_time: scheduledUnix,
+      access_token: params.userAccessToken,
+    };
+
+    if (isVideo) {
+      containerParams.media_type = "REELS";
+      containerParams.video_url = params.mediaUrl;
+    } else {
+      containerParams.image_url = params.mediaUrl;
+    }
+
+    // 5. Create media container
+    try {
+      const containerRes = await axios.post(
+        `${this.graphUrl}/${igUserId}/media`,
+        null,
+        { params: containerParams }
+      );
+      return { containerId: containerRes.data.id, igUserId };
+    } catch (err: any) {
+      const metaErr = err.response?.data?.error;
+      const msg = metaErr
+        ? `Meta ${metaErr.code}: ${metaErr.message}`
+        : err.message;
+      console.error("[MetaService] scheduleInstagramPost error:", metaErr || err.message);
+      throw new Error(msg);
+    }
+  }
+
+  /**
+   * Schedules a Facebook Page post (video or photo) via Graph API.
+   * Uses POST /{page-id}/videos for video, /{page-id}/photos for images.
+   */
+  async scheduleFacebookPost(params: {
+    pageId: string;
+    pageAccessToken: string;
+    mediaUrl: string;
+    caption: string;
+    scheduledAt: Date;
+  }): Promise<{ postId: string }> {
+    const nowMs = Date.now();
+    const scheduledMs = params.scheduledAt.getTime();
+    if (scheduledMs < nowMs + 10 * 60 * 1000) throw new Error("SCHEDULE_TOO_SOON");
+    if (scheduledMs > nowMs + 75 * 24 * 60 * 60 * 1000) throw new Error("SCHEDULE_TOO_FAR");
+    const scheduledUnix = Math.floor(scheduledMs / 1000);
+
+    const isVideo =
+      /\/video\/upload\//i.test(params.mediaUrl) ||
+      /\.(mp4|mov|avi|mkv|webm)(\?|$)/i.test(params.mediaUrl);
+
+    try {
+      if (isVideo) {
+        const res = await axios.post(`${this.graphUrl}/${params.pageId}/videos`, null, {
+          params: {
+            file_url: params.mediaUrl,
+            description: params.caption || "",
+            published: false,
+            scheduled_publish_time: scheduledUnix,
+            access_token: params.pageAccessToken,
+          },
+        });
+        return { postId: res.data.id };
+      } else {
+        const res = await axios.post(`${this.graphUrl}/${params.pageId}/photos`, null, {
+          params: {
+            url: params.mediaUrl,
+            caption: params.caption || "",
+            published: false,
+            scheduled_publish_time: scheduledUnix,
+            access_token: params.pageAccessToken,
+          },
+        });
+        return { postId: res.data.id };
+      }
+    } catch (err: any) {
+      const metaErr = err.response?.data?.error;
+      const msg = metaErr
+        ? `Meta ${metaErr.code}: ${metaErr.message}`
+        : err.message;
+      console.error("[MetaService] scheduleFacebookPost error:", metaErr || err.message);
+      throw new Error(msg);
+    }
+  }
 }
+
 
 export const metaService = new MetaService();

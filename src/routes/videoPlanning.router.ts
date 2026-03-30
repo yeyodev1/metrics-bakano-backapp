@@ -6,11 +6,13 @@ import {
   createPlanning,
   updatePlanning,
   updateItem,
+  uploadItemMedia,
   submitClientApproval,
   reopenPlanning,
   getCalendarItems,
 } from "../controllers/videoPlanning.controller";
 import { generateScript, generateScriptQuick, getLLMStatus } from "../controllers/scriptGeneration.controller";
+import { uploadMedia } from "../middlewares/upload.middleware";
 
 // ── Router A: mounted at /api/planning-entries ────────────────────────────
 // GET  /api/planning-entries/:entryId/video-planning
@@ -71,6 +73,14 @@ videoPlanningRouter.get(
   "/llm-status",
   authMiddleware,
   getLLMStatus
+);
+// Media upload — registered before param routes to avoid collision
+videoPlanningRouter.post(
+  "/items/:itemId/upload-media",
+  authMiddleware,
+  internalOrSuperadminMiddleware,
+  uploadMedia.single("file"),
+  uploadItemMedia
 );
 // Must be registered before /:videoItemId/generate-script to avoid route collision
 videoPlanningRouter.post(

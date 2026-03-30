@@ -1,7 +1,10 @@
 import type { Response, NextFunction } from "express";
 import { HttpStatusCode } from "axios";
+import { Types } from "mongoose";
 import { AuthRequest } from "../types/AuthRequest";
 import { VideoPlanningService } from "../services/videoPlanning.service";
+import models from "../models";
+import cloudinary from "../config/cloudinary";
 
 const service = new VideoPlanningService();
 
@@ -104,11 +107,14 @@ export async function updateItem(
       planningId: string;
       itemId: string;
     };
-    const fields = req.body;
+    const { publishToInstagram, publishToFacebook, ...fields } = req.body;
     // internalRole may be in the JWT payload (optional)
     const internalRole = (req.user as any)?.internalRole as string | undefined;
 
-    const planning = await service.updateItem(planningId, itemId, fields, internalRole);
+    const planning = await service.updateItem(planningId, itemId, fields, internalRole, {
+      publishToInstagram: !!publishToInstagram,
+      publishToFacebook: !!publishToFacebook,
+    });
     res.status(HttpStatusCode.Ok).json({ message: "Item updated.", planning });
   } catch (error: any) {
     if (error.message === "INVALID_ID") {
@@ -232,6 +238,91 @@ export async function getCalendarItems(
       return;
     }
     console.error("getCalendarItems error:", error);
+    next(error);
+  }
+}
+
+// ── POST /video-planning/items/:itemId/upload-media ────────────────────────
+export async function uploadItemMedia(
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+) {
+  try {
+    const { itemId } = req.params as { itemId: string };
+
+    if (!Types.ObjectId.isValid(itemId)) {
+      res.status(HttpStatusCode.BadRequest).json({ message: "Invalid item ID." });
+      return;
+    }
+
+    if (!req.file) {
+      res.status(HttpStatusCode.BadRequest).json({ message: "No file uploaded." });
+      return;
+    }
+
+    const { buffer, mimetype, originalname } = req.file;
+    const isVideo = mimetype.startsWith("video/");
+
+    // Upload to Cloudinary
+    const folder = `video-planning/items/${itemId}`;
+    const cloudinaryResult = await new Promise<{ url: string; public_id: string; duration?: number }>(
+      (resolve, reject) => {
+        const stream = cloudinary.uploader.upload_stream(
+          {
+            folder,
+            resource_type: isVideo ? "video" : "image",
+            use_filename: true,
+            unique_filename: true,
+          },
+          (error, result) => {
+            if (error || !result) return reject(error || new Error("Cloudinary upload failed"));
+            resolve({
+              url: result.secure_url,
+              public_id: result.public_id,
+              duration: (result as any).duration,
+            });
+          }
+        );
+        stream.end(buffer);
+      }
+    );
+
+    // Find the planning document that contains this item
+    const planning = await models.videoPlanning.findOne({ "items._id": new Types.ObjectId(itemId) });
+    if (!planning) {
+      res.status(HttpStatusCode.NotFound).json({ message: "Planning item not found." });
+      return;
+    }
+
+    const item = planning.items.find((i) => i._id.toString() === itemId);
+    if (!item) {
+      res.status(HttpStatusCode.NotFound).json({ message: "Item not found." });
+      return;
+    }
+
+    // Delete previous Cloudinary asset if it exists (fire & forget)
+    const prevLink = (item as any).linkVideo as string | undefined;
+    if (prevLink && /res\.cloudinary\.com/i.test(prevLink)) {
+      const prevPublicId = prevLink.match(/\/upload\/(?:v\d+\/)?(.+)\.[^.]+$/)?.[1];
+      if (prevPublicId) {
+        const prevResourceType = /\/video\/upload\//i.test(prevLink) ? "video" : "image";
+        cloudinary.uploader.destroy(prevPublicId, { resource_type: prevResourceType }).catch(() => {});
+      }
+    }
+
+    (item as any).linkVideo = cloudinaryResult.url;
+    await planning.save();
+
+    res.status(HttpStatusCode.Ok).json({
+      message: "Media uploaded successfully.",
+      url: cloudinaryResult.url,
+      publicId: cloudinaryResult.public_id,
+      mediaType: isVideo ? "video" : "image",
+      item,
+    });
+  } catch (error) {
+    console.error("uploadItemMedia error:", error);
     next(error);
   }
 }

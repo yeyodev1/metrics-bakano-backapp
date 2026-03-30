@@ -2,6 +2,27 @@ import { Types } from "mongoose";
 import models from "../models";
 import type { IVideoPlanning, IVideoItem, ClienteAprobacion } from "../models/videoPlanning.model";
 import { notificationService } from "./notification.service";
+import { metaService } from "./meta.service";
+import cloudinary from "../config/cloudinary";
+
+/** Extract Cloudinary public_id from a secure_url */
+function extractCloudinaryPublicId(url: string): string | null {
+  // e.g. https://res.cloudinary.com/cloud/video/upload/v123/folder/file.mp4
+  const match = url.match(/\/upload\/(?:v\d+\/)?(.+)\.[^.]+$/);
+  return match ? match[1] : null;
+}
+
+/** Delete a Cloudinary asset by URL (best-effort, never throws) */
+async function deleteCloudinaryAsset(url: string): Promise<void> {
+  try {
+    const publicId = extractCloudinaryPublicId(url);
+    if (!publicId) return;
+    const resourceType = /\/video\/upload\//i.test(url) ? "video" : "image";
+    await cloudinary.uploader.destroy(publicId, { resource_type: resourceType });
+  } catch (err: any) {
+    console.warn("[VideoPlanningService] Cloudinary delete failed:", err.message);
+  }
+}
 
 // Fields an editor (internalRole=editor) is allowed to modify
 const EDITOR_ALLOWED_FIELDS = new Set(["estadoProduccion", "edicion"]);
@@ -43,6 +64,18 @@ export class VideoPlanningService {
       // Blocked once client approved
       if (existing.clienteAprobado) throw new Error("LOCKED");
 
+      // Detect items removed that had Cloudinary assets → delete them (fire & forget)
+      const newIds = new Set(normalised.map((i) => i._id?.toString()).filter(Boolean));
+      const removedWithAssets = existing.items.filter(
+        (i) =>
+          !newIds.has(i._id.toString()) &&
+          i.linkVideo &&
+          /res\.cloudinary\.com/i.test(i.linkVideo)
+      );
+      if (removedWithAssets.length) {
+        Promise.all(removedWithAssets.map((i) => deleteCloudinaryAsset(i.linkVideo!))).catch(() => {});
+      }
+
       existing.items = normalised as IVideoItem[];
       await existing.save();
 
@@ -74,7 +107,8 @@ export class VideoPlanningService {
     planningId: string,
     itemId: string,
     fields: Record<string, unknown>,
-    internalRole?: string
+    internalRole?: string,
+    platformFlags?: { publishToInstagram?: boolean; publishToFacebook?: boolean }
   ): Promise<IVideoPlanning> {
     if (!Types.ObjectId.isValid(planningId) || !Types.ObjectId.isValid(itemId)) {
       throw new Error("INVALID_ID");
@@ -121,6 +155,67 @@ export class VideoPlanningService {
           `Un video de tu planificación ha sido publicado: "${(item as any).tema || "sin título"}".`
         )
         .catch(() => {});
+    }
+
+    // ── Social media scheduling (opt-in via platformFlags) ────────────────
+    // NOTE: Instagram scheduling is temporarily disabled.
+    // The Meta Content Publishing API requires the app to be approved (out of Development Mode)
+    // so that any Instagram Business account can use it without being manually added as a tester.
+    // Re-enable the Instagram block below once the Meta App Review is approved.
+    const canSchedule =
+      (item as any).fechaPublicacion &&
+      (item as any).linkVideo &&
+      platformFlags?.publishToFacebook; // publishToInstagram intentionally excluded for now
+
+    if (canSchedule) {
+      const workspace = await models.workspaces.findById(planning.workspaceId).lean();
+      const meta = workspace?.metaAds;
+      const scheduledAt = new Date((item as any).fechaPublicacion);
+
+      if (meta?.pageId && meta?.accessToken) {
+        // ── Instagram (DISABLED — pending Meta App Review approval) ───────
+        // if (platformFlags?.publishToInstagram) {
+        //   try {
+        //     const result = await metaService.scheduleInstagramPost({
+        //       pageId: meta.pageId,
+        //       userAccessToken: meta.accessToken,
+        //       pageAccessToken: meta.pageAccessToken,
+        //       mediaUrl: (item as any).linkVideo,
+        //       caption: (item as any).copyPublicacion || "",
+        //       scheduledAt,
+        //     });
+        //     (item as any).igContainerId = result.containerId;
+        //     (item as any).igScheduleStatus = "SCHEDULED";
+        //     (item as any).igScheduleError = undefined;
+        //   } catch (igErr: any) {
+        //     console.warn("[VideoPlanningService] Instagram scheduling failed:", igErr.message);
+        //     (item as any).igScheduleStatus = "FAILED";
+        //     (item as any).igScheduleError = igErr.message;
+        //   }
+        // }
+
+        // ── Facebook ───────────────────────────────────────────────────────
+        if (platformFlags?.publishToFacebook && meta.pageAccessToken) {
+          try {
+            const result = await metaService.scheduleFacebookPost({
+              pageId: meta.pageId,
+              pageAccessToken: meta.pageAccessToken,
+              mediaUrl: (item as any).linkVideo,
+              caption: (item as any).copyPublicacion || "",
+              scheduledAt,
+            });
+            (item as any).fbPostId = result.postId;
+            (item as any).fbScheduleStatus = "SCHEDULED";
+            (item as any).fbScheduleError = undefined;
+          } catch (fbErr: any) {
+            console.warn("[VideoPlanningService] Facebook scheduling failed:", fbErr.message);
+            (item as any).fbScheduleStatus = "FAILED";
+            (item as any).fbScheduleError = fbErr.message;
+          }
+        }
+
+        await planning.save();
+      }
     }
 
     return planning.toObject() as IVideoPlanning;

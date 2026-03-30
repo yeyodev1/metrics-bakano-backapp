@@ -48,6 +48,14 @@ export interface IVideoItem {
   fechaPublicacion?: Date;
   copyPublicacion?: string;
   order: number;
+  // Instagram scheduling
+  igContainerId?: string;
+  igScheduleStatus?: 'SCHEDULED' | 'FAILED';
+  igScheduleError?: string;
+  // Facebook scheduling
+  fbPostId?: string;
+  fbScheduleStatus?: 'SCHEDULED' | 'FAILED';
+  fbScheduleError?: string;
 }
 
 const GuionIASchema = new Schema(
@@ -114,6 +122,12 @@ const VideoItemSchema = new Schema<IVideoItem>(
     fechaPublicacion: { type: Date },
     copyPublicacion: { type: String, trim: true },
     order: { type: Number, default: 0 },
+    igContainerId: { type: String, trim: true },
+    igScheduleStatus: { type: String, enum: ['SCHEDULED', 'FAILED'] },
+    igScheduleError: { type: String, trim: true },
+    fbPostId: { type: String, trim: true },
+    fbScheduleStatus: { type: String, enum: ['SCHEDULED', 'FAILED'] },
+    fbScheduleError: { type: String, trim: true },
   },
   { _id: true }
 );

@@ -14,6 +14,18 @@ export const upload = multer({
   },
 });
 
+export const uploadMedia = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 200 * 1024 * 1024 }, // 200MB for videos
+  fileFilter: (_req, file, cb) => {
+    if (file.mimetype.startsWith("video/") || file.mimetype.startsWith("image/")) {
+      cb(null, true);
+    } else {
+      cb(new Error("Solo se permiten videos e imágenes"));
+    }
+  },
+});
+
 export const uploadDocument = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024 }, // 10MB max
