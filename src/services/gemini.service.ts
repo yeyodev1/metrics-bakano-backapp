@@ -110,6 +110,155 @@ CTA: "No olvides escribirnos al WhatsApp para hacer tu pedido o solo déjanos un
 
 --- FIN DE EJEMPLOS ---
 
+--- BANCO DE ESTRUCTURAS DE GANCHOS VIRALES ---
+Usa estas estructuras como plantillas para construir el gancho de cada video. Adapta el nicho, el dolor y el resultado al perfil de marca del cliente. NO copies los ejemplos literalmente — úsalos como molde.
+
+CATEGORÍA 1: "CÓMO" (Consejos y Trucos)
+- Cómo [Lograr el resultado] de una forma que nadie te ha contado.
+- Cómo [Lograr el objetivo] en [Plazo corto].
+- Cómo [Acción] incluso cuando no tienes ganas.
+- Cómo [Dominar una habilidad] sin [Problema común].
+- Cómo entrenar tu [cerebro/cuerpo/negocio] para [Tarea difícil].
+- Cómo transformar tu [Aspecto de la Vida] en tan solo [Plazo].
+- Cómo planificar [Tarea Grande] en [Poco Tiempo].
+- Cómo conseguir [El Resultado Deseado] sin [Problema Común].
+- Cómo [Dominar una Habilidad] usando [Método No Convencional].
+- Cómo completé [Tarea] en [Tiempo récord].
+- Cómo me entrené para [Superar un Problema Común].
+- Cómo logré [Objetivo] sin [Problema Común].
+- Cómo planifico [Plazo] de [Actividad] en [Menos Tiempo].
+- Cómo [Transformé algo] y tú también puedes.
+- Cómo obtuve [Resultados] sin [Error Común].
+- Cómo logré mi objetivo haciendo lo contrario de lo esperado.
+- Cómo evité [Problema Común] como [Experto/Profesional].
+- Cómo convertí [dificultad] en [fortaleza/éxito].
+
+CATEGORÍA 2: DESAFÍOS Y MOTIVACIÓN
+- Desafío de [X] días para [Lograr el objetivo].
+- [Tema] motivación para cuando te sientes [emoción negativa].
+- El Desafío de Reinicio de [Mes]: Hagámoslo juntos.
+- Roba mi reinicio mensual de [Mes] (esa rutina [estética]).
+- Una rutina [temporal] que cambió mi [vida/negocio/salud].
+- Reinicio de [X] días para [Transformar aspecto de la vida].
+- Desafíate a ti mismo con [hábito diario] durante [período].
+- Cómo mantener [nuevo hábito] durante un mes sin dificultades.
+- Desafío de [X] días para acumular hábitos: pequeños cambios, grandes resultados.
+
+CATEGORÍA 3: MODERNOS / ESTÉTICOS
+- Esta [marca/producto] se siente como [producto de lujo] pero cuesta [precio accesible].
+- POV: Te estás convirtiendo en [Tu mejor versión].
+- La tendencia [de temporada] que no esperaba amar.
+- [Marca] vs [Marca] — ¿Cuál gana para tu [objetivo]?
+- Probé [Producto/Desafío en Tendencia] para que tú no tengas que hacerlo.
+- Lo que me pondría/haría si fuera [Escenario/Personaje].
+- La estética [de temporada] que debes probar.
+
+CATEGORÍA 4: EXPERTO / AUTORIDAD
+- Lo que nadie te cuenta sobre [Nicho/Industria].
+- Lo que me gustaría que más gente supiera sobre [Lucha común].
+- La estrategia más ignorada para [Lograr el Objetivo].
+- Lo que hago diferente como [profesión] para [resolver el problema].
+- [Número] mitos sobre [Nicho] que debes dejar de creer.
+- He trabajado con [Número] clientes: esto es lo que todos tenían en común.
+- Lo que todo [público objetivo] necesita saber sobre [tema].
+- Yo [Profesión] — así es como manejo [Problema común].
+- El método con respaldo [científico/real] para [Lograr el objetivo].
+- He probado [varias estrategias]: esto es lo que realmente funciona.
+
+CATEGORÍA 5: GUÍAS Y TRUCOS
+- La guía definitiva de [nicho] para [año/temporada].
+- La única guía que necesitas para [tema de nicho].
+- Guía paso a paso para [Transformación].
+- La guía sin tonterías para [tema de nicho].
+- La guía [de nicho] para obtener resultados sin [esfuerzo/drama].
+- La guía infalible para [Lograr la meta].
+- Tu hoja de ruta [Año] hacia [Objetivo].
+- La hoja de trucos secreta para [Avanzar más rápido].
+- Tu guía de [Temporada] para [Tema de tendencia].
+- La fórmula [Nicho]: una guía práctica para obtener resultados rápidos.
+
+CATEGORÍA 6: NARRACIÓN DE HISTORIAS
+- Nunca le he dicho esto a nadie antes, pero [Revelación personal].
+- Hice algo polémico y luego pasó esto...
+- Tenía muchas ganas de mantener esto en secreto, pero tengo que compartirlo.
+- Solía creer en [Creencia común] hasta que probé [Nuevo método].
+- Ojalá hubiera sabido esto antes: [Lección que lo cambió todo].
+- Pasé [X tiempo] cometiendo [error]. Esto es lo que debería haber hecho.
+- Nadie me dijo [La verdad sobre el nicho], así que aprendí a las malas.
+- Probé [Tendencia popular] durante [Tiempo] y esto es lo que realmente sucedió.
+- El error que me costó [Resultado Negativo] y cómo lo solucioné.
+- Estaba tan equivocado sobre [concepto]: esto es lo que aprendí.
+- Pensé que [Creencia] era verdadera hasta que [Experiencia] me demostró lo contrario.
+- Si pudiera volver atrás en el tiempo, me diría esto sobre [Tema].
+- Nunca pensé que sería la persona que [Objetivo logrado] — esto es lo que cambió.
+- Me dijeron que [Mito] era la única manera, pero se equivocaron.
+- Fracasé en [Actividad] durante [Tiempo] hasta que aprendí esto.
+- Lo único que hice y que cambió todo para mi [Objetivo].
+- Este pequeño cambio transformó por completo mi [Resultado].
+- La mentira más grande que creí sobre [Tema] y cómo me frenó.
+- Casi me doy por vencido con [Objetivo] hasta que probé esto.
+- Todos me dijeron que [Consejo común]... pero aquí está el porqué hice lo contrario.
+
+CATEGORÍA 7: LISTAS
+- [Número] [Elementos] que me hicieron [Reacción/Experiencia emocional].
+- [Número] cosas que hacer en lugar de [mal hábito].
+- [Número] cosas que hago cada [período] para [resultado deseado].
+- [Número] reglas que sigo para [Resultado deseado].
+- [Número] cosas que nadie te cuenta sobre [Tema].
+- [Número] pasos para [Lograr la Meta] sin [Lucha Común].
+- [Número] cambios simples que conducen a [Resultado deseado].
+- [Número] hábitos que me ayudaron a lograr [Resultado].
+- Los [Número] pasos exactos que tomé para [Lograr la Meta].
+- [Número] maneras de mejorar instantáneamente tu [Habilidad/Hábito].
+
+CATEGORÍA 8: DOCUMENTACIÓN / INVESTIGACIÓN
+- He estudiado más de [Número] [personas/casos]: los que [Rasgo Deseable] tienen estos [comportamientos] en común.
+- Pregunté a [Número] expertos sobre [Tema] y esto fue lo que dijeron.
+- Hice [Acción] durante [X días]: esto fue lo que pasó.
+- Si tuviera que empezar de nuevo hoy, esto es exactamente lo que haría diferente.
+- La lección más difícil que aprendí este año: cómo lo cambió todo.
+- Probé [Número] [productos/métodos] populares: aquí está el ganador.
+- Gasté [X] dólares en [producto/servicio]: ¿valió la pena?
+- Dejé [hábito] por [tiempo]: esto fue lo que pasó.
+- La mayoría de la gente hace [Acción] mal. Aquí te explicamos cómo hacerlo bien.
+- Seguí la forma "tradicional" de hacer [cosas]... y funcionó mejor de lo esperado.
+
+CATEGORÍA 9: CONTRASTE
+- Lo que ves vs. lo que realmente sucede [en el nicho].
+- La expectativa vs. la realidad de [actividad de nicho].
+- Antes vs. Después de [Transformación/Resultado].
+- El esfuerzo vs. el resultado real.
+- Lo que todos hacen vs. lo que DEBERÍAS hacer.
+- El consejo que funciona vs. el consejo que te hace perder el tiempo.
+- Lo que solía pensar sobre [nicho] vs. lo que sé ahora.
+- La opción de moda vs. el clásico que siempre funciona.
+
+CATEGORÍA 10: PREDICCIONES Y TENDENCIAS
+- [Número] tendencias en [industria] que definirán [año].
+- Los mayores cambios que se avecinan en [industria].
+- Lo que predigo que sucederá en [industria] este año.
+- Lo que nadie habla en [industria] para [año].
+- [La industria] nunca volverá a ser la misma. Aquí te explico por qué.
+- Por qué [Tendencia Popular] fracasará en [Año].
+- La única tendencia en [industria] que dominará [año].
+- Olvídate de todo lo que sabías sobre [industria]: [año] lo cambia todo.
+
+CATEGORÍA 11: TEMAS DE TENDENCIA Y AUTORIDAD DE NICHO
+- Lo que [X] años de [experiencia] me enseñaron sobre [tema].
+- Cosas que nunca volvería a hacer como [profesional/experto].
+- He ayudado a [X] personas con [problema]: esto es lo que siempre funciona.
+- La herramienta que lo cambió todo para mi [proceso/resultado].
+- Si quieres [Lograr tu meta], concéntrate en esta única cosa.
+- Probé [X estrategias]: solo una funcionó (aquí está cuál).
+- Cómo solucioné mi [problema] en [poco tiempo].
+- Mi método comprobado paso a paso para [lograr el objetivo].
+- Los [X] cambios que hice y que transformaron por completo mis [resultados].
+- Cómo obtuve [Resultado impresionante] sin [Lucha común].
+
+--- FIN DEL BANCO DE GANCHOS ---
+
+INSTRUCCIÓN DE USO DEL BANCO: Para cada guión, selecciona la estructura del banco que mejor se adapte al tipo de video (TOFU/MOFU/BOFU) y al nicho del cliente. Personaliza cada plantilla con datos reales del brand profile. NUNCA uses las plantillas con los ejemplos de nicho genéricos — siempre adapta al cliente.
+
 IMPORTANTE: Responde ÚNICAMENTE con un JSON válido, sin markdown, sin explicaciones extra.`;
 
 export interface GeminiFileResult {
