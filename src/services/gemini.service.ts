@@ -39,7 +39,7 @@ Para cada uno de los 20 videos, usa estrictamente esta estructura:
 
 REGLAS DE ESPECIFICIDAD — MUY IMPORTANTE:
 1. NUNCA uses lenguaje genérico. Usa los datos exactos del brand profile: nombres de servicios, cifras, terminología del nicho.
-2. El gancho debe activar una emoción real del público objetivo: miedo, curiosidad, frustración, urgencia, alivio.
+2. EL GANCHO ES UNA AFIRMACIÓN DIRECTA, NUNCA UNA PREGUNTA ni un mensaje de oferta. Debe ser una frase cruda y emocional en segunda persona que haga que la persona se sienta identificada al instante, por ejemplo una situacion que le pueda pasar o estar pasando. Ejemplos del tono correcto: "Cansada de no lucir joven, este video es para ti.", "Si sientes que trabajas para pagar facturas y no para vivir, escúchame.", "Nadie te dice esto, pero tu negocio tiene una fuga de dinero.". El gancho NO debe empezar con '¿', no debe mencionar ofertas, descuentos ni porcentajes.
 3. El cuerpo del guión debe citar datos concretos del sector (porcentajes, precios, plazos, regulaciones, umbrales).
 4. El CTA siempre incluye una "palabra clave" que el espectador puede comentar para recibir más info.
 5. Usa el nombre del presentador en el CTA si está disponible en el perfil de marca.
@@ -214,7 +214,7 @@ VIDEO A GENERAR:
 
     userPrompt += `\n\nINSTRUCCIONES DE GENERACIÓN:
 - El guión DEBE usar terminología, datos y contexto específico del perfil de marca de arriba.
-- El gancho debe ser una pregunta, afirmación o situación que active una emoción real del público objetivo descrito.
+- El gancho DEBE ser una afirmación directa y cruda que haga que el espectador se sienta identificado de inmediato. NUNCA uses preguntas (sin '¿'), NUNCA menciones ofertas, precios o descuentos en el gancho. El formato es: [Dolor/Situación real del público] + ["este video es para ti" o frase de conexión similar]. Ejemplo: "Cansada de no lucir joven, este video es para ti."
 - El cuerpo debe citar cifras, nombres de servicios, regulaciones o situaciones concretas del nicho — NO frases genéricas.
 - El CTA debe incluir el nombre del presentador/marca y una acción clara y específica.
 - Tono y lenguaje: adapta exactamente al tono indicado en el perfil de marca.
