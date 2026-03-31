@@ -34,7 +34,7 @@ export async function generateScript(
 ) {
   try {
     const videoItemId = req.params["videoItemId"] as string;
-    const { contextoMes }: { contextoMes?: ScriptContext } = req.body;
+    const { contextoMes, tipoGuion: tipoGuionOverride }: { contextoMes?: ScriptContext; tipoGuion?: "TOFU" | "MOFU" | "BOFU" } = req.body;
 
     if (!Types.ObjectId.isValid(videoItemId)) {
       res.status(HttpStatusCode.BadRequest).send({ message: "Invalid videoItemId." });
@@ -80,9 +80,9 @@ export async function generateScript(
 
     const brandProfile = workspace.brandProfile as any;
 
-    // Infer tipoGuion based on video number
+    // Use override from request, fallback to stored value, then infer from number
     const tipoGuion =
-      (videoItem as any).tipoGuion || geminiService.inferTipoGuion(videoItem.numero);
+      tipoGuionOverride || (videoItem as any).tipoGuion || geminiService.inferTipoGuion(videoItem.numero);
 
     // Prepare file parts from Gemini-cached files
     const fileUris: GeminiFileResult[] = [];
@@ -169,11 +169,13 @@ export async function generateScriptQuick(
       tema,
       tipo,
       contextoMes,
+      tipoGuion: tipoGuionOverride,
     }: {
       workspaceId: string;
       tema: string;
       tipo?: string;
       contextoMes?: ScriptContext;
+      tipoGuion?: "TOFU" | "MOFU" | "BOFU";
     } = req.body;
 
     if (!workspaceId || !tema) {
@@ -197,7 +199,7 @@ export async function generateScriptQuick(
 
     const brandProfile = workspace.brandProfile as any;
     const tipoGuion: "TOFU" | "MOFU" | "BOFU" =
-      (tipo && TIPO_REEL_TO_GUION[tipo]) || "TOFU";
+      tipoGuionOverride || (tipo && TIPO_REEL_TO_GUION[tipo]) || "TOFU";
 
     const fileUris: GeminiFileResult[] = [];
     if (brandProfile.archivos?.length > 0) {

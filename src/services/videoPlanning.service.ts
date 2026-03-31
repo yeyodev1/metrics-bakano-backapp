@@ -127,7 +127,7 @@ export class VideoPlanningService {
     // All content fields are mutable via PATCH — the lock (clienteAprobado) only prevents
     // replacing ALL items via PUT/POST. Individual item edits are always allowed for internal team.
     const MUTABLE_FIELDS = new Set([
-      "tema", "descripcion", "tipo", "linkEjemplo", "recursos",
+      "tema", "descripcion", "tipo", "tipoGuion", "linkEjemplo", "recursos",
       "lugarGrabacion", "guion", "estadoIdea", "estadoProduccion",
       "edicion", "estadoPublicacion", "comentario", "motivoRechazo",
       "linkVideo", "fechaPublicacion", "copyPublicacion",
