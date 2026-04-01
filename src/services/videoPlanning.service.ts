@@ -61,8 +61,23 @@ export class VideoPlanningService {
     });
 
     if (existing) {
-      // Blocked once client approved
-      if (existing.clienteAprobado) throw new Error("LOCKED");
+      if (existing.clienteAprobado) {
+        // Planning is locked: only allow appending brand-new items (no _id)
+        const newOnly = normalised.filter((i) => !i._id);
+        if (newOnly.length === 0) throw new Error("LOCKED");
+
+        // Re-number new items after the existing ones
+        const base = existing.items.length;
+        const toAppend = newOnly.map((item, i) => ({
+          ...item,
+          numero: base + i + 1,
+          order: base + i,
+          clienteAprobacion: "PENDIENTE" as ClienteAprobacion,
+        }));
+        existing.items.push(...(toAppend as IVideoItem[]));
+        await existing.save();
+        return existing.toObject() as IVideoPlanning;
+      }
 
       // Detect items removed that had Cloudinary assets → delete them (fire & forget)
       const newIds = new Set(normalised.map((i) => i._id?.toString()).filter(Boolean));
