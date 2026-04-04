@@ -30,7 +30,7 @@ export class ResendService {
 
   async sendWelcomeEmail(params: WelcomeEmailParams): Promise<void> {
     const { to, recipientName, email, password, isInternal, internalRole } = params;
-    const appUrl = process.env.APP_URL || 'https://metrics.bakano.ec';
+    const appUrl = 'https://metrics.bakano.ec';
     const firstName = recipientName ? recipientName.split(' ')[0] : 'nuevo integrante';
 
     const roleLabels: Record<string, string> = {
@@ -40,10 +40,10 @@ export class ResendService {
       copywriter: 'Copywriter', analista: 'Analista', desarrollador: 'Desarrollador',
     };
 
-    const userTypeLabel  = isInternal ? 'Equipo Interno' : 'Cliente';
-    const userTypeColor  = isInternal ? '#6d28d9' : '#0f766e';
-    const userTypeBg     = isInternal ? '#f5f3ff' : '#f0fdfa';
-    const roleLabel      = internalRole ? roleLabels[internalRole] || internalRole : null;
+    const userTypeLabel = isInternal ? 'Equipo Interno' : 'Cliente';
+    const userTypeColor = isInternal ? '#6d28d9' : '#0f766e';
+    const userTypeBg = isInternal ? '#f5f3ff' : '#f0fdfa';
+    const roleLabel = internalRole ? roleLabels[internalRole] || internalRole : null;
 
     const html = `
 <!DOCTYPE html>
@@ -527,7 +527,7 @@ export class ResendService {
     date: Date;
   }): Promise<void> {
     const { to, recipientName, workspaceName, workspaceId, hasFilled, filledAmount, totalDayAmount, date } = params;
-    const appUrl = process.env.APP_URL || "https://metrics.bakano.ec";
+    const appUrl = "https://metrics.bakano.ec";
     const firstName = recipientName.split(" ")[0];
 
     const dateLabel = date.toLocaleDateString("es-EC", {
