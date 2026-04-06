@@ -131,29 +131,50 @@ export class MetaService {
 
   async getAdInsights(adAccountId: string, accessToken: string, datePreset: string = "this_month") {
     try {
-      // 1. Get Aggregated Insights
-      const aggregatedResponse = await axios.get(`${this.graphUrl}/act_${adAccountId}/insights`, {
-        params: {
-          access_token: accessToken,
-          level: "ad",
-          fields: "ad_id,ad_name,campaign_name,spend,impressions,clicks,cpc,cpm,reach,actions,action_values,cost_per_action_type,purchase_roas",
-          date_preset: datePreset,
-        },
-      });
+      // 1. Get Aggregated Insights + Ad statuses (in parallel)
+      const [aggregatedResponse, dailyResponse, adsStatusResponse] = await Promise.all([
+        axios.get(`${this.graphUrl}/act_${adAccountId}/insights`, {
+          params: {
+            access_token: accessToken,
+            level: "ad",
+            fields: "ad_id,ad_name,campaign_name,spend,impressions,clicks,cpc,cpm,reach,actions,action_values,cost_per_action_type,purchase_roas",
+            date_preset: datePreset,
+          },
+        }),
+        // 2. Get Daily Insights for Time Series Chart
+        axios.get(`${this.graphUrl}/act_${adAccountId}/insights`, {
+          params: {
+            access_token: accessToken,
+            level: "account",
+            fields: "spend,clicks,impressions,actions,date_start",
+            date_preset: datePreset,
+            time_increment: 1,
+          },
+        }),
+        // 3. Get current effective_status per ad (not available in insights)
+        axios.get(`${this.graphUrl}/act_${adAccountId}/ads`, {
+          params: {
+            access_token: accessToken,
+            fields: "id,effective_status",
+            limit: 500,
+          },
+        }).catch(() => ({ data: { data: [] } })),
+      ]);
 
-      // 2. Get Daily Insights for Time Series Chart
-      const dailyResponse = await axios.get(`${this.graphUrl}/act_${adAccountId}/insights`, {
-        params: {
-          access_token: accessToken,
-          level: "account",
-          fields: "spend,clicks,impressions,actions,date_start",
-          date_preset: datePreset,
-          time_increment: 1,
-        },
-      });
+      // Build a status map: adId -> effective_status
+      const statusMap: Record<string, string> = {};
+      for (const ad of (adsStatusResponse.data.data || [])) {
+        statusMap[ad.id] = ad.effective_status;
+      }
+
+      // Merge status into each insight row
+      const insights = (aggregatedResponse.data.data || []).map((row: any) => ({
+        ...row,
+        effective_status: statusMap[row.ad_id] ?? 'UNKNOWN',
+      }));
 
       return {
-        insights: aggregatedResponse.data.data,
+        insights,
         dailySpend: dailyResponse.data.data || []
       };
     } catch (error: any) {

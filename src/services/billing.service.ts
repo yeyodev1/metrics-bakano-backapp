@@ -108,12 +108,12 @@ export class BillingService {
     // Get day total for notification
     const daySummary = await this.getDaySummary(workspaceId, today);
 
-    // Notify all superadmins
+    // Notify superadmins + external collaborators
     try {
-      const superadmins = await models.users.find({
-        role: "superadmin",
-        isActive: true,
-      }).lean();
+      const [superadmins, externals] = await Promise.all([
+        models.users.find({ role: "superadmin", isActive: true }).lean(),
+        this.getExternalCollaboratorEmails(workspaceId),
+      ]);
 
       const superadminEmails = superadmins.map((sa) => sa.email);
 
@@ -129,8 +129,23 @@ export class BillingService {
           date: today,
         });
       }
+
+      if (externals.length > 0) {
+        await resendService.sendBillingExternalNotification({
+          recipients: externals,
+          workspaceName: workspace.name,
+          workspaceId,
+          userName: user.name || user.email,
+          amount,
+          totalDay: daySummary.totalAmount,
+          metaSpend,
+          roas,
+          date: today,
+          isUpdate: false,
+        });
+      }
     } catch (emailError: any) {
-      console.error("[BillingService] Failed to send superadmin notification:", emailError.message);
+      console.error("[BillingService] Failed to send billing notifications:", emailError.message);
     }
 
     return entry;
@@ -227,11 +242,25 @@ export class BillingService {
   }
 
   /**
+   * Returns all external collaborator emails for a workspace.
+   */
+  private async getExternalCollaboratorEmails(workspaceId: string): Promise<{ email: string; name: string }[]> {
+    const externals = await models.users.find({
+      isInternal: false,
+      isActive: true,
+      "workspaces.workspaceId": new Types.ObjectId(workspaceId),
+    }).lean();
+    return externals.map(u => ({ email: u.email, name: u.name || u.email }));
+  }
+
+  /**
    * Updates a billing entry. Superadmin can always edit.
-   * Admin/Colaborador can only edit the same day (Ecuador timezone).
+   * Others can edit entries up to 7 days old (within the week).
+   * Sends email notifications to all external collaborators after update.
    */
   async updateEntry(
     entryId: string,
+    workspaceId: string,
     requesterId: string,
     requesterRole: string,
     newAmount: number,
@@ -244,12 +273,12 @@ export class BillingService {
     if (requesterRole !== "superadmin") {
       const today = this.normalizeDateToEcuador(new Date());
       const entryDate = this.normalizeDateToEcuador(entry.date);
+      const diffDays = Math.round((today.getTime() - entryDate.getTime()) / (1000 * 60 * 60 * 24));
 
-      if (today.getTime() !== entryDate.getTime()) {
+      if (diffDays > 7) {
         throw new Error("EDIT_NOT_ALLOWED");
       }
 
-      // Also verify the user owns this entry
       if (entry.userId.toString() !== requesterId) {
         throw new Error("EDIT_NOT_ALLOWED");
       }
@@ -263,6 +292,31 @@ export class BillingService {
     if (notes !== undefined) entry.notes = notes;
 
     await entry.save();
+
+    // Notify external collaborators after update
+    try {
+      const workspace = await models.workspaces.findById(workspaceId).lean();
+      const externals = await this.getExternalCollaboratorEmails(workspaceId);
+      const daySummary = await this.getDaySummary(workspaceId, entry.date);
+
+      if (externals.length > 0 && workspace) {
+        await resendService.sendBillingExternalNotification({
+          recipients: externals,
+          workspaceName: workspace.name,
+          workspaceId,
+          userName: entry.userName,
+          amount: newAmount,
+          totalDay: daySummary.totalAmount,
+          metaSpend,
+          roas,
+          date: entry.date,
+          isUpdate: true,
+        });
+      }
+    } catch (emailError: any) {
+      console.error("[BillingService] Failed to send external notification after update:", emailError.message);
+    }
+
     return entry;
   }
 

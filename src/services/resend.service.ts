@@ -514,6 +514,161 @@ export class ResendService {
   }
 
   /**
+   * Notifies all external collaborators of a workspace when a billing entry is created or updated.
+   * Sent individually to each recipient so the email is personalized.
+   */
+  async sendBillingExternalNotification(params: {
+    recipients: { email: string; name: string }[];
+    workspaceName: string;
+    workspaceId: string;
+    userName: string;
+    amount: number;
+    totalDay: number;
+    metaSpend: number;
+    roas: number;
+    date: Date;
+    isUpdate: boolean;
+  }): Promise<void> {
+    const { recipients, workspaceName, workspaceId, userName, amount, totalDay, metaSpend, roas, date, isUpdate } = params;
+    const appUrl = "https://metrics.bakano.ec";
+    const billingUrl = `${appUrl}/app/workspaces/${workspaceId}/billing`;
+
+    const dateLabel = date.toLocaleDateString("es-EC", {
+      weekday: "long", day: "numeric", month: "long", year: "numeric",
+      timeZone: "America/Guayaquil",
+    });
+
+    const roasColor = roas >= 3 ? "#16a34a" : roas >= 1 ? "#d97706" : "#dc2626";
+    const roasBg = roas >= 3 ? "#f0fdf4" : roas >= 1 ? "#fffbeb" : "#fef2f2";
+    const roasBorder = roas >= 3 ? "#bbf7d0" : roas >= 1 ? "#fde68a" : "#fecaca";
+    const actionLabel = isUpdate ? "Facturación actualizada" : "Nueva facturación registrada";
+    const actionEmoji = isUpdate ? "✏️" : "💰";
+    const subjectPrefix = isUpdate ? "✏️ Facturación actualizada" : "💰 Nueva facturación";
+
+    const emailPromises = recipients.map(({ email, name }) => {
+      const firstName = name.split(" ")[0];
+      const html = `
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>${actionLabel} · ${workspaceName}</title>
+</head>
+<body style="margin:0;padding:0;background-color:#f0f2f5;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f0f2f5;padding:40px 16px;">
+    <tr>
+      <td align="center">
+        <table width="580" cellpadding="0" cellspacing="0" style="max-width:580px;width:100%;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.10);">
+
+          <!-- Header -->
+          <tr>
+            <td style="background:linear-gradient(135deg,#0f1117 0%,#1e293b 100%);padding:36px 40px 32px;text-align:center;">
+              <p style="margin:0 0 16px;color:#ffffff;font-size:22px;font-weight:800;letter-spacing:-0.5px;">Bakano Ads</p>
+              <div style="display:inline-block;width:64px;height:64px;background:rgba(255,255,255,0.08);border-radius:50%;text-align:center;line-height:64px;font-size:30px;margin-bottom:16px;">${actionEmoji}</div>
+              <h1 style="margin:0;color:#ffffff;font-size:24px;font-weight:700;line-height:1.3;">${actionLabel}</h1>
+              <p style="margin:8px 0 0;color:rgba(255,255,255,0.65);font-size:14px;text-transform:capitalize;">${dateLabel}</p>
+            </td>
+          </tr>
+
+          <!-- Greeting -->
+          <tr>
+            <td style="padding:28px 40px 0;">
+              <p style="margin:0;color:#0f172a;font-size:15px;line-height:1.6;">Hola <strong>${firstName}</strong>, se ha ${isUpdate ? "actualizado" : "registrado"} la facturación de <strong>${workspaceName}</strong>.</p>
+            </td>
+          </tr>
+
+          <!-- Details card -->
+          <tr>
+            <td style="padding:20px 40px 0;">
+              <table width="100%" cellpadding="0" cellspacing="0" style="background:#f8fafc;border:1.5px solid #e2e8f0;border-radius:12px;overflow:hidden;">
+                <tr>
+                  <td style="padding:10px 20px;background:#e2e8f0;">
+                    <p style="margin:0;color:#64748b;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.6px;">Resumen del día</p>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding:20px;">
+                    <table width="100%" cellpadding="0" cellspacing="0">
+                      <tr>
+                        <td style="padding-bottom:14px;">
+                          <p style="margin:0 0 3px;color:#94a3b8;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;">${isUpdate ? "Actualizado por" : "Registrado por"}</p>
+                          <p style="margin:0;color:#0f172a;font-size:15px;font-weight:700;">${userName}</p>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style="border-top:1px solid #e2e8f0;padding:14px 0;">
+                          <p style="margin:0 0 3px;color:#94a3b8;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;">Monto ${isUpdate ? "actualizado" : "registrado"}</p>
+                          <p style="margin:0;color:#0f172a;font-size:20px;font-weight:800;">$${amount.toLocaleString("es-EC", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style="border-top:1px solid #e2e8f0;padding:14px 0;">
+                          <p style="margin:0 0 3px;color:#94a3b8;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;">Total facturado del día</p>
+                          <p style="margin:0;color:#0f172a;font-size:18px;font-weight:700;">$${totalDay.toLocaleString("es-EC", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style="border-top:1px solid #e2e8f0;padding:14px 0;">
+                          <p style="margin:0 0 3px;color:#94a3b8;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;">Inversión Meta Ads</p>
+                          <p style="margin:0;color:#0f172a;font-size:15px;font-weight:600;">$${metaSpend.toLocaleString("es-EC", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style="border-top:1px solid #e2e8f0;padding-top:14px;">
+                          <p style="margin:0 0 8px;color:#94a3b8;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;">ROAS del día</p>
+                          <span style="display:inline-block;background:${roasBg};color:${roasColor};border:1.5px solid ${roasBorder};border-radius:8px;padding:6px 16px;font-size:18px;font-weight:800;">${roas.toFixed(2)}x</span>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- CTA -->
+          <tr>
+            <td style="padding:24px 40px;">
+              <table width="100%" cellpadding="0" cellspacing="0">
+                <tr>
+                  <td align="center">
+                    <a href="${billingUrl}" style="display:inline-block;background:#0f172a;color:#ffffff;text-decoration:none;padding:14px 28px;border-radius:10px;font-weight:700;font-size:14px;letter-spacing:0.2px;">Ver facturación completa →</a>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="background:#f8fafc;padding:20px 40px;border-top:1px solid #e2e8f0;text-align:center;">
+              <p style="margin:0;color:#94a3b8;font-size:12px;line-height:1.6;">
+                Este correo fue generado automáticamente por <strong>Bakano Ads</strong>.<br/>
+                Estás recibiendo esto porque tienes acceso a <strong>${workspaceName}</strong>.
+              </p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+
+      return this.client.emails.send({
+        from: this.from,
+        to: email,
+        subject: `${subjectPrefix} · ${workspaceName} · $${amount.toLocaleString("es-EC", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+        html,
+      });
+    });
+
+    await Promise.allSettled(emailPromises);
+  }
+
+  /**
    * Sends a daily billing reminder or confirmation to an external user.
    */
   async sendDailyBillingReminder(params: {

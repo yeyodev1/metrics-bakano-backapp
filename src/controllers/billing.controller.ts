@@ -105,7 +105,7 @@ export async function getDayBilling(req: AuthRequest, res: Response): Promise<vo
  */
 export async function updateBillingEntry(req: AuthRequest, res: Response): Promise<void> {
   try {
-    const { entryId } = req.params;
+    const { workspaceId, entryId } = req.params;
     const requesterId = req.user!._id;
     const requesterRole = req.user!.role;
     const { amount, notes } = req.body;
@@ -120,7 +120,14 @@ export async function updateBillingEntry(req: AuthRequest, res: Response): Promi
       return;
     }
 
-    const entry = await billingService.updateEntry(entryId as string, requesterId as string, requesterRole as string, amount, notes);
+    const entry = await billingService.updateEntry(
+      entryId as string,
+      workspaceId as string,
+      requesterId as string,
+      requesterRole as string,
+      amount,
+      notes
+    );
 
     res.status(200).json({ message: "Entrada de facturación actualizada.", entry });
   } catch (error: any) {
@@ -129,7 +136,7 @@ export async function updateBillingEntry(req: AuthRequest, res: Response): Promi
       return;
     }
     if (error.message === "EDIT_NOT_ALLOWED") {
-      res.status(403).json({ message: "No puedes editar esta entrada. Solo se puede editar el mismo día de creación." });
+      res.status(403).json({ message: "Solo puedes editar entradas de los últimos 7 días." });
       return;
     }
     console.error("[BillingController] updateBillingEntry error:", error);
