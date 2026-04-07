@@ -75,12 +75,24 @@ export class NotificationService {
     await models.notifications.insertMany(docs);
   }
 
-  async getForUser(userId: string, limit = 50) {
-    return await models.notifications
-      .find({ userId: new Types.ObjectId(userId) })
-      .sort({ createdAt: -1 })
-      .limit(limit)
-      .lean();
+  async getForUser(userId: string, page = 1, limit = 10) {
+    const skip = (page - 1) * limit;
+    const filter = { userId: new Types.ObjectId(userId) };
+    const [notifications, total] = await Promise.all([
+      models.notifications
+        .find(filter)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      models.notifications.countDocuments(filter),
+    ]);
+    return {
+      notifications,
+      total,
+      page,
+      totalPages: Math.ceil(total / limit),
+    };
   }
 
   async getUnreadCount(userId: string): Promise<number> {

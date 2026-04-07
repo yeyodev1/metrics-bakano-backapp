@@ -5,8 +5,10 @@ import { notificationService } from "../services/notification.service";
 export async function getMyNotifications(req: AuthRequest, res: Response) {
   try {
     const userId = req.user!._id;
-    const notifications = await notificationService.getForUser(userId);
-    res.json({ notifications });
+    const page = Math.max(1, parseInt(req.query["page"] as string, 10) || 1);
+    const limit = Math.min(50, Math.max(1, parseInt(req.query["limit"] as string, 10) || 10));
+    const result = await notificationService.getForUser(userId as string, page, limit);
+    res.json(result);
   } catch {
     res.status(500).json({ message: "Error al obtener notificaciones" });
   }
