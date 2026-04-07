@@ -45,7 +45,8 @@ export class BillingService {
     workspaceId: string,
     userId: string,
     amount: number,
-    notes?: string
+    notes?: string,
+    dateOverride?: Date
   ): Promise<InstanceType<typeof models.dailyBilling>> {
     const workspace = await models.workspaces.findById(workspaceId).lean();
     if (!workspace) throw new Error("WORKSPACE_NOT_FOUND");
@@ -53,7 +54,7 @@ export class BillingService {
     const user = await models.users.findById(userId).lean();
     if (!user) throw new Error("USER_NOT_FOUND");
 
-    const today = this.normalizeDateToEcuador(new Date());
+    const today = this.normalizeDateToEcuador(dateOverride ?? new Date());
 
     // Check for existing entry for this user/workspace/day
     const existing = await models.dailyBilling.findOne({

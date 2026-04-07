@@ -1,0 +1,19 @@
+{
+  "versions": [
+    {
+      "version": "1.4.0",
+      "date": "2026-04-06",
+      "title": "Facturación mejorada, filtros de anuncios y timezone Ecuador",
+      "summary": "Esta versión incluye mejoras importantes en la vista de facturación, nuevos filtros en el dashboard de campañas y correcciones de zona horaria.",
+      "changes": [
+        { "type": "new", "text": "Sistema de edición de facturación hasta 7 días después del registro" },
+        { "type": "new", "text": "Filtros en tabla de anuncios: buscar por nombre, filtrar por estado (activo/pausado), ordenar por inversión, ROAS, conversaciones o clics" },
+        { "type": "new", "text": "Botón de agenda de reunión en el sidebar para clientes (Denisse & Diego Reyes)" },
+        { "type": "improved", "text": "Gráfico de facturación convertido a línea para mayor claridad visual" },
+        { "type": "improved", "text": "Botón de editar facturación ahora muestra texto 'Editar' para mayor claridad" },
+        { "type": "improved", "text": "Corrección de zona horaria: todas las fechas ahora en hora Ecuador (UTC-5)" },
+        { "type": "fix", "text": "KPIs de facturación mensual ahora muestran los totales correctamente" }
+      ]
+    }
+  ]
+}

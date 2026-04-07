@@ -861,6 +861,143 @@ export class ResendService {
       html,
     });
   }
+
+  /**
+   * Sends a "What's New" changelog email to a single user.
+   */
+  async sendChangelogEmail(params: {
+    to: string;
+    recipientName: string;
+    version: { version: string; date: string; title: string; summary: string; changes: Array<{ type: string; text: string }> };
+  }): Promise<void> {
+    const { to, recipientName, version } = params;
+    const firstName = recipientName.split(" ")[0];
+    const appUrl = "https://metrics.bakano.ec";
+
+    const typeConfig: Record<string, { label: string; color: string; bg: string; icon: string }> = {
+      new:      { label: "Nuevo",    color: "#059669", bg: "#d1fae5", icon: "✦" },
+      improved: { label: "Mejora",   color: "#2563eb", bg: "#dbeafe", icon: "↑" },
+      fix:      { label: "Corrección", color: "#d97706", bg: "#fef3c7", icon: "✓" },
+      removed:  { label: "Eliminado", color: "#dc2626", bg: "#fee2e2", icon: "✕" },
+    };
+
+    const changeRows = version.changes.map((c) => {
+      const cfg = typeConfig[c.type] || typeConfig["improved"];
+      return `
+        <tr>
+          <td style="padding: 10px 0; vertical-align: top; border-bottom: 1px solid #f1f5f9;">
+            <span style="display:inline-block;background:${cfg.bg};color:${cfg.color};font-size:10px;font-weight:800;padding:3px 8px;border-radius:20px;white-space:nowrap;letter-spacing:0.4px;text-transform:uppercase;">${cfg.label}</span>
+          </td>
+          <td style="padding: 10px 0 10px 14px; vertical-align: top; border-bottom: 1px solid #f1f5f9; font-size: 14px; color: #374151; line-height: 1.5;">
+            ${c.text}
+          </td>
+        </tr>`;
+    }).join("");
+
+    const formattedDate = new Date(version.date + "T12:00:00").toLocaleDateString("es-EC", {
+      day: "numeric", month: "long", year: "numeric", timeZone: "America/Guayaquil"
+    });
+
+    const html = `
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Novedades de Bakano Ads v${version.version}</title>
+</head>
+<body style="margin:0;padding:0;background-color:#f0f2f5;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f0f2f5;padding:40px 16px;">
+    <tr>
+      <td align="center">
+        <table width="580" cellpadding="0" cellspacing="0" style="max-width:580px;width:100%;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.10);">
+
+          <!-- Header -->
+          <tr>
+            <td style="background:linear-gradient(135deg,#0f1117 0%,#1e293b 100%);padding:32px 40px;">
+              <table width="100%" cellpadding="0" cellspacing="0">
+                <tr>
+                  <td>
+                    <p style="margin:0 0 8px;color:rgba(255,255,255,0.55);font-size:12px;font-weight:700;letter-spacing:1px;text-transform:uppercase;">Bakano Ads Platform</p>
+                    <h1 style="margin:0 0 6px;color:#ffffff;font-size:22px;font-weight:800;letter-spacing:-0.3px;">¿Qué hay de nuevo? 🚀</h1>
+                    <p style="margin:0;color:rgba(255,255,255,0.6);font-size:13px;">Versión ${version.version} · ${formattedDate}</p>
+                  </td>
+                  <td style="text-align:right;vertical-align:middle;">
+                    <div style="background:rgba(255,255,255,0.12);border-radius:12px;padding:10px 18px;display:inline-block;">
+                      <span style="color:#fff;font-size:20px;font-weight:900;letter-spacing:-1px;">v${version.version}</span>
+                    </div>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Greeting -->
+          <tr>
+            <td style="padding:32px 40px 0;">
+              <p style="margin:0 0 16px;font-size:15px;color:#374151;line-height:1.6;">
+                Hola <strong>${firstName}</strong>,
+              </p>
+              <p style="margin:0 0 24px;font-size:14px;color:#6b7280;line-height:1.7;">
+                ${version.summary}
+              </p>
+
+              <!-- Version title banner -->
+              <div style="background:linear-gradient(135deg,rgba(124,58,237,0.06) 0%,rgba(124,58,237,0.02) 100%);border:1.5px solid rgba(124,58,237,0.15);border-radius:12px;padding:16px 20px;margin-bottom:28px;">
+                <p style="margin:0;font-size:15px;font-weight:700;color:#1e1b4b;">📋 ${version.title}</p>
+              </div>
+            </td>
+          </tr>
+
+          <!-- Changes list -->
+          <tr>
+            <td style="padding:0 40px 32px;">
+              <table width="100%" cellpadding="0" cellspacing="0">
+                ${changeRows}
+              </table>
+            </td>
+          </tr>
+
+          <!-- CTA -->
+          <tr>
+            <td style="padding:0 40px 32px;">
+              <table width="100%" cellpadding="0" cellspacing="0">
+                <tr>
+                  <td style="background:#f8fafc;border-radius:12px;padding:24px;text-align:center;">
+                    <p style="margin:0 0 16px;font-size:14px;color:#6b7280;">Accede a la plataforma para ver todas las novedades en acción</p>
+                    <a href="${appUrl}" style="display:inline-block;background:linear-gradient(135deg,#0f1117 0%,#1e293b 100%);color:#ffffff;text-decoration:none;padding:13px 32px;border-radius:10px;font-size:14px;font-weight:700;letter-spacing:0.2px;">
+                      Ir a Bakano Ads →
+                    </a>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="background:#f8fafc;padding:20px 40px;border-top:1px solid #e2e8f0;text-align:center;">
+              <p style="margin:0;color:#94a3b8;font-size:12px;line-height:1.6;">
+                Este correo fue enviado automáticamente por <strong>Bakano Ads</strong> al publicar una nueva versión.<br/>
+                Si tienes dudas sobre estas funcionalidades, contacta a tu gestor de cuenta.
+              </p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+
+    await this.client.emails.send({
+      from: this.from,
+      to,
+      subject: `🚀 Novedades en Bakano Ads · v${version.version} — ${version.title}`,
+      html,
+    });
+  }
 }
 
 export const resendService = new ResendService();

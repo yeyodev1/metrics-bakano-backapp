@@ -11,7 +11,7 @@ export async function createBillingEntry(req: AuthRequest, res: Response): Promi
   try {
     const { workspaceId } = req.params;
     const userId = req.user!._id;
-    const { amount, notes } = req.body;
+    const { amount, notes, date } = req.body;
 
     if (amount === undefined || amount === null) {
       res.status(400).json({ message: "El monto (amount) es requerido." });
@@ -23,7 +23,26 @@ export async function createBillingEntry(req: AuthRequest, res: Response): Promi
       return;
     }
 
-    const entry = await billingService.createEntry(workspaceId as string, userId as string, amount, notes);
+    // Validate optional date param (YYYY-MM-DD)
+    let entryDate: Date | undefined;
+    if (date) {
+      const parsed = new Date(date + "T12:00:00Z");
+      if (isNaN(parsed.getTime())) {
+        res.status(400).json({ message: "Fecha inválida. Use el formato YYYY-MM-DD." });
+        return;
+      }
+      // Reject future dates only
+      const todayEcuador = billingService.normalizeDateToEcuador(new Date());
+      const targetEcuador = billingService.normalizeDateToEcuador(parsed);
+      if (targetEcuador.getTime() > todayEcuador.getTime()) {
+        res.status(400).json({ message: "No puedes registrar facturación para fechas futuras." });
+        return;
+      }
+      // Allow any past date — no limit on how far back
+      entryDate = parsed;
+    }
+
+    const entry = await billingService.createEntry(workspaceId as string, userId as string, amount, notes, entryDate);
 
     res.status(201).json({ message: "Entrada de facturación registrada exitosamente.", entry });
   } catch (error: any) {
@@ -36,7 +55,7 @@ export async function createBillingEntry(req: AuthRequest, res: Response): Promi
       return;
     }
     if (error.message === "ENTRY_ALREADY_EXISTS") {
-      res.status(409).json({ message: "Ya tienes una entrada registrada para el día de hoy." });
+      res.status(409).json({ message: "Ya tienes una entrada registrada para ese día." });
       return;
     }
     console.error("[BillingController] createBillingEntry error:", error);
