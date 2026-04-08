@@ -862,7 +862,7 @@ export class ResendService {
     await this.client.emails.send({
       from: this.from,
       to,
-      reply_to: process.env.RESEND_REPLY_TO || 'hola@bakano.ec',
+      replyTo: process.env.RESEND_REPLY_TO || 'hola@bakano.ec',
       subject,
       html,
       text,

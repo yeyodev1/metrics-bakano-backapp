@@ -72,7 +72,7 @@ export async function deleteNotification(req: AuthRequest, res: Response) {
  */
 export async function sendBillingReminder(req: AuthRequest, res: Response) {
   try {
-    const { workspaceId } = req.params;
+    const workspaceId = req.params.workspaceId as string;
 
     const workspace = await models.workspaces.findById(workspaceId).select("name").lean();
     if (!workspace) return res.status(404).json({ message: "Entorno no encontrado" });
@@ -101,7 +101,7 @@ export async function sendBillingReminder(req: AuthRequest, res: Response) {
     await Promise.all([
       // In-app notifications (bulk insert)
       notificationService.createForWorkspaceUsers(
-        workspaceId,
+        workspaceId as string,
         true,
         "billing_reminder",
         "Datos de facturación pendientes",
@@ -111,10 +111,10 @@ export async function sendBillingReminder(req: AuthRequest, res: Response) {
       ...users.map((u) =>
         resendService
           .sendDailyBillingReminder({
-            to: u.email,
-            recipientName: u.name || u.email,
-            workspaceName: workspace.name,
-            workspaceId,
+            to: u.email as string,
+            recipientName: (u.name || u.email) as string,
+            workspaceName: workspace.name as string,
+            workspaceId: workspaceId as string,
             hasFilled: false,
             date: now,
           })
