@@ -93,13 +93,16 @@ export async function getAdsInsights(req: Request, res: Response, next: NextFunc
       return;
     }
 
-    // Date preset from query (e.g. this_month, last_30d)
+    // Date range: prefer explicit since/until, fallback to datePreset
+    const since = req.query.since as string | undefined;
+    const until = req.query.until as string | undefined;
     const datePreset = (req.query.datePreset as string) || "this_month";
+    const timeRange = since && until ? { since, until } : undefined;
 
     const [insightsRes, spendByPlatform, adsSpendByPlatform] = await Promise.all([
-      metaService.getAdInsights(adAccountId, workspace.metaAds.accessToken, datePreset),
-      metaService.getSpendByPlatform(adAccountId, workspace.metaAds.accessToken, datePreset).catch(() => []),
-      metaService.getAdsSpendByPlatform(adAccountId, workspace.metaAds.accessToken, datePreset).catch(() => []),
+      metaService.getAdInsights(adAccountId, workspace.metaAds.accessToken, datePreset, timeRange),
+      metaService.getSpendByPlatform(adAccountId, workspace.metaAds.accessToken, datePreset, timeRange).catch(() => []),
+      metaService.getAdsSpendByPlatform(adAccountId, workspace.metaAds.accessToken, datePreset, timeRange).catch(() => []),
     ]);
 
     res.status(HttpStatusCode.Ok).send({

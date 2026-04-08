@@ -129,7 +129,13 @@ export class MetaService {
     }
   }
 
-  async getAdInsights(adAccountId: string, accessToken: string, datePreset: string = "this_month") {
+  private dateParams(datePreset: string, timeRange?: { since: string; until: string }) {
+    return timeRange
+      ? { time_range: JSON.stringify(timeRange) }
+      : { date_preset: datePreset }
+  }
+
+  async getAdInsights(adAccountId: string, accessToken: string, datePreset: string = "this_month", timeRange?: { since: string; until: string }) {
     try {
       // 1. Get Aggregated Insights + Ad statuses (in parallel)
       const [aggregatedResponse, dailyResponse, adsStatusResponse] = await Promise.all([
@@ -138,7 +144,7 @@ export class MetaService {
             access_token: accessToken,
             level: "ad",
             fields: "ad_id,ad_name,campaign_name,spend,impressions,clicks,cpc,cpm,reach,actions,action_values,cost_per_action_type,purchase_roas",
-            date_preset: datePreset,
+            ...this.dateParams(datePreset, timeRange),
           },
         }),
         // 2. Get Daily Insights for Time Series Chart
@@ -147,7 +153,7 @@ export class MetaService {
             access_token: accessToken,
             level: "account",
             fields: "spend,clicks,impressions,actions,date_start",
-            date_preset: datePreset,
+            ...this.dateParams(datePreset, timeRange),
             time_increment: 1,
           },
         }),
@@ -187,7 +193,7 @@ export class MetaService {
   /**
    * Gets spend by platform (Facebook vs Instagram) for the ad account
    */
-  async getSpendByPlatform(adAccountId: string, accessToken: string, datePreset: string = "this_month") {
+  async getSpendByPlatform(adAccountId: string, accessToken: string, datePreset: string = "this_month", timeRange?: { since: string; until: string }) {
     try {
       const response = await axios.get(`${this.graphUrl}/act_${adAccountId}/insights`, {
         params: {
@@ -195,7 +201,7 @@ export class MetaService {
           level: "account",
           fields: "spend",
           breakdowns: "publisher_platform",
-          date_preset: datePreset,
+          ...this.dateParams(datePreset, timeRange),
         },
       });
       return response.data.data;
@@ -209,7 +215,7 @@ export class MetaService {
   /**
    * Gets spend by platform for each Ad
    */
-  async getAdsSpendByPlatform(adAccountId: string, accessToken: string, datePreset: string = "this_month") {
+  async getAdsSpendByPlatform(adAccountId: string, accessToken: string, datePreset: string = "this_month", timeRange?: { since: string; until: string }) {
     try {
       const response = await axios.get(`${this.graphUrl}/act_${adAccountId}/insights`, {
         params: {
@@ -217,7 +223,7 @@ export class MetaService {
           level: "ad",
           fields: "ad_id,spend",
           breakdowns: "publisher_platform",
-          date_preset: datePreset,
+          ...this.dateParams(datePreset, timeRange),
         },
       });
       return response.data.data;

@@ -851,14 +851,25 @@ export class ResendService {
 </html>`;
 
     const subject = hasFilled
-      ? `✅ Facturación confirmada · ${workspaceName}`
-      : `⏰ Recordatorio: registra tu facturación de hoy · ${workspaceName}`;
+      ? `Facturación confirmada - ${workspaceName} | Bakano Ads`
+      : `Registro de facturación pendiente - ${workspaceName} | Bakano Ads`;
+
+    // Plain-text fallback (improves deliverability)
+    const text = hasFilled
+      ? `Hola ${recipientName.split(' ')[0]}, tu facturación de ${workspaceName} fue confirmada correctamente. Gracias por mantener tus datos al día en Bakano Ads.`
+      : `Hola ${recipientName.split(' ')[0]}, aún no has registrado la facturación de hoy para ${workspaceName}. Ingresa a https://metrics.bakano.ec/app/workspaces/${workspaceId}/billing para completarlo. Equipo Bakano Ads.`;
 
     await this.client.emails.send({
       from: this.from,
       to,
+      reply_to: process.env.RESEND_REPLY_TO || 'hola@bakano.ec',
       subject,
       html,
+      text,
+      headers: {
+        'List-Unsubscribe': `<mailto:${process.env.RESEND_REPLY_TO || 'hola@bakano.ec'}?subject=Cancelar+recordatorios>`,
+        'X-Entity-Ref-ID': `billing-${workspaceId}`,
+      },
     });
   }
 

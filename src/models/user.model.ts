@@ -18,6 +18,7 @@ export type InternalRole =
   | 'copywriter'
   | 'analista'
   | 'desarrollador'
+  | 'trafficker'
 
 export interface IUser extends Document {
   name?: string;
@@ -81,7 +82,7 @@ export const UserSchema = new Schema<IUser>(
     },
     internalRole: {
       type: String,
-      enum: ['director', 'estratega', 'project_manager', 'content_manager', 'account_manager', 'community_manager', 'productor', 'asistente_produccion', 'disenador', 'copywriter', 'analista', 'desarrollador'],
+      enum: ['director', 'estratega', 'project_manager', 'content_manager', 'account_manager', 'community_manager', 'productor', 'asistente_produccion', 'disenador', 'copywriter', 'analista', 'desarrollador', 'trafficker'],
       default: null,
     },
     isActive: {
