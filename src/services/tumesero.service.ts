@@ -31,7 +31,7 @@ interface TumeseroSession {
   subtotal_neto: string | null;
   costo_delivery: string | null;
   subtotal_desc: string | null;
-  estado_funnel: "CON_ORDEN" | "SIN_ORDEN";
+  estado_funnel: "CON_ORDEN" | "CON_PAGO" | "SIN_ORDEN";
 }
 
 interface TumeseroApiResponse {
@@ -123,7 +123,7 @@ export class TumeseroService {
     >();
 
     for (const s of sessions) {
-      const isOrder = s.estado_funnel === "CON_ORDEN";
+      const isOrder = s.estado_funnel === "CON_ORDEN" || s.estado_funnel === "CON_PAGO";
       const storeName = s.nombre_tienda || "Sin tienda";
 
       if (!storeMap.has(storeName)) {
