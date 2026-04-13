@@ -87,12 +87,6 @@ export class TumeseroService {
       { upsert: true, new: true }
     );
 
-    if (usage.callCount > DAILY_CALL_LIMIT) {
-      throw new Error(
-        `Límite diario de ${DAILY_CALL_LIMIT} llamadas a Tumesero alcanzado. Intenta mañana.`
-      );
-    }
-
     const response = await axios.get<TumeseroApiResponse>(TUMESERO_API_URL, {
       params: { desde, hasta, token: TUMESERO_TOKEN },
       timeout: 15000,
@@ -253,6 +247,36 @@ export class TumeseroService {
       dailyLimit: DAILY_CALL_LIMIT,
       tokenExpiresAt: "2026-07-31 23:59:59",
     };
+  }
+
+  /**
+   * Returns aggregated data for an arbitrary date range from the DB (no Tumesero API calls).
+   */
+  async getRangeSummary(workspaceId: string, from: string, to: string) {
+    const docs = await SalesDailySummaryModel.find({
+      workspaceId: new Types.ObjectId(workspaceId),
+      date: { $gte: from, $lte: to },
+    })
+      .sort({ date: 1 })
+      .lean();
+
+    const totals = docs.reduce(
+      (acc, d) => {
+        acc.totalSessions += d.totalSessions;
+        acc.totalOrders   += d.totalOrders;
+        acc.totalRevenue  += d.totalRevenue;
+        acc.totalBilled   += d.totalBilled;
+        return acc;
+      },
+      { totalSessions: 0, totalOrders: 0, totalRevenue: 0, totalBilled: 0 }
+    );
+
+    const monthConversionRate =
+      totals.totalSessions > 0
+        ? parseFloat(((totals.totalOrders / totals.totalSessions) * 100).toFixed(2))
+        : 0;
+
+    return { days: docs, ...totals, monthConversionRate };
   }
 
   getBoloncityWorkspaceId() {

@@ -5,6 +5,7 @@ import {
   triggerManualSync,
   syncRange,
   getApiUsage,
+  getRangeData,
 } from "../controllers/salesSummary.controller";
 
 const salesSummaryRouter = Router();
@@ -23,5 +24,8 @@ salesSummaryRouter.post("/:workspaceId/sync", triggerManualSync);
 
 // POST /api/sales-summary/:workspaceId/sync-range?from=YYYY-MM-DD&to=YYYY-MM-DD
 salesSummaryRouter.post("/:workspaceId/sync-range", syncRange);
+
+// GET /api/sales-summary/:workspaceId/range?from=YYYY-MM-DD&to=YYYY-MM-DD
+salesSummaryRouter.get("/:workspaceId/range", getRangeData);
 
 export default salesSummaryRouter;

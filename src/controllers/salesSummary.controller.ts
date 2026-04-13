@@ -174,3 +174,37 @@ export async function getApiUsage(req: AuthRequest, res: Response): Promise<void
     res.status(500).json({ message: error.message || "Error al obtener uso de API." });
   }
 }
+
+/**
+ * GET /api/sales-summary/:workspaceId/range?from=YYYY-MM-DD&to=YYYY-MM-DD
+ * Returns already-synced daily summaries for an arbitrary date range (reads DB only).
+ */
+export async function getRangeData(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const workspaceId = String(req.params.workspaceId);
+
+    if (!isBoloncityWorkspace(workspaceId)) {
+      res.status(403).json({ message: "Integración Tumesero no disponible para este workspace." });
+      return;
+    }
+
+    const from = String(req.query.from ?? "");
+    const to   = String(req.query.to   ?? "");
+
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) {
+      res.status(400).json({ message: "Use ?from=YYYY-MM-DD&to=YYYY-MM-DD" });
+      return;
+    }
+
+    if (from > to) {
+      res.status(400).json({ message: "La fecha 'from' debe ser anterior o igual a 'to'." });
+      return;
+    }
+
+    const data = await tumeseroService.getRangeSummary(workspaceId, from, to);
+    res.json(data);
+  } catch (error: any) {
+    console.error("[SalesSummary] getRangeData error:", error.message);
+    res.status(500).json({ message: error.message || "Error al obtener datos del rango." });
+  }
+}
