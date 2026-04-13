@@ -13,6 +13,7 @@ import teamKpiRouter from "./teamKpi.router";
 import visitLogRouter from "./visitLog.router";
 import changelogRouter from "./changelog.router";
 import salesSummaryRouter from "./salesSummary.router";
+import cronRouter from "./cron.router";
 
 function routerApi(app: Application) {
   const router = express.Router();
@@ -33,6 +34,7 @@ function routerApi(app: Application) {
   router.use("/visit-logs", visitLogRouter);
   router.use("/changelog", changelogRouter);
   router.use("/sales-summary", salesSummaryRouter);
+  router.use("/cron", cronRouter);
 }
 
 export default routerApi;
