@@ -10,6 +10,8 @@ import { NotificationModel } from "./notification.model";
 import { DailyBillingEntryModel } from "./dailyBilling.model";
 import { TeamKpiRecordModel } from "./teamKpiRecord.model";
 import { VisitLogModel } from "./visitLog.model";
+import { SalesDailySummaryModel } from "./salesDailySummary.model";
+import { TumeseroUsageModel } from "./tumeseroUsage.model";
 
 const models = {
   users: UserModel,
@@ -24,6 +26,8 @@ const models = {
   dailyBilling: DailyBillingEntryModel,
   teamKpiRecords: TeamKpiRecordModel,
   visitLogs: VisitLogModel,
+  salesDailySummary: SalesDailySummaryModel,
+  tumeseroUsage: TumeseroUsageModel,
 };
 
 export default models;
