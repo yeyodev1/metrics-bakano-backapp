@@ -80,20 +80,33 @@ export class TumeseroService {
   async fetchSessions(desde: string, hasta: string): Promise<TumeseroSession[]> {
     const todayStr = getTodayEcuador();
 
-    // Check and update daily usage
-    const usage = await TumeseroUsageModel.findOneAndUpdate(
+    // Check current usage BEFORE incrementing
+    const currentUsage = await TumeseroUsageModel.findOne({ date: todayStr }).lean();
+    const currentCount = currentUsage?.callCount ?? 0;
+    if (currentCount >= DAILY_CALL_LIMIT) {
+      throw new Error(
+        `Límite diario de API alcanzado (${currentCount}/${DAILY_CALL_LIMIT} llamadas). Intenta mañana.`
+      );
+    }
+
+    // Increment usage
+    await TumeseroUsageModel.findOneAndUpdate(
       { date: todayStr },
       { $inc: { callCount: 1 }, $set: { lastCallAt: new Date() } },
       { upsert: true, new: true }
     );
 
     const response = await axios.get<TumeseroApiResponse>(TUMESERO_API_URL, {
-      params: { desde, hasta, token: TUMESERO_TOKEN },
+      params: { desde, hasta, token: TUMESERO_TOKEN, limit: 1000 },
       timeout: 15000,
     });
 
     if (response.data.status !== "ok") {
-      throw new Error("Tumesero API returned non-ok status");
+      throw new Error(`Tumesero API returned non-ok status: ${response.data.status}`);
+    }
+
+    if (!Array.isArray(response.data.data)) {
+      throw new Error("Tumesero API returned malformed data (expected array)");
     }
 
     return response.data.data;
@@ -117,7 +130,7 @@ export class TumeseroService {
     >();
 
     for (const s of sessions) {
-      const isOrder = s.estado_funnel === "CON_ORDEN" || s.estado_funnel === "CON_PAGO";
+      const isOrder = s.estado_pago === "CONFIRMADO";
       const storeName = s.nombre_tienda || "Sin tienda";
 
       if (!storeMap.has(storeName)) {
