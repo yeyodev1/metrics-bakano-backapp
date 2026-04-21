@@ -223,6 +223,7 @@ export class BillingService {
     avgROAS: number;
     entries: any[];
     entryCount: number;
+    totalOnlineRevenue: number;
   }> {
     const normalizedDate = this.normalizeDateToEcuador(date);
 
