@@ -38,6 +38,7 @@ export interface IWorkspace extends Document {
     lastSyncedAt: Date;
   };
   brandProfile?: IBrandProfile;
+  brandProfileInviteSentAt?: Date;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -104,6 +105,10 @@ const WorkspaceSchema = new Schema<IWorkspace>(
     },
     brandProfile: {
       type: BrandProfileSchema,
+      default: null,
+    },
+    brandProfileInviteSentAt: {
+      type: Date,
       default: null,
     },
   },

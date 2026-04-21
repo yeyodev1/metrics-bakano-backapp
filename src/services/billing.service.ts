@@ -46,7 +46,8 @@ export class BillingService {
     userId: string,
     amount: number,
     notes?: string,
-    dateOverride?: Date
+    dateOverride?: Date,
+    onlineRevenue?: number
   ): Promise<InstanceType<typeof models.dailyBilling>> {
     const workspace = await models.workspaces.findById(workspaceId).lean();
     if (!workspace) throw new Error("WORKSPACE_NOT_FOUND");
@@ -101,6 +102,7 @@ export class BillingService {
       userEmail: user.email,
       date: today,
       amount,
+      onlineRevenue: onlineRevenue != null && onlineRevenue > 0 ? onlineRevenue : undefined,
       metaSpend,
       roas,
       notes,
@@ -191,6 +193,7 @@ export class BillingService {
 
     const days = Array.from(dayMap.entries()).map(([isoDate, dayEntries]) => {
       const totalAmount = dayEntries.reduce((sum, e) => sum + e.amount, 0);
+      const totalOnlineRevenue = dayEntries.reduce((sum, e) => sum + (e.onlineRevenue ?? 0), 0);
       const totalMetaSpend = dayEntries[0]?.metaSpend ?? 0;
       const avgROAS = totalMetaSpend > 0 ? totalAmount / totalMetaSpend : 0;
       const dateObj = new Date(isoDate);
@@ -198,6 +201,7 @@ export class BillingService {
         date: dateObj,
         dateStr: this.dateToEcuadorString(dateObj),
         totalAmount,
+        totalOnlineRevenue,
         totalMetaSpend,
         avgROAS,
         entries: dayEntries,
@@ -230,11 +234,13 @@ export class BillingService {
       .lean();
 
     const totalAmount = entries.reduce((sum, e) => sum + e.amount, 0);
+    const totalOnlineRevenue = entries.reduce((sum, e) => sum + (e.onlineRevenue ?? 0), 0);
     const totalMetaSpend = entries[0]?.metaSpend ?? 0;
     const avgROAS = totalMetaSpend > 0 ? totalAmount / totalMetaSpend : 0;
 
     return {
       totalAmount,
+      totalOnlineRevenue,
       totalMetaSpend,
       avgROAS,
       entries,
@@ -265,7 +271,8 @@ export class BillingService {
     requesterId: string,
     requesterRole: string,
     newAmount: number,
-    notes?: string
+    notes?: string,
+    onlineRevenue?: number
   ): Promise<InstanceType<typeof models.dailyBilling>> {
     const entry = await models.dailyBilling.findById(entryId);
     if (!entry) throw new Error("ENTRY_NOT_FOUND");
@@ -291,6 +298,7 @@ export class BillingService {
     entry.amount = newAmount;
     entry.roas = roas;
     if (notes !== undefined) entry.notes = notes;
+    if (onlineRevenue != null) entry.onlineRevenue = onlineRevenue > 0 ? onlineRevenue : undefined;
 
     await entry.save();
 

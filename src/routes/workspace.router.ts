@@ -24,6 +24,7 @@ import {
   upsertBrandProfile,
   uploadBrandProfileFile,
   deleteBrandProfileFile,
+  sendBrandProfileInviteController,
 } from "../controllers/brandProfile.controller";
 
 const workspaceRouter = Router();
@@ -39,26 +40,28 @@ workspaceRouter.put("/global-users/:userId", superadminMiddleware, updateGlobalU
 workspaceRouter.post("/global-users/:userId/resend-invite", superadminMiddleware, resendInvite);
 workspaceRouter.post("/", superadminMiddleware, createWorkspace);
 
-// ── Brand Profile ──────────────────────────────────────────────
-workspaceRouter.get("/:id/brand-profile", internalOrSuperadminMiddleware, getBrandProfile);
-workspaceRouter.patch("/:id/brand-profile", internalOrSuperadminMiddleware, upsertBrandProfile);
+// ── Brand Profile (accessible to all workspace members) ──────────────────
+workspaceRouter.get("/:workspaceId/brand-profile", workspaceAccessMiddleware, getBrandProfile);
+workspaceRouter.patch("/:workspaceId/brand-profile", workspaceAccessMiddleware, upsertBrandProfile);
 workspaceRouter.post(
-  "/:id/brand-profile/files",
+  "/:workspaceId/brand-profile/files",
   internalOrSuperadminMiddleware,
   uploadDocument.single("file"),
   uploadBrandProfileFile
 );
 workspaceRouter.delete(
-  "/:id/brand-profile/files/:publicId",
+  "/:workspaceId/brand-profile/files/:publicId",
   internalOrSuperadminMiddleware,
   deleteBrandProfileFile
 );
+workspaceRouter.post(
+  "/:workspaceId/send-brand-profile-invite",
+  superadminMiddleware,
+  sendBrandProfileInviteController
+);
 
 // ── SPECIFIC Workspace Actions (Superadmin, Admin or Collaborator) ─────────
-// Collaborators have read-only access (GET)
 workspaceRouter.get("/:workspaceId", workspaceAccessMiddleware, getWorkspace);
-
-// Administrative actions (PUT, POST Users, etc.) require Admin/Superadmin
 workspaceRouter.put("/:workspaceId", workspaceAdminMiddleware, updateWorkspace);
 
 // Users Management

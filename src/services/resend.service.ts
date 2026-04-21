@@ -1009,6 +1009,90 @@ export class ResendService {
       html,
     });
   }
+
+  async sendBrandProfileInvite(params: {
+    to: string;
+    recipientName?: string;
+    workspaceName: string;
+    brandProfileUrl: string;
+    completionScore?: number;
+  }): Promise<void> {
+    const { to, recipientName, workspaceName, brandProfileUrl, completionScore = 0 } = params;
+    const firstName = recipientName ? recipientName.split(' ')[0] : 'Cliente';
+    const isReminder = completionScore > 0;
+
+    const html = `<!DOCTYPE html>
+<html lang="es">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+<body style="margin:0;padding:0;background:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="padding:40px 20px;">
+    <tr><td align="center">
+      <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
+
+        <!-- Header -->
+        <tr>
+          <td style="background:linear-gradient(135deg,#7c3aed 0%,#4f46e5 100%);padding:32px 40px;text-align:center;">
+            <p style="margin:0;font-size:13px;font-weight:700;color:rgba(255,255,255,0.7);letter-spacing:2px;text-transform:uppercase;">Bakano Ads</p>
+            <h1 style="margin:12px 0 0;font-size:24px;font-weight:800;color:#ffffff;">
+              ${isReminder ? '⏰ Recordatorio: completa tu perfil' : '🚀 Un paso para empezar a vender más'}
+            </h1>
+          </td>
+        </tr>
+
+        <!-- Body -->
+        <tr>
+          <td style="padding:32px 40px 24px;">
+            <p style="margin:0 0 20px;font-size:16px;color:#1e293b;">Hola <strong>${firstName}</strong>,</p>
+            <p style="margin:0 0 20px;font-size:15px;color:#475569;line-height:1.7;">
+              ${isReminder
+                ? `Tu perfil de marca de <strong>${workspaceName}</strong> está al <strong>${completionScore}%</strong>. Mientras no esté completo, no podemos crear contenido que realmente venda para tu negocio.`
+                : `Tu acceso a <strong>${workspaceName}</strong> en Bakano Ads está listo. Antes de que empecemos a crear contenido para ti, necesitamos que completes tu <strong>Perfil de Marca</strong>.`
+              }
+            </p>
+
+            <!-- Why section -->
+            <div style="background:#faf5ff;border:1.5px solid #e9d5ff;border-radius:12px;padding:20px 24px;margin-bottom:24px;">
+              <p style="margin:0 0 12px;font-size:13px;font-weight:700;color:#7c3aed;text-transform:uppercase;letter-spacing:0.5px;">¿Por qué es importante?</p>
+              <table cellpadding="0" cellspacing="0">
+                <tr><td style="padding:4px 0;color:#4c1d95;font-size:14px;">✅ &nbsp;La IA aprende cómo habla tu negocio</td></tr>
+                <tr><td style="padding:4px 0;color:#4c1d95;font-size:14px;">✅ &nbsp;Creamos videos TOFU, MOFU y BOFU específicos para ti</td></tr>
+                <tr><td style="padding:4px 0;color:#4c1d95;font-size:14px;">✅ &nbsp;El contenido genérico no vende — el tuyo, sí</td></tr>
+                <tr><td style="padding:4px 0;color:#4c1d95;font-size:14px;">✅ &nbsp;Solo toma 10 minutos y es la base de todo</td></tr>
+              </table>
+            </div>
+
+            <!-- CTA -->
+            <div style="text-align:center;margin-bottom:24px;">
+              <a href="${brandProfileUrl}" style="display:inline-block;background:linear-gradient(135deg,#7c3aed 0%,#4f46e5 100%);color:#ffffff;text-decoration:none;padding:14px 36px;border-radius:10px;font-size:15px;font-weight:700;letter-spacing:0.2px;">
+                Completar mi Perfil de Marca →
+              </a>
+              <p style="margin:12px 0 0;font-size:12px;color:#94a3b8;">Solo toma 10 minutos · Puedes guardarlo en cualquier momento</p>
+            </div>
+          </td>
+        </tr>
+
+        <!-- Footer -->
+        <tr>
+          <td style="background:#f8fafc;padding:16px 40px;border-top:1px solid #e2e8f0;text-align:center;">
+            <p style="margin:0;color:#94a3b8;font-size:12px;">Enviado automáticamente por <strong>Bakano Ads</strong>.<br/>Si tienes dudas, contáctanos en soporte@bakano.ec</p>
+          </td>
+        </tr>
+
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+
+    await this.client.emails.send({
+      from: this.from,
+      to,
+      subject: isReminder
+        ? `⏰ Recordatorio: tu perfil de marca de ${workspaceName} está incompleto`
+        : `🚀 Completa tu Perfil de Marca — ${workspaceName}`,
+      html,
+    });
+  }
 }
 
 export const resendService = new ResendService();

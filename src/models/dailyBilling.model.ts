@@ -7,6 +7,7 @@ export interface IDailyBillingEntry extends Document {
   userEmail: string;
   date: Date;
   amount: number;
+  onlineRevenue?: number;
   metaSpend: number;
   roas: number;
   notes?: string;
@@ -22,6 +23,7 @@ const DailyBillingEntrySchema = new Schema<IDailyBillingEntry>(
     userEmail: { type: String, required: true, trim: true },
     date: { type: Date, required: true },
     amount: { type: Number, required: true, min: 0 },
+    onlineRevenue: { type: Number, min: 0 },
     metaSpend: { type: Number, required: true, default: 0 },
     roas: { type: Number, required: true, default: 0 },
     notes: { type: String, trim: true },

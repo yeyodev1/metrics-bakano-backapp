@@ -6,15 +6,33 @@ import models from "../models";
 import cloudinary from "../config/cloudinary";
 import { notificationService } from "../services/notification.service";
 import { geminiService } from "../services/gemini.service";
+import { resendService } from "../services/resend.service";
 
-// ── GET /:id/brand-profile ─────────────────────────────────────────────────
+// ── Helper: compute brand profile completion 0-100 ─────────────────────────
+export function getBrandProfileCompletionScore(bp: any): number {
+  if (!bp) return 0;
+  const required = [
+    bp.descripcion?.trim(),
+    bp.tipoNegocio,
+    bp.publicoObjetivo?.trim(),
+    bp.propuestaValor?.trim(),
+    bp.tono?.trim(),
+    bp.productosServicios?.trim(),
+    bp.problemaResuelto?.trim(),
+    bp.trafficDirection,
+    bp.trafficLink?.trim(),
+  ];
+  return Math.round(required.filter(Boolean).length / required.length * 100);
+}
+
+// ── GET /:workspaceId/brand-profile ───────────────────────────────────────
 export async function getBrandProfile(
   req: AuthRequest,
   res: Response,
   next: NextFunction
 ) {
   try {
-    const id = req.params["id"] as string;
+    const id = req.params["workspaceId"] as string;
     if (!Types.ObjectId.isValid(id)) {
       res.status(HttpStatusCode.BadRequest).send({ message: "Invalid workspace id." });
       return;
@@ -26,21 +44,26 @@ export async function getBrandProfile(
       return;
     }
 
-    res.status(HttpStatusCode.Ok).send({ brandProfile: workspace.brandProfile || null });
+    const completion = getBrandProfileCompletionScore(workspace.brandProfile);
+    res.status(HttpStatusCode.Ok).send({
+      brandProfile: workspace.brandProfile || null,
+      completion,
+      brandProfileInviteSentAt: (workspace as any).brandProfileInviteSentAt || null,
+    });
   } catch (error) {
     console.error("getBrandProfile error:", error);
     next(error);
   }
 }
 
-// ── PATCH /:id/brand-profile ───────────────────────────────────────────────
+// ── PATCH /:workspaceId/brand-profile ─────────────────────────────────────
 export async function upsertBrandProfile(
   req: AuthRequest,
   res: Response,
   next: NextFunction
 ) {
   try {
-    const id = req.params["id"] as string;
+    const id = req.params["workspaceId"] as string;
     if (!Types.ObjectId.isValid(id)) {
       res.status(HttpStatusCode.BadRequest).send({ message: "Invalid workspace id." });
       return;
@@ -52,23 +75,15 @@ export async function upsertBrandProfile(
       return;
     }
 
-    const hadBrandProfile = !!(
-      workspace.brandProfile && workspace.brandProfile.descripcion
-    );
+    const prevScore = getBrandProfileCompletionScore(workspace.brandProfile);
 
     const {
       descripcion, tipoNegocio, vertical, trafficDirection, trafficLink,
       publicoObjetivo, propuestaValor, tono, productosServicios, problemaResuelto,
     } = req.body;
 
-    // Initialize brandProfile if not exists
     if (!workspace.brandProfile) {
-      (workspace as any).brandProfile = {
-        descripcion: "",
-        vertical: "",
-        trafficLink: "",
-        archivos: [],
-      };
+      (workspace as any).brandProfile = { descripcion: "", vertical: "", trafficLink: "", archivos: [] };
     }
 
     if (descripcion !== undefined) (workspace.brandProfile as any).descripcion = descripcion;
@@ -85,17 +100,17 @@ export async function upsertBrandProfile(
 
     await workspace.save();
 
-    // If brand profile was missing before and now has content, notify internal CM/content managers
-    const nowHasBrandProfile = !!(
-      workspace.brandProfile && workspace.brandProfile.descripcion
-    );
-    if (!hadBrandProfile && nowHasBrandProfile) {
-      await _notifyInternalRoles(id, workspace.name, "brand_profile_missing");
+    const newScore = getBrandProfileCompletionScore(workspace.brandProfile);
+
+    // When profile first reaches 100%, notify entire internal team
+    if (prevScore < 100 && newScore === 100) {
+      await _notifyOnCompletion(id, workspace.name).catch(() => {});
     }
 
     res.status(HttpStatusCode.Ok).send({
       message: "Brand profile updated.",
       brandProfile: workspace.brandProfile,
+      completion: newScore,
     });
   } catch (error) {
     console.error("upsertBrandProfile error:", error);
@@ -103,14 +118,14 @@ export async function upsertBrandProfile(
   }
 }
 
-// ── POST /:id/brand-profile/files ──────────────────────────────────────────
+// ── POST /:workspaceId/brand-profile/files ────────────────────────────────
 export async function uploadBrandProfileFile(
   req: AuthRequest,
   res: Response,
   next: NextFunction
 ) {
   try {
-    const id = req.params["id"] as string;
+    const id = req.params["workspaceId"] as string;
     if (!Types.ObjectId.isValid(id)) {
       res.status(HttpStatusCode.BadRequest).send({ message: "Invalid workspace id." });
       return;
@@ -131,14 +146,10 @@ export async function uploadBrandProfileFile(
     const isPdf = mimetype === "application/pdf";
     const folder = `brand-profiles/${id}`;
 
-    // Upload to Cloudinary
     const cloudinaryResult = await new Promise<{ url: string; public_id: string }>(
       (resolve, reject) => {
         const stream = cloudinary.uploader.upload_stream(
-          {
-            folder,
-            resource_type: isPdf ? "raw" : "image",
-          },
+          { folder, resource_type: isPdf ? "raw" : "image" },
           (error, result) => {
             if (error || !result) return reject(error || new Error("Cloudinary upload failed"));
             resolve({ url: result.secure_url, public_id: result.public_id });
@@ -148,15 +159,10 @@ export async function uploadBrandProfileFile(
       }
     );
 
-    // Upload to Gemini Files API and cache URI
     let geminiFileUri: string | undefined;
     let geminiFileMimeType: string | undefined;
     try {
-      const geminiResult = await geminiService.uploadFileBuffer(
-        buffer,
-        mimetype,
-        originalname
-      );
+      const geminiResult = await geminiService.uploadFileBuffer(buffer, mimetype, originalname);
       geminiFileUri = geminiResult.uri;
       geminiFileMimeType = geminiResult.mimeType;
     } catch (geminiError) {
@@ -172,14 +178,8 @@ export async function uploadBrandProfileFile(
       geminiFileMimeType,
     };
 
-    // Initialize brandProfile if needed
     if (!workspace.brandProfile) {
-      (workspace as any).brandProfile = {
-        descripcion: "",
-        vertical: "",
-        trafficLink: "",
-        archivos: [],
-      };
+      (workspace as any).brandProfile = { descripcion: "", vertical: "", trafficLink: "", archivos: [] };
     }
 
     (workspace.brandProfile as any).archivos.push(fileEntry);
@@ -197,14 +197,14 @@ export async function uploadBrandProfileFile(
   }
 }
 
-// ── DELETE /:id/brand-profile/files/:publicId ──────────────────────────────
+// ── DELETE /:workspaceId/brand-profile/files/:publicId ────────────────────
 export async function deleteBrandProfileFile(
   req: AuthRequest,
   res: Response,
   next: NextFunction
 ) {
   try {
-    const id = req.params["id"] as string;
+    const id = req.params["workspaceId"] as string;
     const publicId = req.params["publicId"] as string;
 
     if (!Types.ObjectId.isValid(id)) {
@@ -232,20 +232,14 @@ export async function deleteBrandProfileFile(
       return;
     }
 
-    // Delete from Cloudinary
     const isPdf = fileEntry.tipo === "pdf";
     try {
-      await cloudinary.uploader.destroy(decodedPublicId, {
-        resource_type: isPdf ? "raw" : "image",
-      });
+      await cloudinary.uploader.destroy(decodedPublicId, { resource_type: isPdf ? "raw" : "image" });
     } catch (cloudinaryError) {
       console.warn("Cloudinary deletion failed (non-fatal):", cloudinaryError);
     }
 
-    // Remove from archivos array
-    (workspace.brandProfile as any).archivos = archivos.filter(
-      (f: any) => f.publicId !== decodedPublicId
-    );
+    (workspace.brandProfile as any).archivos = archivos.filter((f: any) => f.publicId !== decodedPublicId);
     (workspace.brandProfile as any).updatedAt = new Date();
     await workspace.save();
 
@@ -259,34 +253,149 @@ export async function deleteBrandProfileFile(
   }
 }
 
-// ── Helper: notify internal CM/content managers ────────────────────────────
-export async function notifyBrandProfileMissing(workspaceId: string, workspaceName: string) {
-  await _notifyInternalRoles(workspaceId, workspaceName, "brand_profile_missing");
+// ── POST /:workspaceId/send-brand-profile-invite ──────────────────────────
+export async function sendBrandProfileInviteController(
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+) {
+  try {
+    const workspaceId = req.params["workspaceId"] as string;
+    if (!Types.ObjectId.isValid(workspaceId)) {
+      res.status(HttpStatusCode.BadRequest).send({ message: "Invalid workspace id." });
+      return;
+    }
+
+    const workspace = await models.workspaces.findById(workspaceId);
+    if (!workspace) {
+      res.status(HttpStatusCode.NotFound).send({ message: "Workspace not found." });
+      return;
+    }
+
+    const appUrl = process.env.APP_URL || 'https://metrics.bakano.ec';
+    const brandProfileUrl = `${appUrl}/app/workspaces/${workspaceId}/brand-profile`;
+    const score = getBrandProfileCompletionScore(workspace.brandProfile);
+
+    // Find external client users for this workspace
+    const clients = await models.users.find({
+      isInternal: false,
+      role: { $ne: 'superadmin' },
+      'workspaces.workspaceId': new Types.ObjectId(workspaceId),
+      isActive: true,
+    }).lean();
+
+    if (clients.length === 0) {
+      res.status(HttpStatusCode.BadRequest).send({ message: "No client users found for this workspace." });
+      return;
+    }
+
+    // Send email to each client
+    const emailPromises = clients.map(client =>
+      resendService.sendBrandProfileInvite({
+        to: client.email,
+        recipientName: client.name,
+        workspaceName: workspace.name,
+        brandProfileUrl,
+        completionScore: score,
+      }).catch(err => console.error('[brand-profile-invite] email error:', err?.message))
+    );
+    await Promise.allSettled(emailPromises);
+
+    // Mark invite as sent on workspace
+    (workspace as any).brandProfileInviteSentAt = new Date();
+    await workspace.save();
+
+    res.status(HttpStatusCode.Ok).send({
+      message: `Invitación enviada a ${clients.length} cliente(s).`,
+      sentTo: clients.map(c => c.email),
+    });
+  } catch (error) {
+    console.error("sendBrandProfileInviteController error:", error);
+    next(error);
+  }
 }
 
-async function _notifyInternalRoles(
+// ── Exported helper for cron ───────────────────────────────────────────────
+export async function notifyBrandProfileMissing(workspaceId: string, workspaceName: string) {
+  await _notifyAllStakeholders(workspaceId, workspaceName, 0);
+}
+
+// ── Internal: notify all stakeholders when profile is incomplete ──────────
+export async function _notifyAllStakeholders(
   workspaceId: string,
   workspaceName: string,
-  type: "brand_profile_missing"
+  score: number
 ) {
   try {
     const wsId = new Types.ObjectId(workspaceId);
-    const internalUsers = await models.users.find({
-      isInternal: true,
-      internalRole: { $in: ["community_manager", "content_manager"] },
-      "workspaces.workspaceId": wsId,
-    });
 
-    for (const user of internalUsers) {
-      await notificationService.create(
-        (user._id as Types.ObjectId).toString(),
-        type,
-        "Perfil de marca pendiente",
-        `El workspace ${workspaceName} no tiene configurado su perfil de marca. Por favor completa la información para poder generar guiones con IA.`,
+    // 1. Superadmins
+    const superadmins = await models.users.find({ role: 'superadmin', isActive: true }).lean();
+    for (const admin of superadmins) {
+      notificationService.create(
+        (admin._id as Types.ObjectId).toString(),
+        'brand_profile_missing',
+        'Perfil de marca incompleto',
+        `${workspaceName} tiene su perfil al ${score}%. El cliente aún no lo ha completado.`,
         { workspaceId: wsId }
-      );
+      ).catch(() => {});
+    }
+
+    // 2. Project managers assigned to this workspace
+    const pms = await models.users.find({
+      isInternal: true,
+      internalRole: 'project_manager',
+      'workspaces.workspaceId': wsId,
+      isActive: true,
+    }).lean();
+    for (const pm of pms) {
+      notificationService.create(
+        (pm._id as Types.ObjectId).toString(),
+        'brand_profile_missing',
+        'Perfil de marca incompleto',
+        `${workspaceName} tiene su perfil al ${score}%. El cliente aún no lo ha completado.`,
+        { workspaceId: wsId }
+      ).catch(() => {});
+    }
+
+    // 3. External clients of this workspace
+    const clients = await models.users.find({
+      isInternal: false,
+      role: { $ne: 'superadmin' },
+      'workspaces.workspaceId': wsId,
+      isActive: true,
+    }).lean();
+    for (const client of clients) {
+      notificationService.create(
+        (client._id as Types.ObjectId).toString(),
+        'brand_profile_missing',
+        'Tu perfil de marca está incompleto',
+        `Tu perfil está al ${score}%. Complétalo para que creemos contenido que venda para tu negocio.`,
+        { workspaceId: wsId }
+      ).catch(() => {});
     }
   } catch (error) {
-    console.error("_notifyInternalRoles error:", error);
+    console.error("_notifyAllStakeholders error:", error);
+  }
+}
+
+// ── Internal: notify on first completion ──────────────────────────────────
+async function _notifyOnCompletion(workspaceId: string, workspaceName: string) {
+  const wsId = new Types.ObjectId(workspaceId);
+
+  const internalUsers = await models.users.find({
+    isInternal: true,
+    'workspaces.workspaceId': wsId,
+    isActive: true,
+  }).lean();
+
+  for (const user of internalUsers) {
+    notificationService.create(
+      (user._id as Types.ObjectId).toString(),
+      'brand_profile_missing',
+      'Perfil de marca completado',
+      `El cliente de ${workspaceName} completó su perfil de marca al 100%. Ya pueden generarse guiones con IA.`,
+      { workspaceId: wsId }
+    ).catch(() => {});
   }
 }
