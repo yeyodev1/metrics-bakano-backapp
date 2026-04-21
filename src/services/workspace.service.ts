@@ -536,11 +536,13 @@ export class WorkspaceService {
       // Ensure user role is 'user' for multi-workspace logic
       user.role = "user";
 
-      // Replace or update workspaces
-      user.workspaces = payload.workspaces.map(ws => ({
-        workspaceId: new Types.ObjectId(ws.workspaceId),
-        role: ws.role
-      }));
+      // Internal users keep all workspaces managed by migration script — never overwrite
+      if (!user.isInternal) {
+        user.workspaces = payload.workspaces.map(ws => ({
+          workspaceId: new Types.ObjectId(ws.workspaceId),
+          role: ws.role
+        }));
+      }
 
       await user.save();
       await user.populate("workspaces.workspaceId", "name");
@@ -612,7 +614,7 @@ export class WorkspaceService {
     if (payload.internalRole !== undefined) (user as any).internalRole = payload.internalRole;
 
     let newWorkspaceIds: string[] = [];
-    if (payload.workspaces) {
+    if (payload.workspaces && !user.isInternal) {
       const oldIds = new Set((user.workspaces || []).map(w => w.workspaceId.toString()));
       newWorkspaceIds = payload.workspaces
         .filter(ws => !oldIds.has(ws.workspaceId))
