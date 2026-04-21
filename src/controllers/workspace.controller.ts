@@ -120,6 +120,29 @@ export async function updateWorkspace(req: AuthRequest, res: Response, next: Nex
   }
 }
 
+export async function toggleWorkspaceActive(req: AuthRequest, res: Response, next: NextFunction) {
+  try {
+    const workspaceId = req.params["workspaceId"] as string;
+    const { isActive } = req.body;
+    if (typeof isActive !== "boolean") {
+      res.status(HttpStatusCode.BadRequest).send({ message: "isActive debe ser un booleano." });
+      return;
+    }
+    const workspace = await workspaceService.toggleWorkspaceActive(workspaceId, isActive);
+    res.status(HttpStatusCode.Ok).send({
+      message: `Entorno ${isActive ? "activado" : "desactivado"} correctamente.`,
+      workspace,
+    });
+  } catch (error: any) {
+    if (error.message === "INVALID_ID" || error.message === "NOT_FOUND") {
+      res.status(HttpStatusCode.NotFound).send({ message: "Entorno no encontrado." });
+      return;
+    }
+    console.error("toggleWorkspaceActive error:", error);
+    next(error);
+  }
+}
+
 export async function listAllCollaborators(req: AuthRequest, res: Response, next: NextFunction) {
   try {
     const search = req.query["search"] as string;

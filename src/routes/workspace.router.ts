@@ -10,6 +10,7 @@ import {
   listWorkspaces,
   getWorkspace,
   updateWorkspace,
+  toggleWorkspaceActive,
   listUsers,
   createUser,
   updateUser,
@@ -63,6 +64,7 @@ workspaceRouter.post(
 // ── SPECIFIC Workspace Actions (Superadmin, Admin or Collaborator) ─────────
 workspaceRouter.get("/:workspaceId", workspaceAccessMiddleware, getWorkspace);
 workspaceRouter.put("/:workspaceId", workspaceAdminMiddleware, updateWorkspace);
+workspaceRouter.patch("/:workspaceId/toggle-active", superadminMiddleware, toggleWorkspaceActive);
 
 // Users Management
 workspaceRouter.get("/:workspaceId/users", workspaceAccessMiddleware, listUsers);

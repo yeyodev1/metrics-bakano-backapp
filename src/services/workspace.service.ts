@@ -69,7 +69,7 @@ export class WorkspaceService {
     const { search, page = 1, limit = 10 } = options;
     const skip = (page - 1) * limit;
 
-    const query: any = { isActive: true };
+    const query: any = {};
     if (search) {
       query.name = { $regex: search, $options: "i" };
     }
@@ -644,6 +644,17 @@ export class WorkspaceService {
 
     const { password, ...withoutPassword } = user.toObject();
     return withoutPassword;
+  }
+
+  async toggleWorkspaceActive(workspaceId: string, isActive: boolean) {
+    if (!Types.ObjectId.isValid(workspaceId)) throw new Error("INVALID_ID");
+    const workspace = await models.workspaces.findByIdAndUpdate(
+      workspaceId,
+      { isActive },
+      { new: true }
+    ).lean();
+    if (!workspace) throw new Error("NOT_FOUND");
+    return workspace;
   }
 }
 
