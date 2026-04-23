@@ -510,6 +510,47 @@ export class WorkspaceService {
     return true;
   }
 
+  // ── Internal User Management ──────────────────────────────────
+
+  async listInternalUsers() {
+    return models.users
+      .find({ isInternal: true })
+      .select("-password")
+      .sort({ internalRole: 1, name: 1 })
+      .lean();
+  }
+
+  async createInternalUser(payload: { name?: string; email: string; password: string; internalRole: string }) {
+    const existing = await models.users.findOne({ email: payload.email.toLowerCase().trim() }).lean();
+    if (existing) throw new Error("EMAIL_TAKEN");
+
+    const hashed = await bcrypt.hash(payload.password, 10);
+    const user = await models.users.create({
+      name: payload.name?.trim(),
+      email: payload.email.toLowerCase().trim(),
+      password: hashed,
+      role: "user",
+      isInternal: true,
+      internalRole: payload.internalRole,
+      workspaces: [],
+      isActive: true,
+    });
+
+    const { password, ...withoutPassword } = user.toObject();
+    return withoutPassword;
+  }
+
+  async deleteInternalUser(requestingUserId: string, targetUserId: string) {
+    if (!Types.ObjectId.isValid(targetUserId)) throw new Error("INVALID_ID");
+    if (requestingUserId === targetUserId) throw new Error("CANNOT_DELETE_SELF");
+
+    const user = await models.users.findOne({ _id: targetUserId, isInternal: true });
+    if (!user) throw new Error("NOT_FOUND");
+
+    await models.users.findByIdAndDelete(targetUserId);
+    return true;
+  }
+
   // ── Global User Management (Multi-workspace) ─────────────────
 
   async createGlobalUser(payload: CreateGlobalUserPayload) {
@@ -614,7 +655,7 @@ export class WorkspaceService {
     if (payload.internalRole !== undefined) (user as any).internalRole = payload.internalRole;
 
     let newWorkspaceIds: string[] = [];
-    if (payload.workspaces && !user.isInternal) {
+    if (payload.workspaces) {
       const oldIds = new Set((user.workspaces || []).map(w => w.workspaceId.toString()));
       newWorkspaceIds = payload.workspaces
         .filter(ws => !oldIds.has(ws.workspaceId))
