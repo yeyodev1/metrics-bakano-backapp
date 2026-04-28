@@ -47,7 +47,8 @@ export class BillingService {
     amount: number,
     notes?: string,
     dateOverride?: Date,
-    onlineRevenue?: number
+    onlineRevenue?: number,
+    branches?: { branchId: string; amount: number }[]
   ): Promise<InstanceType<typeof models.dailyBilling>> {
     const workspace = await models.workspaces.findById(workspaceId).lean();
     if (!workspace) throw new Error("WORKSPACE_NOT_FOUND");
@@ -103,6 +104,10 @@ export class BillingService {
       date: today,
       amount,
       onlineRevenue: onlineRevenue != null && onlineRevenue > 0 ? onlineRevenue : undefined,
+      branches: branches?.map(b => ({
+        branchId: new Types.ObjectId(b.branchId),
+        amount: b.amount
+      })),
       metaSpend,
       roas,
       notes,
@@ -273,7 +278,8 @@ export class BillingService {
     requesterRole: string,
     newAmount: number,
     notes?: string,
-    onlineRevenue?: number
+    onlineRevenue?: number,
+    branches?: { branchId: string; amount: number }[]
   ): Promise<InstanceType<typeof models.dailyBilling>> {
     const entry = await models.dailyBilling.findById(entryId);
     if (!entry) throw new Error("ENTRY_NOT_FOUND");
@@ -300,6 +306,12 @@ export class BillingService {
     entry.roas = roas;
     if (notes !== undefined) entry.notes = notes;
     if (onlineRevenue != null) entry.onlineRevenue = onlineRevenue > 0 ? onlineRevenue : undefined;
+    if (branches !== undefined) {
+      (entry as any).branches = branches.map(b => ({
+        branchId: new Types.ObjectId(b.branchId),
+        amount: b.amount
+      }));
+    }
 
     await entry.save();
 

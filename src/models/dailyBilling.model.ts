@@ -1,5 +1,10 @@
 import { Schema, model, Document, Types } from "mongoose";
 
+export interface IBillingBranch {
+  branchId: Types.ObjectId;
+  amount: number;
+}
+
 export interface IDailyBillingEntry extends Document {
   workspaceId: Types.ObjectId;
   userId: Types.ObjectId;
@@ -8,6 +13,7 @@ export interface IDailyBillingEntry extends Document {
   date: Date;
   amount: number;
   onlineRevenue?: number;
+  branches?: IBillingBranch[];
   metaSpend: number;
   roas: number;
   notes?: string;
@@ -24,6 +30,12 @@ const DailyBillingEntrySchema = new Schema<IDailyBillingEntry>(
     date: { type: Date, required: true },
     amount: { type: Number, required: true, min: 0 },
     onlineRevenue: { type: Number, min: 0 },
+    branches: [
+      {
+        branchId: { type: Schema.Types.ObjectId, ref: "Branch", required: true },
+        amount: { type: Number, required: true, min: 0 },
+      },
+    ],
     metaSpend: { type: Number, required: true, default: 0 },
     roas: { type: Number, required: true, default: 0 },
     notes: { type: String, trim: true },

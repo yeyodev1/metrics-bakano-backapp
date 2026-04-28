@@ -27,6 +27,12 @@ import {
   deleteBrandProfileFile,
   sendBrandProfileInviteController,
 } from "../controllers/brandProfile.controller";
+import {
+  getBranches,
+  createBranch,
+  updateBranch,
+  deleteBranch,
+} from "../controllers/branch.controller";
 
 const workspaceRouter = Router();
 
@@ -71,5 +77,11 @@ workspaceRouter.get("/:workspaceId/users", workspaceAccessMiddleware, listUsers)
 workspaceRouter.post("/:workspaceId/users", workspaceAdminMiddleware, createUser);
 workspaceRouter.put("/:workspaceId/users/:userId", workspaceAdminMiddleware, updateUser);
 workspaceRouter.delete("/:workspaceId/users/:userId", workspaceAdminMiddleware, deleteUser);
+
+// Branches Management
+workspaceRouter.get("/:workspaceId/branches", workspaceAccessMiddleware, getBranches);
+workspaceRouter.post("/:workspaceId/branches", workspaceAdminMiddleware, createBranch);
+workspaceRouter.put("/:workspaceId/branches/:id", workspaceAdminMiddleware, updateBranch);
+workspaceRouter.delete("/:workspaceId/branches/:id", workspaceAdminMiddleware, deleteBranch);
 
 export default workspaceRouter;

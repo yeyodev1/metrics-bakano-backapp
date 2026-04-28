@@ -11,7 +11,7 @@ export async function createBillingEntry(req: AuthRequest, res: Response): Promi
   try {
     const { workspaceId } = req.params;
     const userId = req.user!._id;
-    const { amount, notes, date, onlineRevenue } = req.body;
+    const { amount, notes, date, onlineRevenue, branches } = req.body;
 
     if (amount === undefined || amount === null) {
       res.status(400).json({ message: "El monto (amount) es requerido." });
@@ -42,7 +42,7 @@ export async function createBillingEntry(req: AuthRequest, res: Response): Promi
       entryDate = parsed;
     }
 
-    const entry = await billingService.createEntry(workspaceId as string, userId as string, amount, notes, entryDate, onlineRevenue);
+    const entry = await billingService.createEntry(workspaceId as string, userId as string, amount, notes, entryDate, onlineRevenue, branches);
 
     res.status(201).json({ message: "Entrada de facturación registrada exitosamente.", entry });
   } catch (error: any) {
@@ -127,7 +127,7 @@ export async function updateBillingEntry(req: AuthRequest, res: Response): Promi
     const { workspaceId, entryId } = req.params;
     const requesterId = req.user!._id;
     const requesterRole = req.user!.role;
-    const { amount, notes, onlineRevenue: updOnlineRevenue } = req.body;
+    const { amount, notes, onlineRevenue: updOnlineRevenue, branches } = req.body;
 
     if (amount === undefined || amount === null) {
       res.status(400).json({ message: "El monto (amount) es requerido." });
@@ -146,7 +146,8 @@ export async function updateBillingEntry(req: AuthRequest, res: Response): Promi
       requesterRole as string,
       amount,
       notes,
-      updOnlineRevenue
+      updOnlineRevenue,
+      branches
     );
 
     res.status(200).json({ message: "Entrada de facturación actualizada.", entry });
