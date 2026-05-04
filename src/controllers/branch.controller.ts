@@ -13,7 +13,7 @@ const HttpStatusCode = {
 
 export async function getBranches(req: Request, res: Response) {
   try {
-    const { workspaceId } = req.params;
+    const workspaceId = req.params.workspaceId as string;
 
     if (!Types.ObjectId.isValid(workspaceId)) {
       res.status(HttpStatusCode.BadRequest).send({
@@ -42,7 +42,7 @@ export async function getBranches(req: Request, res: Response) {
 
 export async function createBranch(req: Request, res: Response) {
   try {
-    const { workspaceId } = req.params;
+    const workspaceId = req.params.workspaceId as string;
     const { name } = req.body;
 
     if (!Types.ObjectId.isValid(workspaceId)) {
@@ -80,7 +80,7 @@ export async function createBranch(req: Request, res: Response) {
 
 export async function updateBranch(req: Request, res: Response) {
   try {
-    const { id } = req.params;
+    const id = req.params.id as string;
     const { name, isActive } = req.body;
 
     if (!Types.ObjectId.isValid(id)) {
@@ -123,7 +123,7 @@ export async function updateBranch(req: Request, res: Response) {
 
 export async function deleteBranch(req: Request, res: Response) {
   try {
-    const { id } = req.params;
+    const id = req.params.id as string;
 
     if (!Types.ObjectId.isValid(id)) {
       res.status(HttpStatusCode.BadRequest).send({
