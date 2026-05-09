@@ -33,6 +33,8 @@ export interface IUser extends Document {
   isActive: boolean;
   phoneNumber?: string;
   phoneExtension?: string;
+  apiKey?: string;
+  apiKeyCreatedAt?: Date;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -97,6 +99,14 @@ export const UserSchema = new Schema<IUser>(
     phoneExtension: {
       type: String,
       trim: true,
+    },
+    apiKey: {
+      type: String,
+      index: true,
+      sparse: true,
+    },
+    apiKeyCreatedAt: {
+      type: Date,
     },
   },
   {
