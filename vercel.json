@@ -11,5 +11,11 @@
       "source": "/(.*)",
       "destination": "dist/index.js"
     }
+  ],
+  "crons": [
+    {
+      "path": "/api/cron/tumesero-sync",
+      "schedule": "0 4 * * *"
+    }
   ]
 }

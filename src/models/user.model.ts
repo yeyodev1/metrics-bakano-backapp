@@ -5,6 +5,22 @@ export interface IUserWorkspaceAccess {
   role: "admin" | "colaborador";
 }
 
+export type InternalRole =
+  | 'director'
+  | 'estratega'
+  | 'project_manager'
+  | 'content_manager'
+  | 'account_manager'
+  | 'community_manager'
+  | 'productor'
+  | 'asistente_produccion'
+  | 'editor'
+  | 'disenador'
+  | 'copywriter'
+  | 'analista'
+  | 'desarrollador'
+  | 'trafficker'
+
 export interface IUser extends Document {
   name?: string;
   email: string;
@@ -12,14 +28,18 @@ export interface IUser extends Document {
   role: "superadmin" | "user" | "admin" | "colaborador";
   workspaceId?: Types.ObjectId;
   workspaces: IUserWorkspaceAccess[];
+  isInternal: boolean;
+  internalRole?: InternalRole;
   isActive: boolean;
   phoneNumber?: string;
   phoneExtension?: string;
+  apiKey?: string;
+  apiKeyCreatedAt?: Date;
   createdAt: Date;
   updatedAt: Date;
 }
 
-const UserSchema = new Schema<IUser>(
+export const UserSchema = new Schema<IUser>(
   {
     name: {
       type: String,
@@ -59,6 +79,15 @@ const UserSchema = new Schema<IUser>(
         },
       }
     ],
+    isInternal: {
+      type: Boolean,
+      default: false,
+    },
+    internalRole: {
+      type: String,
+      enum: ['director', 'estratega', 'project_manager', 'content_manager', 'account_manager', 'community_manager', 'productor', 'asistente_produccion', 'editor', 'disenador', 'copywriter', 'analista', 'desarrollador', 'trafficker'],
+      default: null,
+    },
     isActive: {
       type: Boolean,
       default: true,
@@ -70,6 +99,14 @@ const UserSchema = new Schema<IUser>(
     phoneExtension: {
       type: String,
       trim: true,
+    },
+    apiKey: {
+      type: String,
+      index: true,
+      sparse: true,
+    },
+    apiKeyCreatedAt: {
+      type: Date,
     },
   },
   {

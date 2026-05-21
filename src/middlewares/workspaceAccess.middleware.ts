@@ -33,11 +33,21 @@ export async function workspaceAccessMiddleware(
       return;
     }
 
+    if (user.isInternal) {
+      next();
+      return;
+    }
+
     const hasAccess = user.workspaces?.some(
       (ws) => ws.workspaceId.toString() === paramWsId
     ) || (user.workspaceId && user.workspaceId.toString() === paramWsId);
 
     if (hasAccess) {
+      const workspace = await models.workspaces.findById(paramWsId).select("isActive").lean();
+      if (!workspace || !workspace.isActive) {
+        res.status(HttpStatusCode.Forbidden).send({ message: "Este entorno está desactivado." });
+        return;
+      }
       next();
       return;
     }

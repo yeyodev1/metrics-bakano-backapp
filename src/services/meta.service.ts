@@ -129,31 +129,58 @@ export class MetaService {
     }
   }
 
-  async getAdInsights(adAccountId: string, accessToken: string, datePreset: string = "this_month") {
-    try {
-      // 1. Get Aggregated Insights
-      const aggregatedResponse = await axios.get(`${this.graphUrl}/act_${adAccountId}/insights`, {
-        params: {
-          access_token: accessToken,
-          level: "ad",
-          fields: "ad_id,ad_name,campaign_name,spend,impressions,clicks,cpc,cpm,reach,actions,action_values,cost_per_action_type,purchase_roas",
-          date_preset: datePreset,
-        },
-      });
+  private dateParams(datePreset: string, timeRange?: { since: string; until: string }) {
+    return timeRange
+      ? { time_range: JSON.stringify(timeRange) }
+      : { date_preset: datePreset }
+  }
 
-      // 2. Get Daily Insights for Time Series Chart
-      const dailyResponse = await axios.get(`${this.graphUrl}/act_${adAccountId}/insights`, {
-        params: {
-          access_token: accessToken,
-          level: "account",
-          fields: "spend,clicks,impressions,actions,date_start",
-          date_preset: datePreset,
-          time_increment: 1,
-        },
-      });
+  async getAdInsights(adAccountId: string, accessToken: string, datePreset: string = "this_month", timeRange?: { since: string; until: string }) {
+    try {
+      // 1. Get Aggregated Insights + Ad statuses (in parallel)
+      const [aggregatedResponse, dailyResponse, adsStatusResponse] = await Promise.all([
+        axios.get(`${this.graphUrl}/act_${adAccountId}/insights`, {
+          params: {
+            access_token: accessToken,
+            level: "ad",
+            fields: "ad_id,ad_name,campaign_name,spend,impressions,clicks,cpc,cpm,reach,actions,action_values,cost_per_action_type,purchase_roas",
+            ...this.dateParams(datePreset, timeRange),
+          },
+        }),
+        // 2. Get Daily Insights for Time Series Chart
+        axios.get(`${this.graphUrl}/act_${adAccountId}/insights`, {
+          params: {
+            access_token: accessToken,
+            level: "account",
+            fields: "spend,clicks,impressions,actions,date_start",
+            ...this.dateParams(datePreset, timeRange),
+            time_increment: 1,
+          },
+        }),
+        // 3. Get current effective_status per ad (not available in insights)
+        axios.get(`${this.graphUrl}/act_${adAccountId}/ads`, {
+          params: {
+            access_token: accessToken,
+            fields: "id,effective_status",
+            limit: 500,
+          },
+        }).catch(() => ({ data: { data: [] } })),
+      ]);
+
+      // Build a status map: adId -> effective_status
+      const statusMap: Record<string, string> = {};
+      for (const ad of (adsStatusResponse.data.data || [])) {
+        statusMap[ad.id] = ad.effective_status;
+      }
+
+      // Merge status into each insight row
+      const insights = (aggregatedResponse.data.data || []).map((row: any) => ({
+        ...row,
+        effective_status: statusMap[row.ad_id] ?? 'UNKNOWN',
+      }));
 
       return {
-        insights: aggregatedResponse.data.data,
+        insights,
         dailySpend: dailyResponse.data.data || []
       };
     } catch (error: any) {
@@ -166,7 +193,7 @@ export class MetaService {
   /**
    * Gets spend by platform (Facebook vs Instagram) for the ad account
    */
-  async getSpendByPlatform(adAccountId: string, accessToken: string, datePreset: string = "this_month") {
+  async getSpendByPlatform(adAccountId: string, accessToken: string, datePreset: string = "this_month", timeRange?: { since: string; until: string }) {
     try {
       const response = await axios.get(`${this.graphUrl}/act_${adAccountId}/insights`, {
         params: {
@@ -174,7 +201,7 @@ export class MetaService {
           level: "account",
           fields: "spend",
           breakdowns: "publisher_platform",
-          date_preset: datePreset,
+          ...this.dateParams(datePreset, timeRange),
         },
       });
       return response.data.data;
@@ -188,7 +215,7 @@ export class MetaService {
   /**
    * Gets spend by platform for each Ad
    */
-  async getAdsSpendByPlatform(adAccountId: string, accessToken: string, datePreset: string = "this_month") {
+  async getAdsSpendByPlatform(adAccountId: string, accessToken: string, datePreset: string = "this_month", timeRange?: { since: string; until: string }) {
     try {
       const response = await axios.get(`${this.graphUrl}/act_${adAccountId}/insights`, {
         params: {
@@ -196,7 +223,7 @@ export class MetaService {
           level: "ad",
           fields: "ad_id,spend",
           breakdowns: "publisher_platform",
-          date_preset: datePreset,
+          ...this.dateParams(datePreset, timeRange),
         },
       });
       return response.data.data;
@@ -347,6 +374,128 @@ export class MetaService {
       throw new Error(`Failed to fetch Organic Insights. Meta Error: ${JSON.stringify(metaError)}`);
     }
   }
+
+  /**
+   * Schedules an Instagram post (image or Reel) via Content Publishing API.
+   * scheduledAt must be >= 10 min and <= 75 days from now.
+   * Returns the IG media container ID.
+   */
+  async scheduleInstagramPost(params: {
+    pageId: string;
+    userAccessToken: string;
+    pageAccessToken?: string;
+    mediaUrl: string;
+    caption: string;
+    scheduledAt: Date;
+  }): Promise<{ containerId: string; igUserId: string }> {
+    // 1. Resolve IG Business Account ID from the linked page
+    const token = params.pageAccessToken || params.userAccessToken;
+    const pageRes = await axios.get(`${this.graphUrl}/${params.pageId}`, {
+      params: { fields: "instagram_business_account", access_token: token },
+    });
+    const igUserId: string | undefined = pageRes.data.instagram_business_account?.id;
+    if (!igUserId) throw new Error("NO_IG_ACCOUNT");
+
+    // 2. Validate scheduled time window
+    const nowMs = Date.now();
+    const scheduledMs = params.scheduledAt.getTime();
+    if (scheduledMs < nowMs + 10 * 60 * 1000) throw new Error("SCHEDULE_TOO_SOON");
+    if (scheduledMs > nowMs + 75 * 24 * 60 * 60 * 1000) throw new Error("SCHEDULE_TOO_FAR");
+    const scheduledUnix = Math.floor(scheduledMs / 1000);
+
+    // 3. Detect media type from URL
+    const isVideo =
+      /\/video\/upload\//i.test(params.mediaUrl) ||
+      /\.(mp4|mov|avi|mkv|webm)(\?|$)/i.test(params.mediaUrl);
+
+    // 4. Build container params
+    const containerParams: Record<string, any> = {
+      caption: params.caption || "",
+      published: false,
+      scheduled_publish_time: scheduledUnix,
+      access_token: params.userAccessToken,
+    };
+
+    if (isVideo) {
+      containerParams.media_type = "REELS";
+      containerParams.video_url = params.mediaUrl;
+    } else {
+      containerParams.image_url = params.mediaUrl;
+    }
+
+    // 5. Create media container
+    try {
+      const containerRes = await axios.post(
+        `${this.graphUrl}/${igUserId}/media`,
+        null,
+        { params: containerParams }
+      );
+      return { containerId: containerRes.data.id, igUserId };
+    } catch (err: any) {
+      const metaErr = err.response?.data?.error;
+      const msg = metaErr
+        ? `Meta ${metaErr.code}: ${metaErr.message}`
+        : err.message;
+      console.error("[MetaService] scheduleInstagramPost error:", metaErr || err.message);
+      throw new Error(msg);
+    }
+  }
+
+  /**
+   * Schedules a Facebook Page post (video or photo) via Graph API.
+   * Uses POST /{page-id}/videos for video, /{page-id}/photos for images.
+   */
+  async scheduleFacebookPost(params: {
+    pageId: string;
+    pageAccessToken: string;
+    mediaUrl: string;
+    caption: string;
+    scheduledAt: Date;
+  }): Promise<{ postId: string }> {
+    const nowMs = Date.now();
+    const scheduledMs = params.scheduledAt.getTime();
+    if (scheduledMs < nowMs + 10 * 60 * 1000) throw new Error("SCHEDULE_TOO_SOON");
+    if (scheduledMs > nowMs + 75 * 24 * 60 * 60 * 1000) throw new Error("SCHEDULE_TOO_FAR");
+    const scheduledUnix = Math.floor(scheduledMs / 1000);
+
+    const isVideo =
+      /\/video\/upload\//i.test(params.mediaUrl) ||
+      /\.(mp4|mov|avi|mkv|webm)(\?|$)/i.test(params.mediaUrl);
+
+    try {
+      if (isVideo) {
+        const res = await axios.post(`${this.graphUrl}/${params.pageId}/videos`, null, {
+          params: {
+            file_url: params.mediaUrl,
+            description: params.caption || "",
+            published: false,
+            scheduled_publish_time: scheduledUnix,
+            access_token: params.pageAccessToken,
+          },
+        });
+        return { postId: res.data.id };
+      } else {
+        const res = await axios.post(`${this.graphUrl}/${params.pageId}/photos`, null, {
+          params: {
+            url: params.mediaUrl,
+            caption: params.caption || "",
+            published: false,
+            scheduled_publish_time: scheduledUnix,
+            access_token: params.pageAccessToken,
+          },
+        });
+        return { postId: res.data.id };
+      }
+    } catch (err: any) {
+      const metaErr = err.response?.data?.error;
+      const msg = metaErr
+        ? `Meta ${metaErr.code}: ${metaErr.message}`
+        : err.message;
+      console.error("[MetaService] scheduleFacebookPost error:", metaErr || err.message);
+      throw new Error(msg);
+    }
+  }
 }
+
 
 export const metaService = new MetaService();

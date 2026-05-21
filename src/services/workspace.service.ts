@@ -1,6 +1,7 @@
 import bcrypt from "bcryptjs";
 import { Types } from "mongoose";
 import models from "../models";
+import { notificationService } from "./notification.service";
 
 export interface CreateWorkspacePayload {
   name: string;
@@ -14,6 +15,34 @@ export interface CreateUserPayload {
   workspaceId: string;
   phoneNumber?: string;
   phoneExtension?: string;
+}
+
+export interface CreateGlobalUserPayload {
+  name?: string;
+  email: string;
+  password?: string;
+  workspaces: {
+    workspaceId: string;
+    role: "admin" | "colaborador";
+  }[];
+  phoneNumber?: string;
+  phoneExtension?: string;
+  isInternal?: boolean;
+  internalRole?: string | null;
+}
+
+export interface UpdateGlobalUserPayload {
+  name?: string;
+  email?: string;
+  password?: string;
+  workspaces?: {
+    workspaceId: string;
+    role: "admin" | "colaborador";
+  }[];
+  phoneNumber?: string;
+  phoneExtension?: string;
+  isInternal?: boolean;
+  internalRole?: string | null;
 }
 
 export interface UpdateUserPayload {
@@ -40,7 +69,7 @@ export class WorkspaceService {
     const { search, page = 1, limit = 10 } = options;
     const skip = (page - 1) * limit;
 
-    const query: any = { isActive: true };
+    const query: any = {};
     if (search) {
       query.name = { $regex: search, $options: "i" };
     }
@@ -65,10 +94,13 @@ export class WorkspaceService {
     };
   }
 
-  async listWorkspacesForUser(userId: string) {
+  async listWorkspacesForUser(
+    userId: string,
+    options: { search?: string; page?: number; limit?: number } = {}
+  ) {
     if (!Types.ObjectId.isValid(userId)) throw new Error("INVALID_ID");
     const user = await models.users.findById(userId).lean();
-    if (!user) return [];
+    if (!user) return { workspaces: [], total: 0, page: 1, limit: 10, hasMore: false };
 
     const workspaceIds = user.workspaces ? user.workspaces.map((w: any) => w.workspaceId.toString()) : [];
 
@@ -77,31 +109,42 @@ export class WorkspaceService {
       workspaceIds.push(user.workspaceId.toString());
     }
 
-    if (workspaceIds.length === 0) return [];
+    if (workspaceIds.length === 0) {
+      return { workspaces: [], total: 0, page: 1, limit: options.limit ?? 10, hasMore: false };
+    }
 
-    const workspaces = await models.workspaces
-      .find({ _id: { $in: workspaceIds }, isActive: true })
-      .populate("adminId", "email role name")
-      .sort({ createdAt: -1 })
-      .lean();
+    const { search, page = 1, limit = 10 } = options;
+    const skip = (page - 1) * limit;
+
+    const query: any = { _id: { $in: workspaceIds }, isActive: true };
+    if (search) query.name = { $regex: search, $options: "i" };
+
+    const [workspaces, total] = await Promise.all([
+      models.workspaces
+        .find(query)
+        .populate("adminId", "email role name")
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      models.workspaces.countDocuments(query),
+    ]);
 
     // Inyectar el rol del usuario que está solicitando la lista en cada workspace objeto
-    return workspaces.map((ws: any) => {
+    const result = workspaces.map((ws: any) => {
       let userRole: "admin" | "colaborador" = "colaborador";
 
       const wsAccess = user.workspaces?.find((w: any) => w.workspaceId.toString() === ws._id.toString());
       if (wsAccess) {
         userRole = wsAccess.role;
       } else if (user.workspaceId && user.workspaceId.toString() === ws._id.toString()) {
-        // Fallback para legacy
         userRole = (user.role === "admin") ? "admin" : "colaborador";
       }
 
-      return {
-        ...ws,
-        userRole
-      };
+      return { ...ws, userRole };
     });
+
+    return { workspaces: result, total, page, limit, hasMore: total > skip + result.length };
   }
 
   async getWorkspaceById(workspaceId: string, userId?: string) {
@@ -179,6 +222,48 @@ export class WorkspaceService {
         workspaceId // append workspaceId
       };
     });
+  }
+
+  async listAllCollaborators(search?: string, workspaceId?: string) {
+    // Only users who are not superadmins and have workspaces assigned or were legacy workspace owners
+    const query: any = { 
+      role: { $ne: "superadmin" },
+      $or: [
+        { workspaces: { $exists: true, $not: { $size: 0 } } },
+        { workspaceId: { $exists: true } }
+      ]
+    };
+
+    if (search) {
+      const searchRegex = new RegExp(search, "i");
+      query.$and = query.$and || [];
+      query.$and.push({
+        $or: [
+          { name: searchRegex },
+          { email: searchRegex }
+        ]
+      });
+    }
+
+    if (workspaceId && Types.ObjectId.isValid(workspaceId)) {
+      const wsId = new Types.ObjectId(workspaceId);
+      query.$and = query.$and || [];
+      query.$and.push({
+        $or: [
+          { "workspaces.workspaceId": wsId },
+          { workspaceId: wsId }
+        ]
+      });
+    }
+
+    const users = await models.users
+      .find(query)
+      .populate("workspaces.workspaceId", "name")
+      .select("-password")
+      .sort({ createdAt: -1 })
+      .lean();
+      
+    return users;
   }
 
   async createUser(payload: CreateUserPayload) {
@@ -423,6 +508,196 @@ export class WorkspaceService {
 
     await models.users.findByIdAndDelete(targetUserId);
     return true;
+  }
+
+  // ── Internal User Management ──────────────────────────────────
+
+  async listInternalUsers() {
+    return models.users
+      .find({ isInternal: true })
+      .select("-password")
+      .sort({ internalRole: 1, name: 1 })
+      .lean();
+  }
+
+  async createInternalUser(payload: { name?: string; email: string; password: string; internalRole: string }) {
+    const existing = await models.users.findOne({ email: payload.email.toLowerCase().trim() }).lean();
+    if (existing) throw new Error("EMAIL_TAKEN");
+
+    const hashed = await bcrypt.hash(payload.password, 10);
+    const user = await models.users.create({
+      name: payload.name?.trim(),
+      email: payload.email.toLowerCase().trim(),
+      password: hashed,
+      role: "user",
+      isInternal: true,
+      internalRole: payload.internalRole,
+      workspaces: [],
+      isActive: true,
+    });
+
+    const { password, ...withoutPassword } = user.toObject();
+    return withoutPassword;
+  }
+
+  async deleteInternalUser(requestingUserId: string, targetUserId: string) {
+    if (!Types.ObjectId.isValid(targetUserId)) throw new Error("INVALID_ID");
+    if (requestingUserId === targetUserId) throw new Error("CANNOT_DELETE_SELF");
+
+    const user = await models.users.findOne({ _id: targetUserId, isInternal: true });
+    if (!user) throw new Error("NOT_FOUND");
+
+    await models.users.findByIdAndDelete(targetUserId);
+    return true;
+  }
+
+  // ── Global User Management (Multi-workspace) ─────────────────
+
+  async createGlobalUser(payload: CreateGlobalUserPayload) {
+    let user = await models.users.findOne({ email: payload.email.toLowerCase().trim() });
+    let newWorkspaceIds: string[] = [];
+
+    if (user) {
+      if (user.role === "superadmin") throw new Error("CANNOT_MOD_SUPERADMIN");
+
+      // Track which workspaces are actually new
+      const oldIds = new Set((user.workspaces || []).map(w => w.workspaceId.toString()));
+      newWorkspaceIds = payload.workspaces
+        .filter(ws => !oldIds.has(ws.workspaceId))
+        .map(ws => ws.workspaceId);
+
+      // Update basic info
+      if (payload.name !== undefined) user.name = payload.name.trim();
+      if (payload.password) user.password = await bcrypt.hash(payload.password, 10);
+      if (payload.phoneNumber !== undefined) user.phoneNumber = payload.phoneNumber;
+      if (payload.phoneExtension !== undefined) user.phoneExtension = payload.phoneExtension;
+      if (payload.isInternal !== undefined) user.isInternal = payload.isInternal;
+      if (payload.internalRole !== undefined) (user as any).internalRole = payload.internalRole;
+
+      // Ensure user role is 'user' for multi-workspace logic
+      user.role = "user";
+
+      // Internal users keep all workspaces managed by migration script — never overwrite
+      if (!user.isInternal) {
+        user.workspaces = payload.workspaces.map(ws => ({
+          workspaceId: new Types.ObjectId(ws.workspaceId),
+          role: ws.role
+        }));
+      }
+
+      await user.save();
+      await user.populate("workspaces.workspaceId", "name");
+    } else {
+      if (!payload.password) throw new Error("PASSWORD_REQUIRED");
+      const hashed = await bcrypt.hash(payload.password, 10);
+
+      user = await models.users.create({
+        name: payload.name?.trim(),
+        email: payload.email.toLowerCase().trim(),
+        password: hashed,
+        role: "user",
+        workspaces: payload.workspaces.map(ws => ({
+          workspaceId: new Types.ObjectId(ws.workspaceId),
+          role: ws.role
+        })),
+        isActive: true,
+        phoneNumber: payload.phoneNumber,
+        phoneExtension: payload.phoneExtension,
+        isInternal: payload.isInternal || false,
+        internalRole: payload.internalRole || null,
+      });
+      await user.populate("workspaces.workspaceId", "name");
+      // All workspaces are new for a brand-new user
+      newWorkspaceIds = payload.workspaces.map(ws => ws.workspaceId);
+    }
+
+    // Fire notifications for newly assigned workspaces (non-blocking)
+    if (newWorkspaceIds.length > 0) {
+      const userId = user._id.toString();
+      const wsNames = await models.workspaces
+        .find({ _id: { $in: newWorkspaceIds } })
+        .select("name")
+        .lean();
+      for (const ws of wsNames) {
+        notificationService
+          .create(userId, "new_client_assigned", "Nuevo cliente asignado", `Se te ha asignado el cliente: ${ws.name}`, {
+            workspaceId: ws._id.toString(),
+          })
+          .catch(() => {});
+      }
+    }
+
+    const { password, ...withoutPassword } = user.toObject();
+    return withoutPassword;
+  }
+
+  async updateGlobalUser(userId: string, payload: UpdateGlobalUserPayload) {
+    if (!Types.ObjectId.isValid(userId)) throw new Error("INVALID_ID");
+
+    const user = await models.users.findById(userId);
+    if (!user) throw new Error("NOT_FOUND");
+    if (user.role === "superadmin") throw new Error("CANNOT_MOD_SUPERADMIN");
+
+    if (payload.email) {
+      const emailTaken = await models.users.findOne({
+        email: payload.email.toLowerCase(),
+        _id: { $ne: new Types.ObjectId(userId) },
+      }).lean();
+      if (emailTaken) throw new Error("EMAIL_TAKEN");
+      user.email = payload.email.toLowerCase().trim();
+    }
+
+    if (payload.name !== undefined) user.name = payload.name.trim();
+    if (payload.password) user.password = await bcrypt.hash(payload.password, 10);
+    if (payload.phoneNumber !== undefined) user.phoneNumber = payload.phoneNumber;
+    if (payload.phoneExtension !== undefined) user.phoneExtension = payload.phoneExtension;
+    if (payload.isInternal !== undefined) user.isInternal = payload.isInternal;
+    if (payload.internalRole !== undefined) (user as any).internalRole = payload.internalRole;
+
+    let newWorkspaceIds: string[] = [];
+    if (payload.workspaces) {
+      const oldIds = new Set((user.workspaces || []).map(w => w.workspaceId.toString()));
+      newWorkspaceIds = payload.workspaces
+        .filter(ws => !oldIds.has(ws.workspaceId))
+        .map(ws => ws.workspaceId);
+
+      user.workspaces = payload.workspaces.map(ws => ({
+        workspaceId: new Types.ObjectId(ws.workspaceId),
+        role: ws.role
+      }));
+    }
+
+    await user.save();
+    await user.populate("workspaces.workspaceId", "name");
+
+    // Fire notifications for newly assigned workspaces (non-blocking)
+    if (newWorkspaceIds.length > 0) {
+      const wsNames = await models.workspaces
+        .find({ _id: { $in: newWorkspaceIds } })
+        .select("name")
+        .lean();
+      for (const ws of wsNames) {
+        notificationService
+          .create(userId, "new_client_assigned", "Nuevo cliente asignado", `Se te ha asignado el cliente: ${ws.name}`, {
+            workspaceId: ws._id.toString(),
+          })
+          .catch(() => {});
+      }
+    }
+
+    const { password, ...withoutPassword } = user.toObject();
+    return withoutPassword;
+  }
+
+  async toggleWorkspaceActive(workspaceId: string, isActive: boolean) {
+    if (!Types.ObjectId.isValid(workspaceId)) throw new Error("INVALID_ID");
+    const workspace = await models.workspaces.findByIdAndUpdate(
+      workspaceId,
+      { isActive },
+      { new: true }
+    ).lean();
+    if (!workspace) throw new Error("NOT_FOUND");
+    return workspace;
   }
 }
 
