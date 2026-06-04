@@ -24,6 +24,12 @@ export interface IBrandProfile {
   updatedAt?: Date;
 }
 
+export interface IOnboardingStatus {
+  videoGenesisAccepted: boolean;
+  contractSubmitted: boolean;
+  meetingScheduled: boolean;
+}
+
 export interface IWorkspace extends Document {
   name: string;
   adminId?: Types.ObjectId;
@@ -39,6 +45,9 @@ export interface IWorkspace extends Document {
   };
   brandProfile?: IBrandProfile;
   brandProfileInviteSentAt?: Date;
+  onboardingStatus?: IOnboardingStatus;
+  preNegotiatedContract?: any; // Stores predefined contract parameters
+  contractData?: any; // Stores the final contract form and signature
   createdAt: Date;
   updatedAt: Date;
 }
@@ -109,6 +118,26 @@ const WorkspaceSchema = new Schema<IWorkspace>(
     },
     brandProfileInviteSentAt: {
       type: Date,
+      default: null,
+    },
+    onboardingStatus: {
+      type: {
+        videoGenesisAccepted: { type: Boolean, default: false },
+        contractSubmitted: { type: Boolean, default: false },
+        meetingScheduled: { type: Boolean, default: false },
+      },
+      default: {
+        videoGenesisAccepted: false,
+        contractSubmitted: false,
+        meetingScheduled: false,
+      },
+    },
+    preNegotiatedContract: {
+      type: Schema.Types.Mixed,
+      default: null,
+    },
+    contractData: {
+      type: Schema.Types.Mixed,
       default: null,
     },
   },
