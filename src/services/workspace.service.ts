@@ -577,8 +577,18 @@ export class WorkspaceService {
       // Ensure user role is 'user' for multi-workspace logic
       user.role = "user";
 
-      // Internal users keep all workspaces managed by migration script — never overwrite
-      if (!user.isInternal) {
+      // Internal users keep all workspaces managed by migration script — we append new ones, never overwrite
+      if (user.isInternal) {
+        const oldIds = new Set((user.workspaces || []).map(w => w.workspaceId.toString()));
+        payload.workspaces.forEach(ws => {
+          if (!oldIds.has(ws.workspaceId)) {
+            user!.workspaces!.push({
+              workspaceId: new Types.ObjectId(ws.workspaceId),
+              role: ws.role
+            });
+          }
+        });
+      } else {
         user.workspaces = payload.workspaces.map(ws => ({
           workspaceId: new Types.ObjectId(ws.workspaceId),
           role: ws.role
@@ -691,13 +701,31 @@ export class WorkspaceService {
 
   async toggleWorkspaceActive(workspaceId: string, isActive: boolean) {
     if (!Types.ObjectId.isValid(workspaceId)) throw new Error("INVALID_ID");
+
     const workspace = await models.workspaces.findByIdAndUpdate(
       workspaceId,
       { isActive },
       { new: true }
-    ).lean();
+    );
     if (!workspace) throw new Error("NOT_FOUND");
     return workspace;
   }
-}
 
+  async deleteWorkspace(workspaceId: string) {
+    if (!Types.ObjectId.isValid(workspaceId)) throw new Error("INVALID_ID");
+
+    const workspace = await models.workspaces.findById(workspaceId);
+    if (!workspace) throw new Error("NOT_FOUND");
+
+    // Remove this workspace from all users' workspaces arrays
+    await models.users.updateMany(
+      { "workspaces.workspaceId": new Types.ObjectId(workspaceId) },
+      { $pull: { workspaces: { workspaceId: new Types.ObjectId(workspaceId) } } }
+    );
+
+    // Delete the workspace document
+    await models.workspaces.findByIdAndDelete(workspaceId);
+    
+    return true;
+  }
+}
