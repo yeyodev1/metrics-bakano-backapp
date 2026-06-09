@@ -154,7 +154,7 @@ Los anexos podrán ser actualizados de común acuerdo entre las partes mediante 
 
         doc.text('DÉCIMA SEGUNDA.- HONORARIOS Y FORMA DE PAGO:', { underline: true });
         if (data.diasPago) {
-          doc.text(`EL CLIENTE pagará a BAKANO la suma mensual de USD ${data.valorMensual} más IVA.
+          doc.text(`EL CLIENTE pagará a BAKANO la suma mensual acordada más IVA.
 Los pagos deberán realizarse de manera anticipada dentro de los primeros ${data.diasPago} días de cada período mensual.
 La falta de pago facultará a BAKANO a suspender inmediatamente los servicios sin responsabilidad alguna.
 El presupuesto publicitario en Meta Ads, Google Ads u otras plataformas NO se encuentra incluido salvo pacto expreso.`);
@@ -167,25 +167,14 @@ El presupuesto publicitario en Meta Ads, Google Ads u otras plataformas NO se en
         doc.moveDown();
 
         doc.text('DÉCIMA TERCERA.- PLAZO, PERMANENCIA MÍNIMA Y TERMINACIÓN:', { underline: true });
-        if (data.plazoMeses) {
-          doc.text(`El presente contrato se mantendrá plenamente vigente dentro de un periodo de tiempo estipulado de ${data.plazoMeses} meses, o bien, extenderá de forma sucesiva sus obligaciones comerciales hasta dar por cancelado el servicio mediante notificación formal escrita o electrónica entre las partes.
-Las partes acuerdan expresamente una permanencia mínima obligatoria de ${data.mesesPermanencia} meses contados desde el inicio efectivo de la prestación del servicio. En caso de que EL CLIENTE decida terminar unilateralmente el contrato antes del cumplimiento del plazo mínimo acordado, deberá pagar a favor de BAKANO, en concepto de fee de salida y compensación por estructura operativa, planificación estratégica y recursos asignados, el equivalente a ${data.mensualidadesPenalidad} mensualidades del servicio contratado.
-El fee de salida será exigible inmediatamente y no constituirá cláusula penal excluyente de otros daños o valores pendientes.
-Cualquiera de las partes podrá terminar el contrato notificando por escrito con al menos quince (15) días de anticipación una vez cumplido el período mínimo obligatorio o dictaminando formalmente dar por cancelado el servicio.
+        doc.text(`El presente contrato tiene una permanencia mínima obligatoria de 1 mes contado desde el inicio efectivo de la prestación del servicio.
+Posteriormente, el contrato se renovará de manera automática y sucesiva mes a mes, mientras EL CLIENTE mantenga activa y al día su suscripción mensual.
+EL CLIENTE podrá desistir del servicio y dar por terminado el contrato en el momento que lo desee, sin penalidad alguna, comunicando su decisión mediante notificación formal escrita o electrónica.
 BAKANO podrá terminar inmediatamente el contrato en caso de:
 - Incumplimiento de pagos.
 - Uso indebido de metodología.
 - Conductas que afecten reputacionalmente a BAKANO.
 - Incumplimiento grave de EL CLIENTE.`);
-        } else {
-          doc.text(`El presente contrato tiene un plazo de permanencia y vigencia según lo conversado y estipulado previamente entre las partes.
-Cualquiera de las partes podrá terminar el contrato notificando por escrito con al menos quince (15) días de anticipación una vez cumplido el período mínimo obligatorio o dictaminando formalmente dar por cancelado el servicio.
-BAKANO podrá terminar inmediatamente el contrato en caso de:
-- Incumplimiento de pagos.
-- Uso indebido de metodología.
-- Conductas que afecten reputacionalmente a BAKANO.
-- Incumplimiento grave de EL CLIENTE.`);
-        }
         doc.moveDown();
 
         doc.text('DÉCIMA CUARTA.- LIMITACIÓN DE RESPONSABILIDAD:', { underline: true });
@@ -205,6 +194,22 @@ BAKANO no será responsable por:
 
         doc.text('DÉCIMA SEXTA.- JURISDICCIÓN:', { underline: true });
         doc.text('Para cualquier controversia derivada del presente contrato, las partes se someten a los jueces competentes de la ciudad de Guayaquil y a la legislación ecuatoriana.');
+        doc.moveDown();
+
+        doc.text('DÉCIMA OCTAVA.- GARANTÍA DE DESEMPEÑO Y EXTENSIÓN DE SERVICIO:', { underline: true });
+        doc.text('En caso de que, tras la correcta implementación de las campañas y estrategias comerciales, BAKANO no logre generar ningún prospecto (lead) para EL CLIENTE, se activará de forma excepcional una garantía de desempeño. Esta garantía consistirá en la extensión de los servicios por un periodo máximo de hasta dos (2) meses adicionales, durante los cuales BAKANO no percibirá el pago de sus honorarios mensuales estipulados. El objetivo exclusivo de esta extensión será ajustar, optimizar y completar el proceso estratégico de marketing digital hasta estabilizar la captación de prospectos.');
+        doc.moveDown();
+
+        doc.text('DÉCIMA NOVENA.- EXCLUSIÓN DE PRESUPUESTO PUBLICITARIO DE LA GARANTÍA:', { underline: true });
+        doc.text('EL CLIENTE reconoce y acepta expresamente que la gratuidad temporal de honorarios descrita en la cláusula anterior aplica única y exclusivamente a los servicios profesionales de BAKANO. En consecuencia, durante los meses que se active la extensión por garantía, EL CLIENTE mantendrá de forma obligatoria, directa e ininterrumpida el pago del presupuesto publicitario (pauta) en Meta Ads, Google Ads o las plataformas correspondientes. La falta de asignación presupuestaria para pauta por parte de EL CLIENTE provocará la cancelación inmediata de la garantía.');
+        doc.moveDown();
+
+        doc.text('VIGÉSIMA.- CORRESPONSABILIDAD COMERCIAL Y CONDICIÓN DE GESTIÓN:', { underline: true });
+        doc.text('Para la validez y continuidad de la garantía de desempeño, EL CLIENTE se obliga irrevocablemente a cumplir con su contraparte operativa y comercial estipulada en la Cláusula Séptima de este contrato. Esto incluye la obligación estricta de contar con personal interno capacitado para la atención inmediata, seguimiento oportuno y el despliegue del máximo esfuerzo comercial para el cierre de ventas de los prospectos generados. EL CLIENTE deberá compartir con BAKANO la retroalimentación de dicha gestión comercial para fines de optimización.');
+        doc.moveDown();
+
+        doc.text('VIGÉSIMA PRIMERA.- AUDITORÍA Y ANULACIÓN DE LA GARANTÍA:', { underline: true });
+        doc.text('BAKANO se reserva el derecho de verificar la gestión comercial de EL CLIENTE a través de las plataformas y herramientas tecnológicas pactadas. Si se demuestra que BAKANO cumplió con la generación de prospectos, pero estos no se convirtieron en cierres comerciales debido a demoras en el contacto, deficiente atención, inacción operativa o incumplimiento de procesos internos por parte de EL CLIENTE, la presente garantía quedará automáticamente anulada, debiendo EL CLIENTE abonar la mensualidad regular correspondiente.');
         doc.moveDown(2);
 
         doc.text('En señal de aceptación, las partes suscriben el presente contrato en dos ejemplares de igual tenor y valor legal.', { align: 'center' });
