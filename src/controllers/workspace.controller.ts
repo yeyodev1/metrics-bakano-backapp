@@ -189,6 +189,22 @@ export async function listUsers(req: AuthRequest, res: Response, next: NextFunct
   }
 }
 
+export async function getTeam(req: AuthRequest, res: Response, next: NextFunction) {
+  try {
+    const workspaceId = req.params["workspaceId"] as string;
+    const teamData = await workspaceService.getTeamData(workspaceId);
+    res.status(HttpStatusCode.Ok).send({ message: "Team retrieved successfully.", data: teamData });
+    return;
+  } catch (error: any) {
+    if (error.message === "INVALID_ID" || error.message === "NOT_FOUND") {
+      res.status(HttpStatusCode.NotFound).send({ message: "Workspace not found." });
+      return;
+    }
+    console.error("getTeam error:", error);
+    next(error);
+  }
+}
+
 export async function createUser(req: AuthRequest, res: Response, next: NextFunction) {
   try {
     const workspaceId = req.params["workspaceId"] as string;

@@ -48,6 +48,10 @@ export interface IWorkspace extends Document {
   onboardingStatus?: IOnboardingStatus;
   preNegotiatedContract?: any; // Stores predefined contract parameters
   contractData?: any; // Stores the final contract form and signature
+  teamInfo?: {
+    teamName: string;
+    teamVideoUrl: string;
+  };
   createdAt: Date;
   updatedAt: Date;
 }
@@ -139,6 +143,10 @@ const WorkspaceSchema = new Schema<IWorkspace>(
     contractData: {
       type: Schema.Types.Mixed,
       default: null,
+    },
+    teamInfo: {
+      teamName: { type: String, trim: true },
+      teamVideoUrl: { type: String, trim: true },
     },
   },
   {

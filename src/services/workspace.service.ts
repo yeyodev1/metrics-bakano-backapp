@@ -224,6 +224,30 @@ export class WorkspaceService {
     });
   }
 
+  async getTeamData(workspaceId: string) {
+    if (!Types.ObjectId.isValid(workspaceId)) throw new Error("INVALID_ID");
+
+    const workspace = await models.workspaces.findById(workspaceId).select("teamInfo").lean();
+    if (!workspace) throw new Error("NOT_FOUND");
+
+    const members = await models.users
+      .find({
+        isInternal: true,
+        $or: [
+          { "workspaces.workspaceId": new Types.ObjectId(workspaceId) },
+          { workspaceId: new Types.ObjectId(workspaceId) }
+        ]
+      })
+      .select("-password")
+      .sort({ internalRole: 1, name: 1 })
+      .lean();
+
+    return {
+      teamInfo: workspace.teamInfo || null,
+      members,
+    };
+  }
+
   async listAllCollaborators(search?: string, workspaceId?: string) {
     // Only users who are not superadmins and have workspaces assigned or were legacy workspace owners
     const query: any = { 
