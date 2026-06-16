@@ -242,9 +242,15 @@ export class WorkspaceService {
       .sort({ internalRole: 1, name: 1 })
       .lean();
 
+    const allInternalUsers = await models.users
+      .find({ isInternal: true })
+      .select("-password")
+      .lean();
+
     return {
       teamInfo: workspace.teamInfo || null,
       members,
+      allInternalUsers,
     };
   }
 
