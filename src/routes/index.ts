@@ -17,6 +17,7 @@ import cronRouter from "./cron.router";
 import publicMetricsRouter from "./publicMetrics.router";
 import { onboardingRouter } from "./onboarding.router";
 import { webhookRouter } from "./webhook.router";
+import evaluationRouter from "./evaluation.router";
 
 function routerApi(app: Application) {
   const router = express.Router();
@@ -40,6 +41,7 @@ function routerApi(app: Application) {
   router.use("/cron", cronRouter);
   router.use("/public", publicMetricsRouter);
   router.use("/onboarding", onboardingRouter);
+  router.use("/evaluations", evaluationRouter);
 
   // Webhooks are top-level on v1
   app.use("/v1/webhooks", webhookRouter);

@@ -13,6 +13,7 @@ import { VisitLogModel } from "./visitLog.model";
 import { SalesDailySummaryModel } from "./salesDailySummary.model";
 import { TumeseroUsageModel } from "./tumeseroUsage.model";
 import { BranchModel } from "./branch.model";
+import { EvaluationModel } from "./evaluation.model";
 
 const models = {
   users: UserModel,
@@ -30,6 +31,7 @@ const models = {
   salesDailySummary: SalesDailySummaryModel,
   tumeseroUsage: TumeseroUsageModel,
   branches: BranchModel,
+  evaluations: EvaluationModel,
 };
 
 export default models;
