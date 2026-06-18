@@ -88,61 +88,124 @@ export class GhlService {
    * Gets meetings filtered by workspace users' emails or workspace name.
    */
   async getMeetingsForWorkspace(workspaceId: string, startTime: string, endTime: string) {
-    // 1. Get workspace details
+    // 1. Get current workspace details
     const workspace = await models.workspaces.findById(workspaceId).select("name").lean();
     const workspaceName = (workspace?.name || "").toLowerCase().trim();
+    const isAgencyWorkspace = workspaceId === "69a9ea689c444c9a6e1b28e5" || workspaceName === "bakano";
 
-    // 2. Get workspace users (both clients and internal experts assigned to the workspace)
+    // 2. Fetch all users from the database
     const allUsers = await models.users.find().select("email photoUrl name isInternal workspaceId workspaces").lean();
 
+    // Helper function to extract client/external users for a specific workspace
+    const getClientUsersForWorkspace = (wsId: string) => {
+      return allUsers.filter((u: any) => {
+        const isUserInternal = u.isInternal === true || (u.email && u.email.toLowerCase().endsWith("@bakano.ec"));
+        if (isUserInternal) return false; // Only want external/client users
+
+        const idStr = u.workspaceId?.toString() ?? "";
+        if (idStr === wsId) return true;
+        if (u.workspaces?.some((w: any) => (w.workspaceId?._id?.toString() ?? w.workspaceId?.toString()) === wsId)) return true;
+        return false;
+      });
+    };
+
+    // 3. Fetch all workspaces to do cross-workspace filtering if this is the agency workspace
+    const allWorkspaces = await models.workspaces.find({}, "name").lean();
+
+    // 4. Fetch appointments from GHL
+    const appointments = await this.getAppointments(startTime, endTime);
+
+    // Helper to check if an appointment matches a specific workspace (non-agency)
+    const matchesWorkspace = (appt: any, ws: any) => {
+      const wsName = (ws.name || "").toLowerCase().trim();
+      if (!wsName || wsName === "bakano") return false;
+
+      const apptTitle = (appt.title || appt.name || "").toLowerCase();
+      const apptCompanyName = (appt.contact?.companyName || "").toLowerCase();
+
+      // Match by workspace name
+      if (apptTitle.includes(wsName) || apptCompanyName.includes(wsName)) {
+        return true;
+      }
+
+      // Match by client users' emails or names
+      const wsClients = getClientUsersForWorkspace(ws._id.toString());
+      
+      // Check emails
+      const apptEmails: string[] = [];
+      if (appt.email) apptEmails.push(appt.email.toLowerCase());
+      if (appt.contact?.email) apptEmails.push(appt.contact.email.toLowerCase());
+      if (Array.isArray(appt.attendees)) {
+        appt.attendees.forEach((a: any) => {
+          if (a.email) apptEmails.push(a.email.toLowerCase());
+        });
+      }
+      const clientEmails = wsClients.map(c => c.email.toLowerCase());
+      if (apptEmails.some(e => clientEmails.includes(e))) return true;
+
+      // Check names
+      const clientNames = wsClients.map(c => c.name?.toLowerCase()).filter(Boolean);
+      if (clientNames.some(name => apptTitle.includes(name))) return true;
+
+      return false;
+    };
+
+    // 5. Get workspace users (both clients and internal experts assigned to the workspace)
     const workspaceUsers = allUsers.filter((u: any) => {
       if (u.workspaceId?.toString() === workspaceId) return true;
-      if (u.workspaces?.some((w: any) => w.workspaceId?.toString() === workspaceId)) return true;
+      if (u.workspaces?.some((w: any) => (w.workspaceId?._id?.toString() ?? w.workspaceId?.toString()) === workspaceId)) return true;
       return false;
     });
 
     const workspaceEmails = workspaceUsers.map((u: any) => u.email.toLowerCase());
 
-    // 3. Fetch appointments from GHL
-    const appointments = await this.getAppointments(startTime, endTime);
-
-    // 4. Filter appointments
+    // 6. Filter appointments
+    // 6. Filter appointments
     const filtered = appointments.filter((appt: any) => {
-      const apptTitle = (appt.title || appt.name || "").toLowerCase();
-      const apptCompanyName = (appt.contact?.companyName || "").toLowerCase();
+      // Use the standard matching logic for all workspaces, including the agency.
+      // This prevents the agency workspace calendar from being flooded with unassigned client meetings.
+      const currentWs = allWorkspaces.find(ws => ws._id.toString() === workspaceId);
+      if (!currentWs) return false;
 
-      // Condition A: Event title contains workspace name (entorno)
-      if (workspaceName && apptTitle.includes(workspaceName)) return true;
-
-      // Condition B: Event contact company name matches workspace name
-      if (workspaceName && apptCompanyName.includes(workspaceName)) return true;
-
-      // Condition C: Match any attendee email against experts and clients
-      const emails: string[] = [];
-      if (appt.email) emails.push(appt.email.toLowerCase());
-      if (appt.contact?.email) emails.push(appt.contact.email.toLowerCase());
-      if (Array.isArray(appt.attendees)) {
-        appt.attendees.forEach((a: any) => {
-          if (a.email) emails.push(a.email.toLowerCase());
+      // Special case: if it's the agency workspace, we check if the title mentions agency or 
+      // if it's an internal meeting (attending ONLY by internal users).
+      if (isAgencyWorkspace) {
+        const apptTitle = (appt.title || appt.name || "").toLowerCase();
+        if (apptTitle.includes("bakano") || apptTitle.includes("interna") || apptTitle.includes("equipo")) {
+          return true;
+        }
+        
+        // Exclude if it matches another client
+        const matchesAnyOther = allWorkspaces.some(ws => {
+          if (ws._id.toString() === workspaceId) return false;
+          return matchesWorkspace(appt, ws);
         });
+        if (matchesAnyOther) return false;
+
+        // Count internal vs external attendees
+        const apptEmails: string[] = [];
+        if (appt.email) apptEmails.push(appt.email.toLowerCase());
+        if (appt.contact?.email) apptEmails.push(appt.contact.email.toLowerCase());
+        if (Array.isArray(appt.attendees)) {
+          appt.attendees.forEach((a: any) => {
+            if (a.email) apptEmails.push(a.email.toLowerCase());
+          });
+        }
+
+        const agencyEmails = allUsers.filter(u => u.isInternal || (u.email && u.email.toLowerCase().endsWith("@bakano.ec"))).map(u => u.email.toLowerCase());
+        const hasExternal = apptEmails.some(e => !agencyEmails.includes(e));
+        const hasInternal = apptEmails.some(e => agencyEmails.includes(e));
+
+        // If it's strictly an internal meeting (no external emails) and has internal people, it's for the agency
+        if (hasInternal && !hasExternal && apptEmails.length > 0) return true;
+
+        return false;
       }
 
-      if (emails.some(e => workspaceEmails.includes(e))) return true;
-
-      // Condition D: Event title contains an EXTERNAL workspace user's name
-      const hasNameMatch = workspaceUsers.some((u: any) => {
-        if (!u.name || !u.email) return false;
-        // Ignore internal employees (bakano.ec)
-        if (u.email.toLowerCase().endsWith('@bakano.ec')) return false;
-        
-        // Exact full name match in the title (case insensitive)
-        return apptTitle.includes(u.name.toLowerCase());
-      });
-
-      return hasNameMatch;
+      return matchesWorkspace(appt, currentWs);
     });
 
-    // 4. Transform to match a standard format for frontend
+    // 7. Transform to match a standard format for frontend
     return filtered.map((appt: any) => {
       const apptTitle = (appt.title || appt.name || "").toLowerCase();
       
