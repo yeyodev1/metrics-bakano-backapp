@@ -5,6 +5,7 @@ import { internalOrSuperadminMiddleware } from "../middlewares/internalOrSuperad
 import { workspaceAccessMiddleware } from "../middlewares/workspaceAccess.middleware";
 import { workspaceAdminMiddleware } from "../middlewares/workspaceAdmin.middleware";
 import { uploadDocument } from "../middlewares/upload.middleware";
+import { ghlController } from "../controllers/ghl.controller";
 import {
   createWorkspace,
   listWorkspaces,
@@ -81,6 +82,9 @@ workspaceRouter.get("/:workspaceId/team", workspaceAccessMiddleware, getTeam);
 workspaceRouter.post("/:workspaceId/users", workspaceAdminMiddleware, createUser);
 workspaceRouter.put("/:workspaceId/users/:userId", workspaceAdminMiddleware, updateUser);
 workspaceRouter.delete("/:workspaceId/users/:userId", workspaceAdminMiddleware, deleteUser);
+
+// GHL Meetings
+workspaceRouter.get("/:workspaceId/meetings", workspaceAccessMiddleware, ghlController.getWorkspaceMeetings);
 
 // Branches Management
 workspaceRouter.get("/:workspaceId/branches", workspaceAccessMiddleware, getBranches);
