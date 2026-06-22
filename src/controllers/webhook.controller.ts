@@ -19,6 +19,7 @@ export const handleMetaSchedulingWebhook = async (req: Request, res: Response, n
             workspace.onboardingStatus = {
               videoGenesisAccepted: true,
               contractSubmitted: true,
+              resourcesCompleted: false,
               meetingScheduled: false,
             };
           }

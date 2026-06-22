@@ -16,6 +16,7 @@ import salesSummaryRouter from "./salesSummary.router";
 import cronRouter from "./cron.router";
 import publicMetricsRouter from "./publicMetrics.router";
 import { onboardingRouter } from "./onboarding.router";
+import { resourceRouter } from "./resource.router";
 import { webhookRouter } from "./webhook.router";
 import evaluationRouter from "./evaluation.router";
 
@@ -40,6 +41,7 @@ function routerApi(app: Application) {
   router.use("/sales-summary", salesSummaryRouter);
   router.use("/cron", cronRouter);
   router.use("/public", publicMetricsRouter);
+  router.use("/workspaces", resourceRouter);
   router.use("/onboarding", onboardingRouter);
   router.use("/evaluations", evaluationRouter);
 

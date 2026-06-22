@@ -17,6 +17,7 @@ export const acceptVideoResponsibilities = async (req: Request, res: Response, n
       workspace.onboardingStatus = {
         videoGenesisAccepted: false,
         contractSubmitted: false,
+        resourcesCompleted: false,
         meetingScheduled: false,
       };
     }
@@ -107,6 +108,7 @@ export const submitContract = async (req: Request, res: Response, next: NextFunc
       workspace.onboardingStatus = {
         videoGenesisAccepted: true,
         contractSubmitted: false,
+        resourcesCompleted: false,
         meetingScheduled: false,
       };
     }
@@ -134,6 +136,7 @@ export const checkOnboardingStatus = async (req: Request, res: Response, next: N
       onboardingStatus: workspace.onboardingStatus || {
         videoGenesisAccepted: false,
         contractSubmitted: false,
+        resourcesCompleted: false,
         meetingScheduled: false,
       },
       preNegotiatedContract: workspace.preNegotiatedContract || null
@@ -158,6 +161,7 @@ export const markMeetingScheduled = async (req: Request, res: Response, next: Ne
       workspace.onboardingStatus = {
         videoGenesisAccepted: true,
         contractSubmitted: true,
+        resourcesCompleted: false,
         meetingScheduled: false,
       };
     }
@@ -167,6 +171,33 @@ export const markMeetingScheduled = async (req: Request, res: Response, next: Ne
     res.status(200).send({ message: "Meeting marked as scheduled." });
   } catch (error) {
     console.error("Error in markMeetingScheduled:", error);
+    res.status(500).send({ error: "Internal server error" });
+  }
+};
+
+export const markResourcesCompleted = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { workspaceId } = req.params;
+
+    const workspace = await WorkspaceModel.findById(workspaceId);
+    if (!workspace) {
+      return res.status(404).send({ error: "Workspace not found" });
+    }
+
+    if (!workspace.onboardingStatus) {
+      workspace.onboardingStatus = {
+        videoGenesisAccepted: false,
+        contractSubmitted: false,
+        resourcesCompleted: false,
+        meetingScheduled: false,
+      };
+    }
+    workspace.onboardingStatus.resourcesCompleted = true;
+    await workspace.save();
+
+    res.status(200).send({ message: "Resources step completed." });
+  } catch (error) {
+    console.error("Error in markResourcesCompleted:", error);
     res.status(500).send({ error: "Internal server error" });
   }
 };
