@@ -2,6 +2,7 @@ import express from "express";
 import cors from "cors";
 import http from "http";
 import routerApi from "./routes";
+import { dbConnect } from "./config/mongo";
 import { globalErrorHandler } from "./middlewares/globalErrorHandler.middleware";
 
 const whitelist = [
@@ -30,6 +31,11 @@ export function createApp() {
 
   app.use(cors(corsOptions));
   app.use(express.json({ limit: "50mb" }));
+
+  app.use(async (_req, _res, next) => {
+    await dbConnect();
+    next();
+  });
 
   app.get("/", (_req, res) => {
     res.send("metrics bakano backapp is alive");
