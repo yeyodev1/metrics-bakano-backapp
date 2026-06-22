@@ -143,6 +143,21 @@ export async function toggleWorkspaceActive(req: AuthRequest, res: Response, nex
   }
 }
 
+export async function deleteWorkspace(req: AuthRequest, res: Response, next: NextFunction) {
+  try {
+    const workspaceId = req.params["workspaceId"] as string;
+    await workspaceService.deleteWorkspace(workspaceId);
+    res.status(HttpStatusCode.Ok).send({ message: "Workspace and associated references deleted successfully." });
+  } catch (error: any) {
+    if (error.message === "INVALID_ID" || error.message === "NOT_FOUND") {
+      res.status(HttpStatusCode.NotFound).send({ message: "Entorno no encontrado." });
+      return;
+    }
+    console.error("deleteWorkspace error:", error);
+    next(error);
+  }
+}
+
 export async function listAllCollaborators(req: AuthRequest, res: Response, next: NextFunction) {
   try {
     const search = req.query["search"] as string;
@@ -170,6 +185,22 @@ export async function listUsers(req: AuthRequest, res: Response, next: NextFunct
       return;
     }
     console.error("listUsers error:", error);
+    next(error);
+  }
+}
+
+export async function getTeam(req: AuthRequest, res: Response, next: NextFunction) {
+  try {
+    const workspaceId = req.params["workspaceId"] as string;
+    const teamData = await workspaceService.getTeamData(workspaceId);
+    res.status(HttpStatusCode.Ok).send({ message: "Team retrieved successfully.", data: teamData });
+    return;
+  } catch (error: any) {
+    if (error.message === "INVALID_ID" || error.message === "NOT_FOUND") {
+      res.status(HttpStatusCode.NotFound).send({ message: "Workspace not found." });
+      return;
+    }
+    console.error("getTeam error:", error);
     next(error);
   }
 }

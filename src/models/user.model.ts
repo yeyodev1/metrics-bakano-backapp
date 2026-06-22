@@ -37,6 +37,8 @@ export interface IUser extends Document {
   apiKeyCreatedAt?: Date;
   createdAt: Date;
   updatedAt: Date;
+  photoUrl?: string;
+  presentationVideoUrl?: string;
 }
 
 export const UserSchema = new Schema<IUser>(
@@ -107,6 +109,16 @@ export const UserSchema = new Schema<IUser>(
     },
     apiKeyCreatedAt: {
       type: Date,
+    },
+    photoUrl: {
+      type: String,
+      trim: true,
+      default: null,
+    },
+    presentationVideoUrl: {
+      type: String,
+      trim: true,
+      default: null,
     },
   },
   {

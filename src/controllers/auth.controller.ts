@@ -39,3 +39,30 @@ export async function login(req: Request, res: Response, next: NextFunction) {
     return;
   }
 }
+
+export async function getMe(req: Request, res: Response, next: NextFunction) {
+  try {
+    const userId = (req as any).user?._id;
+    if (!userId) {
+      res.status(HttpStatusCode.Unauthorized).send({
+        message: "Unauthorized.",
+      });
+      return;
+    }
+
+    const user = await authService.me(userId);
+
+    res.status(HttpStatusCode.Ok).send({
+      message: "User profile retrieved successfully.",
+      user,
+    });
+    return;
+  } catch (error: any) {
+    console.error("GetMe Error:", error);
+
+    res.status(HttpStatusCode.InternalServerError).send({
+      message: "An internal server error occurred.",
+    });
+    return;
+  }
+}

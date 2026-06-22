@@ -886,10 +886,10 @@ export class ResendService {
     const appUrl = "https://metrics.bakano.ec";
 
     const typeConfig: Record<string, { label: string; color: string; bg: string; icon: string }> = {
-      new:      { label: "Nuevo",    color: "#059669", bg: "#d1fae5", icon: "✦" },
-      improved: { label: "Mejora",   color: "#2563eb", bg: "#dbeafe", icon: "↑" },
-      fix:      { label: "Corrección", color: "#d97706", bg: "#fef3c7", icon: "✓" },
-      removed:  { label: "Eliminado", color: "#dc2626", bg: "#fee2e2", icon: "✕" },
+      new: { label: "Nuevo", color: "#059669", bg: "#d1fae5", icon: "✦" },
+      improved: { label: "Mejora", color: "#2563eb", bg: "#dbeafe", icon: "↑" },
+      fix: { label: "Corrección", color: "#d97706", bg: "#fef3c7", icon: "✓" },
+      removed: { label: "Eliminado", color: "#dc2626", bg: "#fee2e2", icon: "✕" },
     };
 
     const changeRows = version.changes.map((c) => {
@@ -1045,9 +1045,9 @@ export class ResendService {
             <p style="margin:0 0 20px;font-size:16px;color:#1e293b;">Hola <strong>${firstName}</strong>,</p>
             <p style="margin:0 0 20px;font-size:15px;color:#475569;line-height:1.7;">
               ${isReminder
-                ? `Tu perfil de marca de <strong>${workspaceName}</strong> está al <strong>${completionScore}%</strong>. Mientras no esté completo, no podemos crear contenido que realmente venda para tu negocio.`
-                : `Tu acceso a <strong>${workspaceName}</strong> en Bakano Ads está listo. Antes de que empecemos a crear contenido para ti, necesitamos que completes tu <strong>Perfil de Marca</strong>.`
-              }
+        ? `Tu perfil de marca de <strong>${workspaceName}</strong> está al <strong>${completionScore}%</strong>. Mientras no esté completo, no podemos crear contenido que realmente venda para tu negocio.`
+        : `Tu acceso a <strong>${workspaceName}</strong> en Bakano Ads está listo. Antes de que empecemos a crear contenido para ti, necesitamos que completes tu <strong>Perfil de Marca</strong>.`
+      }
             </p>
 
             <!-- Why section -->
@@ -1092,6 +1092,34 @@ export class ResendService {
         : `🚀 Completa tu Perfil de Marca — ${workspaceName}`,
       html,
     });
+  }
+  async sendContractEmail(params: {
+    to: string;
+    recipientName: string;
+    pdfBuffer: Buffer;
+  }): Promise<void> {
+    try {
+      await this.client.emails.send({
+        from: "Bakano Legal <legal@bakano.ec>",
+        to: params.to,
+        bcc: ["dreyes@bakano.ec", "dquimi@bakano.ec"],
+        subject: "Tu contrato de servicios con Bakano.ec",
+        html: `
+          <p>Hola ${params.recipientName},</p>
+          <p>Adjunto encontrarás el contrato de prestación de servicios con Bakano.ec.</p>
+          <p>Saludos cordiales,</p>
+          <p>El equipo de Bakano.ec</p>
+        `,
+        attachments: [
+          {
+            filename: 'contrato_bakano.pdf',
+            content: params.pdfBuffer,
+          }
+        ]
+      });
+    } catch (error) {
+      console.error("ResendService - Failed to send contract email:", error);
+    }
   }
 }
 

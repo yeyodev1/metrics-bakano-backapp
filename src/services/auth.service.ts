@@ -46,4 +46,13 @@ export class AuthService {
       token,
     };
   }
+
+  public async me(userId: string) {
+    const user = await models.users.findById(userId).lean();
+    if (!user) {
+      throw new Error("User not found");
+    }
+    const { password, ...userWithoutPassword } = user;
+    return userWithoutPassword;
+  }
 }

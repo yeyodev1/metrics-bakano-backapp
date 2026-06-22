@@ -326,3 +326,58 @@ export async function uploadItemMedia(
     next(error);
   }
 }
+
+// ── GET /video-planning/editor/:editorId/edited-items ─────────────────────
+export async function getEditorCompletedItems(
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+) {
+  try {
+    const { editorId } = req.params as { editorId: string };
+    
+    if (!Types.ObjectId.isValid(editorId)) {
+      res.status(HttpStatusCode.BadRequest).json({ message: "Invalid editor ID." });
+      return;
+    }
+
+    // Find all Plannings assigned to this editor
+    const plannings = await models.planning.find({
+      assignedTo: new Types.ObjectId(editorId)
+    }).lean();
+
+    const planningIds = plannings.map(p => p._id);
+
+    // Find VideoPlannings matching those plannings, and populated with workspace
+    const videoPlannings = await models.videoPlanning.find({
+      planningEntryId: { $in: planningIds }
+    }).populate("workspaceId", "name metaAds.pageName").lean();
+
+    const result: any[] = [];
+    for (const vp of videoPlannings) {
+      for (const item of vp.items) {
+        if (item.edicion === "EDITADO") {
+          result.push({
+            workspaceId: (vp.workspaceId as any)?._id,
+            workspaceName: (vp.workspaceId as any)?.name || "Sin entorno",
+            tema: item.tema,
+            linkVideo: item.linkVideo,
+            fechaPublicacion: item.fechaPublicacion,
+          });
+        }
+      }
+    }
+
+    // Sort by fechaPublicacion desc
+    result.sort((a, b) => {
+      const dateA = a.fechaPublicacion ? new Date(a.fechaPublicacion).getTime() : 0;
+      const dateB = b.fechaPublicacion ? new Date(b.fechaPublicacion).getTime() : 0;
+      return dateB - dateA; // newest first
+    });
+
+    res.status(HttpStatusCode.Ok).json({ items: result });
+  } catch (error: any) {
+    console.error("getEditorCompletedItems error:", error);
+    next(error);
+  }
+}

@@ -19,6 +19,8 @@ import {
   createGlobalUser,
   updateGlobalUser,
   resendInvite,
+  deleteWorkspace,
+  getTeam,
 } from "../controllers/workspace.controller";
 import {
   getBrandProfile,
@@ -71,9 +73,11 @@ workspaceRouter.post(
 workspaceRouter.get("/:workspaceId", workspaceAccessMiddleware, getWorkspace);
 workspaceRouter.put("/:workspaceId", workspaceAdminMiddleware, updateWorkspace);
 workspaceRouter.patch("/:workspaceId/toggle-active", superadminMiddleware, toggleWorkspaceActive);
+workspaceRouter.delete("/:workspaceId", superadminMiddleware, deleteWorkspace);
 
 // Users Management
 workspaceRouter.get("/:workspaceId/users", workspaceAccessMiddleware, listUsers);
+workspaceRouter.get("/:workspaceId/team", workspaceAccessMiddleware, getTeam);
 workspaceRouter.post("/:workspaceId/users", workspaceAdminMiddleware, createUser);
 workspaceRouter.put("/:workspaceId/users/:userId", workspaceAdminMiddleware, updateUser);
 workspaceRouter.delete("/:workspaceId/users/:userId", workspaceAdminMiddleware, deleteUser);

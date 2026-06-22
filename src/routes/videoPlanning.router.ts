@@ -10,6 +10,7 @@ import {
   submitClientApproval,
   reopenPlanning,
   getCalendarItems,
+  getEditorCompletedItems,
 } from "../controllers/videoPlanning.controller";
 import { generateScript, generateScriptQuick, getLLMStatus } from "../controllers/scriptGeneration.controller";
 import { uploadMedia } from "../middlewares/upload.middleware";
@@ -45,6 +46,13 @@ planningEntriesRouter.put(
 // GET    /api/video-planning/calendar
 // POST   /api/video-planning/:videoItemId/generate-script
 const videoPlanningRouter = Router();
+
+videoPlanningRouter.get(
+  "/editor/:editorId/edited-items",
+  authMiddleware,
+  internalOrSuperadminMiddleware,
+  getEditorCompletedItems
+);
 
 videoPlanningRouter.patch(
   "/:planningId/items/:itemId",
