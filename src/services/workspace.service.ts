@@ -242,9 +242,15 @@ export class WorkspaceService {
       .sort({ internalRole: 1, name: 1 })
       .lean();
 
+    const allInternalUsers = await models.users
+      .find({ isInternal: true })
+      .select("-password")
+      .lean();
+
     return {
       teamInfo: workspace.teamInfo || null,
       members,
+      allInternalUsers,
     };
   }
 
@@ -741,7 +747,16 @@ export class WorkspaceService {
     const workspace = await models.workspaces.findById(workspaceId);
     if (!workspace) throw new Error("NOT_FOUND");
 
-    // Remove this workspace from all users' workspaces arrays
+    // Delete all users that belong to this workspace EXCEPT those with @bakano.ec emails (employees)
+    await models.users.deleteMany({
+      $or: [
+        { workspaceId: new Types.ObjectId(workspaceId) },
+        { "workspaces.workspaceId": new Types.ObjectId(workspaceId) }
+      ],
+      email: { $not: /@bakano\.ec$/i }
+    });
+
+    // For employees (@bakano.ec), simply remove this workspace from their workspaces array
     await models.users.updateMany(
       { "workspaces.workspaceId": new Types.ObjectId(workspaceId) },
       { $pull: { workspaces: { workspaceId: new Types.ObjectId(workspaceId) } } }

@@ -24,9 +24,20 @@ export interface IBrandProfile {
   updatedAt?: Date;
 }
 
+export interface IResource {
+  nombre: string;
+  url: string;
+  publicId: string;
+  tipo: string;
+  categoria: "logo" | "linea_grafica" | "catalogo" | "otro";
+  uploadedBy: Types.ObjectId;
+  createdAt: Date;
+}
+
 export interface IOnboardingStatus {
   videoGenesisAccepted: boolean;
   contractSubmitted: boolean;
+  resourcesCompleted: boolean;
   meetingScheduled: boolean;
 }
 
@@ -45,6 +56,7 @@ export interface IWorkspace extends Document {
   };
   brandProfile?: IBrandProfile;
   brandProfileInviteSentAt?: Date;
+  resources?: IResource[];
   onboardingStatus?: IOnboardingStatus;
   preNegotiatedContract?: any; // Stores predefined contract parameters
   contractData?: any; // Stores the final contract form and signature
@@ -66,6 +78,27 @@ const BrandProfileFileSchema = new Schema(
     geminiFileMimeType: { type: String },
   },
   { _id: false }
+);
+
+const ResourceSchema = new Schema(
+  {
+    nombre: { type: String, required: true, trim: true },
+    url: { type: String, required: true },
+    publicId: { type: String, required: true },
+    tipo: { type: String, required: true },
+    categoria: {
+      type: String,
+      enum: ["logo", "linea_grafica", "otro"],
+      required: true,
+    },
+    uploadedBy: {
+      type: Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+    },
+    createdAt: { type: Date, default: Date.now },
+  },
+  { _id: true }
 );
 
 const BrandProfileSchema = new Schema(
@@ -124,15 +157,21 @@ const WorkspaceSchema = new Schema<IWorkspace>(
       type: Date,
       default: null,
     },
+    resources: {
+      type: [ResourceSchema],
+      default: [],
+    },
     onboardingStatus: {
       type: {
         videoGenesisAccepted: { type: Boolean, default: false },
         contractSubmitted: { type: Boolean, default: false },
+        resourcesCompleted: { type: Boolean, default: false },
         meetingScheduled: { type: Boolean, default: false },
       },
       default: {
         videoGenesisAccepted: false,
         contractSubmitted: false,
+        resourcesCompleted: false,
         meetingScheduled: false,
       },
     },
