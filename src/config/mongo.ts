@@ -29,10 +29,19 @@ export async function dbConnect() {
   }
 
   if (!cached.promise) {
-    cached.promise = mongoose.connect(MONGODB_URI).then((m) => {
-      console.log("Connected to MongoDB");
-      return m;
-    });
+    cached.promise = mongoose
+      .connect(MONGODB_URI, {
+        serverSelectionTimeoutMS: 5000,
+        connectTimeoutMS: 10000,
+      })
+      .then((m) => {
+        console.log("Connected to MongoDB");
+        return m;
+      })
+      .catch((err) => {
+        cached.promise = null;
+        throw err;
+      });
   }
 
   cached.conn = await cached.promise;

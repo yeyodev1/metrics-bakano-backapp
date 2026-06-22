@@ -32,9 +32,13 @@ export function createApp() {
   app.use(cors(corsOptions));
   app.use(express.json({ limit: "50mb" }));
 
-  app.use(async (_req, _res, next) => {
-    await dbConnect();
-    next();
+  app.use(async (_req, res, next) => {
+    try {
+      await dbConnect();
+      next();
+    } catch {
+      res.status(503).json({ error: "Database connection failed" });
+    }
   });
 
   app.get("/", (_req, res) => {
