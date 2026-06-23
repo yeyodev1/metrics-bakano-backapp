@@ -33,6 +33,7 @@ export async function dbConnect() {
       .connect(MONGODB_URI, {
         serverSelectionTimeoutMS: 5000,
         connectTimeoutMS: 10000,
+        maxPoolSize: 5,
       })
       .then((m) => {
         console.log("Connected to MongoDB");
