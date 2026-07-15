@@ -63,7 +63,7 @@ export class FlorindaSalesService {
 
   private async authenticate(): Promise<string> {
     const config = this.getConfig();
-    const response = await axios.get<FlorindaLoginResponse>(`${config.baseUrl}/api/login`, {
+    const response = await axios.post<FlorindaLoginResponse>(`${config.baseUrl}/api/login`, null, {
       params: { user: config.user, password: config.password },
       timeout: 15000,
     });
