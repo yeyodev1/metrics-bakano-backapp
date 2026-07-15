@@ -1,6 +1,6 @@
 import { Router, Request, Response } from "express";
 import { tumeseroService, getTodayEcuador } from "../services/tumesero.service";
-import { florindaSalesService } from "../services/florindaSales.service";
+import { florindaSalesService, FLORINDA_WORKSPACE_ID } from "../services/florindaSales.service";
 
 const cronRouter = Router();
 
@@ -42,7 +42,15 @@ cronRouter.get("/florinda-sales-sync", async (req: Request, res: Response) => {
   }
 
   try {
-    const result = await florindaSalesService.syncCurrentYear();
+    const from = typeof req.query.from === "string" ? req.query.from : undefined;
+    const to = typeof req.query.to === "string" ? req.query.to : undefined;
+    if ((from || to) && (!from || !to || !/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to) || from > to)) {
+      res.status(400).json({ ok: false, error: "Use from y to válidos en formato YYYY-MM-DD." });
+      return;
+    }
+    const result = from && to
+      ? await florindaSalesService.syncRange(FLORINDA_WORKSPACE_ID, from, to)
+      : await florindaSalesService.syncCurrentYear();
     console.log(`[Cron] Florinda sales sync OK: ${result.daysSynced} days, ${result.lineItems} lines`);
     res.json({ ok: true, result });
   } catch (err: any) {
