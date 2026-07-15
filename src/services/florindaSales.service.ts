@@ -55,7 +55,7 @@ export class FlorindaSalesService {
 
     return {
       baseUrl: (process.env.FLORINDA_API_BASE_URL || "https://florindafloreria.techncore.com").replace(/\/$/, ""),
-      salesPath: process.env.FLORINDA_SALES_PATH || "/api/reportes/detalleventas",
+      salesPath: process.env.FLORINDA_SALES_PATH || "/api/reportes/detalle-ventas",
       user,
       password,
     };
