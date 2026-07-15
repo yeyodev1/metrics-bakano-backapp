@@ -14,6 +14,7 @@ import { SalesDailySummaryModel } from "./salesDailySummary.model";
 import { TumeseroUsageModel } from "./tumeseroUsage.model";
 import { BranchModel } from "./branch.model";
 import { EvaluationModel } from "./evaluation.model";
+import { FlorindaDailySalesModel } from "./florindaDailySales.model";
 
 const models = {
   users: UserModel,
@@ -32,6 +33,7 @@ const models = {
   tumeseroUsage: TumeseroUsageModel,
   branches: BranchModel,
   evaluations: EvaluationModel,
+  florindaDailySales: FlorindaDailySalesModel,
 };
 
 export default models;
