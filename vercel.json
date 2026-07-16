@@ -16,6 +16,10 @@
     {
       "path": "/api/cron/tumesero-sync",
       "schedule": "0 4 * * *"
+    },
+    {
+      "path": "/api/cron/florinda-sales-sync",
+      "schedule": "15 4 * * *"
     }
   ]
 }

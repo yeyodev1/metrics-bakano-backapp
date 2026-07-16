@@ -1,5 +1,6 @@
 import { Router, Request, Response } from "express";
 import { tumeseroService, getTodayEcuador } from "../services/tumesero.service";
+import { florindaSalesService, FLORINDA_WORKSPACE_ID } from "../services/florindaSales.service";
 
 const cronRouter = Router();
 
@@ -29,6 +30,31 @@ cronRouter.get("/tumesero-sync", async (req: Request, res: Response) => {
     res.json({ ok: true, date: today, result });
   } catch (err: any) {
     console.error("[Cron] Tumesero sync failed:", err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+cronRouter.get("/florinda-sales-sync", async (req: Request, res: Response) => {
+  const secret = process.env.CRON_SECRET;
+  if (!secret || req.headers["authorization"] !== `Bearer ${secret}`) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+
+  try {
+    const from = typeof req.query.from === "string" ? req.query.from : undefined;
+    const to = typeof req.query.to === "string" ? req.query.to : undefined;
+    if ((from || to) && (!from || !to || !/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to) || from > to)) {
+      res.status(400).json({ ok: false, error: "Use from y to válidos en formato YYYY-MM-DD." });
+      return;
+    }
+    const result = from && to
+      ? await florindaSalesService.syncRange(FLORINDA_WORKSPACE_ID, from, to)
+      : await florindaSalesService.syncAll();
+    console.log(`[Cron] Florinda sales sync OK: ${result.daysSynced} days, ${result.lineItems} lines`);
+    res.json({ ok: true, result });
+  } catch (err: any) {
+    console.error("[Cron] Florinda sales sync failed:", err.message);
     res.status(500).json({ ok: false, error: err.message });
   }
 });

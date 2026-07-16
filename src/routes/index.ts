@@ -19,6 +19,7 @@ import { onboardingRouter } from "./onboarding.router";
 import { resourceRouter } from "./resource.router";
 import { webhookRouter } from "./webhook.router";
 import evaluationRouter from "./evaluation.router";
+import florindaSalesRouter from "./florindaSales.router";
 
 function routerApi(app: Application) {
   const router = express.Router();
@@ -44,10 +45,10 @@ function routerApi(app: Application) {
   router.use("/workspaces", resourceRouter);
   router.use("/onboarding", onboardingRouter);
   router.use("/evaluations", evaluationRouter);
+  router.use("/florinda-sales", florindaSalesRouter);
 
   // Webhooks are top-level on v1
   app.use("/v1/webhooks", webhookRouter);
 }
 
 export default routerApi;
-
