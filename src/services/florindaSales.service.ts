@@ -4,12 +4,14 @@ import { FlorindaDailySalesModel } from "../models/florindaDailySales.model";
 import { getTodayEcuador } from "./tumesero.service";
 
 export const FLORINDA_WORKSPACE_ID = "69d7c73318a77b5e0db9f74e";
+export const FLORINDA_SYNC_START_DATE = process.env.FLORINDA_SYNC_START_DATE || "2025-11-27";
 
 interface FlorindaLoginResponse {
   token?: string;
 }
 
 interface FlorindaSale {
+  tipo_documento?: string | null;
   fecha_orden: string;
   vendedor?: string | null;
   factura?: string | null;
@@ -43,6 +45,11 @@ function round(value: number): number {
 
 function apiDate(date: string): string {
   return date.replace(/-/g, "/");
+}
+
+function saleDate(value: string): string | null {
+  const match = value?.match(/^\d{4}-\d{2}-\d{2}/);
+  return match?.[0] || null;
 }
 
 export class FlorindaSalesService {
@@ -94,10 +101,11 @@ export class FlorindaSalesService {
     const days = new Map<string, FlorindaSale[]>();
 
     for (const sale of sales) {
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(sale.fecha_orden)) continue;
-      const entries = days.get(sale.fecha_orden) || [];
+      const date = saleDate(sale.fecha_orden);
+      if (!date) continue;
+      const entries = days.get(date) || [];
       entries.push(sale);
-      days.set(sale.fecha_orden, entries);
+      days.set(date, entries);
     }
 
     const workspaceObjectId = new Types.ObjectId(workspaceId);
@@ -125,7 +133,9 @@ export class FlorindaSalesService {
       };
 
       daySales.forEach((sale, index) => {
-        const invoice = sale.factura || `${date}-${index}`;
+        const invoice = sale.factura
+          ? `${sale.tipo_documento || "DOCUMENTO"}:${sale.factura}`
+          : `${date}-${index}`;
         const lineTotal = amount(sale.precio_total);
         invoices.add(invoice);
         netSales += amount(sale.subtotal_sin_iva);
@@ -166,9 +176,9 @@ export class FlorindaSalesService {
     return { from, to, daysSynced: operations.length, lineItems: sales.length, syncedAt };
   }
 
-  async syncCurrentYear(workspaceId = FLORINDA_WORKSPACE_ID) {
+  async syncAll(workspaceId = FLORINDA_WORKSPACE_ID) {
     const today = getTodayEcuador();
-    return this.syncRange(workspaceId, `${today.slice(0, 4)}-01-01`, today);
+    return this.syncRange(workspaceId, FLORINDA_SYNC_START_DATE, today);
   }
 
   async getMonthSummary(workspaceId: string, year: number, month: number) {

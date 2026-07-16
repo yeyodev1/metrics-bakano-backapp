@@ -4,6 +4,7 @@ import { florindaSalesService, FLORINDA_WORKSPACE_ID } from "../services/florind
 
 export async function getFlorindaMonth(req: AuthRequest, res: Response): Promise<void> {
   try {
+    res.set("Cache-Control", "no-store");
     const workspaceId = String(req.params.workspaceId);
     if (workspaceId !== FLORINDA_WORKSPACE_ID) {
       res.status(403).json({ message: "Integración Florinda no disponible para este workspace." });
@@ -29,7 +30,7 @@ export async function syncFlorindaSales(req: AuthRequest, res: Response): Promis
       return;
     }
     const workspaceId = String(req.params.workspaceId);
-    const result = await florindaSalesService.syncCurrentYear(workspaceId);
+    const result = await florindaSalesService.syncAll(workspaceId);
     res.json({ message: "Ventas de Florinda sincronizadas.", result });
   } catch (error: any) {
     console.error("[FlorindaSales] sync error:", error.message);

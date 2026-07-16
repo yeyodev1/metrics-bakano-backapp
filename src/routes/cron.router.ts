@@ -50,7 +50,7 @@ cronRouter.get("/florinda-sales-sync", async (req: Request, res: Response) => {
     }
     const result = from && to
       ? await florindaSalesService.syncRange(FLORINDA_WORKSPACE_ID, from, to)
-      : await florindaSalesService.syncCurrentYear();
+      : await florindaSalesService.syncAll();
     console.log(`[Cron] Florinda sales sync OK: ${result.daysSynced} days, ${result.lineItems} lines`);
     res.json({ ok: true, result });
   } catch (err: any) {
