@@ -7,6 +7,8 @@ import {
   getDayBilling,
   updateBillingEntry,
   getMyEntryToday,
+  getMissingCurrentMonthDates,
+  distributeCurrentMonthBilling,
 } from "../controllers/billing.controller";
 
 const billingRouter = Router();
@@ -18,6 +20,8 @@ billingRouter.post("/:workspaceId", workspaceAccessMiddleware, createBillingEntr
 billingRouter.get("/:workspaceId/month", workspaceAccessMiddleware, getMonthBilling);
 billingRouter.get("/:workspaceId/day", workspaceAccessMiddleware, getDayBilling);
 billingRouter.get("/:workspaceId/my-entry-today", workspaceAccessMiddleware, getMyEntryToday);
+billingRouter.get("/:workspaceId/missing-current-month", workspaceAccessMiddleware, getMissingCurrentMonthDates);
+billingRouter.post("/:workspaceId/distribute", workspaceAccessMiddleware, distributeCurrentMonthBilling);
 billingRouter.put("/:workspaceId/entry/:entryId", workspaceAccessMiddleware, updateBillingEntry);
 
 export default billingRouter;

@@ -17,6 +17,7 @@ export interface IDailyBillingEntry extends Document {
   metaSpend: number;
   roas: number;
   notes?: string;
+  isBulkDistribution?: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -39,6 +40,7 @@ const DailyBillingEntrySchema = new Schema<IDailyBillingEntry>(
     metaSpend: { type: Number, required: true, default: 0 },
     roas: { type: Number, required: true, default: 0 },
     notes: { type: String, trim: true },
+    isBulkDistribution: { type: Boolean, default: false },
   },
   { timestamps: true, versionKey: false }
 );
