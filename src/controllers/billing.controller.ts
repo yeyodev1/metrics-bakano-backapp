@@ -186,3 +186,54 @@ export async function getMyEntryToday(req: AuthRequest, res: Response): Promise<
     res.status(500).json({ message: "Error interno al verificar la entrada del día." });
   }
 }
+
+export async function getMissingCurrentMonthDates(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const year = Number(req.query.year);
+    const month = Number(req.query.month);
+    if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) {
+      res.status(400).json({ message: "Selecciona un mes válido." });
+      return;
+    }
+    const dates = await billingService.getMissingMonthDates(String(req.user!._id), req.params.workspaceId as string, year, month);
+    res.status(200).json({ dates, count: dates.length });
+  } catch (error) {
+    console.error("[BillingController] getMissingCurrentMonthDates error:", error);
+    res.status(500).json({ message: "No se pudieron obtener los días pendientes." });
+  }
+}
+
+export async function distributeCurrentMonthBilling(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const { total, allocations, notes, year, month } = req.body;
+    if (typeof total !== "number" || !Number.isFinite(total) || total <= 0 || !Array.isArray(allocations) || !Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) {
+      res.status(400).json({ message: "Ingresa un total válido y su distribución por día." });
+      return;
+    }
+    const entries = await billingService.distributeMonthBilling(
+      req.params.workspaceId as string,
+      String(req.user!._id),
+      year,
+      month,
+      total,
+      allocations,
+      typeof notes === "string" ? notes : undefined
+    );
+    res.status(201).json({ message: "Facturación mensual distribuida correctamente.", entries });
+  } catch (error: any) {
+    if (error.message === "NO_PENDING_DAYS") {
+      res.status(409).json({ message: "No tienes días pendientes hasta anteayer en este mes." });
+      return;
+    }
+    if (error.message === "INVALID_ALLOCATION") {
+      res.status(400).json({ message: "La distribución no coincide con los días pendientes o el total ingresado." });
+      return;
+    }
+    if (error?.code === 11000) {
+      res.status(409).json({ message: "Algunos días ya fueron registrados. Actualiza la vista e inténtalo nuevamente." });
+      return;
+    }
+    console.error("[BillingController] distributeCurrentMonthBilling error:", error);
+    res.status(500).json({ message: "No se pudo guardar la facturación distribuida." });
+  }
+}

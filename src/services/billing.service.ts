@@ -36,6 +36,27 @@ export class BillingService {
     return `${year}-${month}-${day}`;
   }
 
+  private async getMetaSpendForDate(workspace: any, date: Date): Promise<number> {
+    const accessToken = workspace.metaAds?.accessToken;
+    const adAccountId = workspace.metaAds?.adAccountId;
+    if (!accessToken || !adAccountId) return 0;
+    try {
+      const dateStr = this.dateToEcuadorString(date);
+      const response = await axios.get(`${this.graphUrl}/act_${adAccountId}/insights`, {
+        params: {
+          access_token: accessToken,
+          level: "account",
+          fields: "spend",
+          time_range: JSON.stringify({ since: dateStr, until: dateStr }),
+        },
+      });
+      return parseFloat(response.data.data?.[0]?.spend || "0");
+    } catch (error: any) {
+      console.error("[BillingService] Failed to fetch Meta spend:", error.response?.data || error.message);
+      return 0;
+    }
+  }
+
   /**
    * Creates a billing entry for a user in a workspace.
    * Fetches metaSpend from Meta API if credentials are available.
@@ -290,7 +311,7 @@ export class BillingService {
       const entryDate = this.normalizeDateToEcuador(entry.date);
       const diffDays = Math.round((today.getTime() - entryDate.getTime()) / (1000 * 60 * 60 * 24));
 
-      if (diffDays > 7) {
+       if (diffDays > 7 && !entry.isBulkDistribution) {
         throw new Error("EDIT_NOT_ALLOWED");
       }
 
@@ -356,6 +377,103 @@ export class BillingService {
       workspaceId: new Types.ObjectId(workspaceId),
       date: normalizedDate,
     });
+  }
+
+  async getMissingMonthDates(userId: string, workspaceId: string, year: number, month: number): Promise<string[]> {
+    const today = this.normalizeDateToEcuador(new Date());
+    const monthStart = new Date(Date.UTC(year, month - 1, 1, 5, 0, 0, 0));
+    const requestedMonthEnd = new Date(Date.UTC(year, month, 0, 5, 0, 0, 0));
+    const through = year === today.getUTCFullYear() && month === today.getUTCMonth() + 1
+      ? new Date(today.getTime() - 2 * 24 * 60 * 60 * 1000)
+      : requestedMonthEnd;
+    if (monthStart > today || through > today) return [];
+    const [workspace, user] = await Promise.all([
+      models.workspaces.findById(workspaceId).select("createdAt").lean(),
+      models.users.findById(userId).select("createdAt").lean(),
+    ]);
+    if (!workspace || !user) return [];
+    const accountStart = this.normalizeDateToEcuador(new Date(Math.max(workspace.createdAt.getTime(), user.createdAt.getTime())));
+    const start = accountStart > monthStart ? accountStart : monthStart;
+    if (through < start) return [];
+
+    const entries = await models.dailyBilling.find({
+      userId: new Types.ObjectId(userId),
+      workspaceId: new Types.ObjectId(workspaceId),
+      date: { $gte: start, $lte: through },
+    }).select("date").lean();
+    const recorded = new Set(entries.map((entry) => this.dateToEcuadorString(entry.date)));
+    const missing: string[] = [];
+    for (let day = new Date(start); day <= through; day.setUTCDate(day.getUTCDate() + 1)) {
+      const date = this.dateToEcuadorString(day);
+      if (!recorded.has(date)) missing.push(date);
+    }
+    return missing;
+  }
+
+  async distributeMonthBilling(
+    workspaceId: string,
+    userId: string,
+    year: number,
+    month: number,
+    total: number,
+    allocations: { date: string; amount: number }[],
+    notes?: string
+  ) {
+    const missingDates = await this.getMissingMonthDates(userId, workspaceId, year, month);
+    const expectedDates = new Set(missingDates);
+    const receivedDates = new Set(allocations.map((allocation) => allocation.date));
+    const totalCents = Math.round(total * 100);
+    const allocatedCents = allocations.reduce((sum, allocation) => sum + Math.round(allocation.amount * 100), 0);
+
+    if (!missingDates.length) throw new Error("NO_PENDING_DAYS");
+    if (receivedDates.size !== missingDates.length || allocations.length !== missingDates.length || allocations.some((allocation) => !expectedDates.has(allocation.date) || !Number.isFinite(allocation.amount) || allocation.amount < 0) || allocatedCents !== totalCents) {
+      throw new Error("INVALID_ALLOCATION");
+    }
+
+    const [workspace, user, branches] = await Promise.all([
+      models.workspaces.findById(workspaceId).lean(),
+      models.users.findById(userId).lean(),
+      models.branches.find({ workspaceId: new Types.ObjectId(workspaceId), isActive: true }).select("_id").lean(),
+    ]);
+    if (!workspace) throw new Error("WORKSPACE_NOT_FOUND");
+    if (!user) throw new Error("USER_NOT_FOUND");
+
+    const rows = await Promise.all(allocations.map(async (allocation) => {
+      const date = new Date(`${allocation.date}T05:00:00.000Z`);
+      const metaSpend = await this.getMetaSpendForDate(workspace, date);
+      const amountCents = Math.round(allocation.amount * 100);
+      const branchBase = branches.length ? Math.floor(amountCents / branches.length) : 0;
+      const branchRemainder = branches.length ? amountCents - branchBase * branches.length : 0;
+      return {
+        workspaceId: new Types.ObjectId(workspaceId),
+        userId: new Types.ObjectId(userId),
+        userName: user.name || user.email,
+        userEmail: user.email,
+        date,
+        amount: allocation.amount,
+        onlineRevenue: branches.length ? undefined : allocation.amount,
+        branches: branches.length ? branches.map((branch, index) => ({
+          branchId: branch._id,
+          amount: (branchBase + (index < branchRemainder ? 1 : 0)) / 100,
+        })) : undefined,
+        metaSpend,
+        roas: metaSpend > 0 ? allocation.amount / metaSpend : 0,
+        notes: notes?.trim() || "Carga masiva mensual",
+        isBulkDistribution: true,
+      };
+    }));
+    const created = await models.dailyBilling.insertMany(rows);
+
+    return created;
+  }
+
+  /**
+   * Verifies every required billing day from this month's workspace start through today.
+   */
+  async getCurrentMonthCompletion(userId: string, workspaceId: string): Promise<{ isComplete: boolean; missingDates: string[] }> {
+    const today = this.normalizeDateToEcuador(new Date());
+    const missingDates = await this.getMissingMonthDates(userId, workspaceId, today.getUTCFullYear(), today.getUTCMonth() + 1);
+    return { isComplete: missingDates.length === 0, missingDates };
   }
 }
 

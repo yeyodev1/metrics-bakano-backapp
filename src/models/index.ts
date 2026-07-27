@@ -15,6 +15,8 @@ import { TumeseroUsageModel } from "./tumeseroUsage.model";
 import { BranchModel } from "./branch.model";
 import { EvaluationModel } from "./evaluation.model";
 import { FlorindaDailySalesModel } from "./florindaDailySales.model";
+import { SalesBookingRequestModel } from "./salesBookingRequest.model";
+import { SalesAppointmentModel } from "./salesAppointment.model";
 
 const models = {
   users: UserModel,
@@ -34,6 +36,8 @@ const models = {
   branches: BranchModel,
   evaluations: EvaluationModel,
   florindaDailySales: FlorindaDailySalesModel,
+  salesBookingRequests: SalesBookingRequestModel,
+  salesAppointments: SalesAppointmentModel,
 };
 
 export default models;
