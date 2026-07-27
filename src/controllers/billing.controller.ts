@@ -189,13 +189,18 @@ export async function getMyEntryToday(req: AuthRequest, res: Response): Promise<
 
 export async function getMissingCurrentMonthDates(req: AuthRequest, res: Response): Promise<void> {
   try {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    res.setHeader('Surrogate-Control', 'no-store');
     const year = Number(req.query.year);
     const month = Number(req.query.month);
     if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) {
       res.status(400).json({ message: "Selecciona un mes válido." });
       return;
     }
-    const dates = await billingService.getMissingMonthDates(String(req.user!._id), req.params.workspaceId as string, year, month);
+    // For bulk registration, we want to include days up to today (not just anteayer)
+    const dates = await billingService.getMissingMonthDates(String(req.user!._id), req.params.workspaceId as string, year, month, true);
     res.status(200).json({ dates, count: dates.length });
   } catch (error) {
     console.error("[BillingController] getMissingCurrentMonthDates error:", error);

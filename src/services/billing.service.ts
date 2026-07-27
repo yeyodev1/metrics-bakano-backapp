@@ -379,31 +379,53 @@ export class BillingService {
     });
   }
 
-  async getMissingMonthDates(userId: string, workspaceId: string, year: number, month: number): Promise<string[]> {
+  /**
+   * Returns the missing dates for a workspace for a given month.
+   * For the current month, considers days up to "anteayer" (2 days ago) by default.
+   * Set includeToday=true to also include today and yesterday (for bulk registration).
+   * Covers the full month from day 1 (allows backfilling past days before workspace creation).
+   * A day is "missing" if NO user has registered billing for that day.
+   */
+  async getMissingMonthDates(userId: string, workspaceId: string, year: number, month: number, includeToday = false): Promise<string[]> {
     const today = this.normalizeDateToEcuador(new Date());
+    const todayStr = this.dateToEcuadorString(today);
     const monthStart = new Date(Date.UTC(year, month - 1, 1, 5, 0, 0, 0));
+    const monthStartStr = this.dateToEcuadorString(monthStart);
     const requestedMonthEnd = new Date(Date.UTC(year, month, 0, 5, 0, 0, 0));
-    const through = year === today.getUTCFullYear() && month === today.getUTCMonth() + 1
-      ? new Date(today.getTime() - 2 * 24 * 60 * 60 * 1000)
-      : requestedMonthEnd;
-    if (monthStart > today || through > today) return [];
+    const requestedMonthEndStr = this.dateToEcuadorString(requestedMonthEnd);
+    const isCurrentMonth = year === today.getUTCFullYear() && month === today.getUTCMonth() + 1;
+
+    // For current month: use today if includeToday=true, otherwise anteayer (2 days ago)
+    const throughStr = isCurrentMonth
+      ? includeToday
+        ? todayStr
+        : this.dateToEcuadorString(new Date(today.getTime() - 2 * 24 * 60 * 60 * 1000))
+      : requestedMonthEndStr;
+
+    if (monthStartStr > todayStr || throughStr > todayStr) return [];
     const [workspace, user] = await Promise.all([
-      models.workspaces.findById(workspaceId).select("createdAt").lean(),
-      models.users.findById(userId).select("createdAt").lean(),
+      models.workspaces.findById(workspaceId).select("_id").lean(),
+      models.users.findById(userId).select("_id").lean(),
     ]);
     if (!workspace || !user) return [];
-    const accountStart = this.normalizeDateToEcuador(new Date(Math.max(workspace.createdAt.getTime(), user.createdAt.getTime())));
-    const start = accountStart > monthStart ? accountStart : monthStart;
-    if (through < start) return [];
+    // Start always at the 1st of the month — allow backfilling past days
+    const startStr = monthStartStr;
+    const start = new Date(startStr + "T05:00:00.000Z");
+    const throughCutoff = new Date(throughStr + "T23:59:59.999Z");
+    if (throughCutoff < start) return [];
 
+    // Check for ANY user's entries in this workspace (not just the requesting user)
+    // A day is "missing" only if NO ONE has registered billing for that day
     const entries = await models.dailyBilling.find({
-      userId: new Types.ObjectId(userId),
       workspaceId: new Types.ObjectId(workspaceId),
-      date: { $gte: start, $lte: through },
+      date: { $gte: start, $lte: throughCutoff },
     }).select("date").lean();
     const recorded = new Set(entries.map((entry) => this.dateToEcuadorString(entry.date)));
     const missing: string[] = [];
-    for (let day = new Date(start); day <= through; day.setUTCDate(day.getUTCDate() + 1)) {
+    const loopStart = new Date(startStr + "T05:00:00.000Z");
+    const loopEnd = new Date(throughStr + "T05:00:00.000Z");
+    const dayMs = 24 * 60 * 60 * 1000;
+    for (let day = new Date(loopStart); day <= loopEnd; day = new Date(day.getTime() + dayMs)) {
       const date = this.dateToEcuadorString(day);
       if (!recorded.has(date)) missing.push(date);
     }
@@ -419,7 +441,8 @@ export class BillingService {
     allocations: { date: string; amount: number }[],
     notes?: string
   ) {
-    const missingDates = await this.getMissingMonthDates(userId, workspaceId, year, month);
+    // Use includeToday=true to match what the frontend shows in the bulk modal
+    const missingDates = await this.getMissingMonthDates(userId, workspaceId, year, month, true);
     const expectedDates = new Set(missingDates);
     const receivedDates = new Set(allocations.map((allocation) => allocation.date));
     const totalCents = Math.round(total * 100);
