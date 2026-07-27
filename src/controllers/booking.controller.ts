@@ -12,9 +12,9 @@ export async function getSalesEligibility(req: AuthRequest, res: Response): Prom
   const workspaceId = String(req.params.workspaceId);
   const userId = String(req.user!._id);
   const [request, billingCompletion, salesAppointment] = await Promise.all([
-    SalesBookingRequestModel.findOne({ workspaceId, userId }).lean(),
+    SalesBookingRequestModel.findOne({ workspaceId, userId }).sort({ createdAt: -1 }).lean(),
     billingService.getCurrentMonthCompletion(userId, workspaceId),
-    SalesAppointmentModel.findOne({ workspaceId, userId, status: { $nin: ["cancelled", "canceled"] } }).sort({ startsAt: -1 }).lean(),
+    SalesAppointmentModel.findOne({ workspaceId, userId, status: { $nin: ["cancelled", "canceled"] } }).sort({ updatedAt: -1 }).lean(),
   ]);
 
   const hasSalesInformation = !!request && request.lostSaleEvidence.length > 0;
@@ -26,6 +26,19 @@ export async function getSalesEligibility(req: AuthRequest, res: Response): Prom
     salesAppointment: salesAppointment ?? null,
     request: request ?? null,
   });
+}
+
+export async function getUpcomingSalesAppointment(req: AuthRequest, res: Response): Promise<void> {
+  const workspaceId = String(req.params.workspaceId);
+  const userId = String(req.user!._id);
+  const salesAppointment = await SalesAppointmentModel.findOne({
+    workspaceId,
+    userId,
+    startsAt: { $gt: new Date() },
+    status: { $nin: ["cancelled", "canceled"] },
+  }).sort({ startsAt: 1 }).lean();
+
+  res.json({ salesAppointment: salesAppointment ?? null });
 }
 
 export async function submitSalesBookingRequest(req: AuthRequest, res: Response): Promise<void> {
@@ -75,11 +88,14 @@ export async function submitSalesBookingRequest(req: AuthRequest, res: Response)
       return { name: file.originalname, url: result.url, publicId: result.publicId, mimeType: file.mimetype, description };
     }));
 
-    const request = await SalesBookingRequestModel.findOneAndUpdate(
-      { workspaceId, userId },
-      { salesApproach: approach, commonObjection: objection, otherObjection: objection === "other" ? other.trim() : undefined, lostSaleEvidence: evidence },
-      { new: true, upsert: true, runValidators: true }
-    );
+    const request = await SalesBookingRequestModel.create({
+      workspaceId,
+      userId,
+      salesApproach: approach,
+      commonObjection: objection,
+      otherObjection: objection === "other" ? other.trim() : undefined,
+      lostSaleEvidence: evidence,
+    });
     res.status(201).json({ eligible: true, hasSalesInformation: true, isBillingUpToDate: true, missingBillingDates: [], request });
   } catch (error) {
     console.error("[BookingController] submit sales request error:", error);

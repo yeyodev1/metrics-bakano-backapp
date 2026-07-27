@@ -39,6 +39,6 @@ const SalesBookingRequestSchema = new Schema<ISalesBookingRequest>(
   { timestamps: true, versionKey: false }
 );
 
-SalesBookingRequestSchema.index({ workspaceId: 1, userId: 1 }, { unique: true });
+SalesBookingRequestSchema.index({ workspaceId: 1, createdAt: -1 });
 
 export const SalesBookingRequestModel = model<ISalesBookingRequest>("SalesBookingRequest", SalesBookingRequestSchema);

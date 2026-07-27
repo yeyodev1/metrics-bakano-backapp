@@ -471,31 +471,8 @@ export class BillingService {
    * Verifies every required billing day from this month's workspace start through today.
    */
   async getCurrentMonthCompletion(userId: string, workspaceId: string): Promise<{ isComplete: boolean; missingDates: string[] }> {
-    const [workspace, user] = await Promise.all([
-      models.workspaces.findById(workspaceId).select("createdAt").lean(),
-      models.users.findById(userId).select("createdAt").lean(),
-    ]);
-    if (!workspace || !user) return { isComplete: false, missingDates: [] };
-
     const today = this.normalizeDateToEcuador(new Date());
-    const monthStart = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1, 5, 0, 0, 0));
-    const accountStart = this.normalizeDateToEcuador(
-      new Date(Math.max(workspace.createdAt.getTime(), user.createdAt.getTime()))
-    );
-    const start = accountStart > monthStart ? accountStart : monthStart;
-    const entries = await models.dailyBilling.find({
-      userId: new Types.ObjectId(userId),
-      workspaceId: new Types.ObjectId(workspaceId),
-      date: { $gte: start, $lte: today },
-    }).select("date").lean();
-    const recordedDates = new Set(entries.map((entry) => this.dateToEcuadorString(entry.date)));
-    const missingDates: string[] = [];
-
-    for (let day = new Date(start); day <= today; day.setUTCDate(day.getUTCDate() + 1)) {
-      const date = this.dateToEcuadorString(day);
-      if (!recordedDates.has(date)) missingDates.push(date);
-    }
-
+    const missingDates = await this.getMissingMonthDates(userId, workspaceId, today.getUTCFullYear(), today.getUTCMonth() + 1);
     return { isComplete: missingDates.length === 0, missingDates };
   }
 }
