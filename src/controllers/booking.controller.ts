@@ -2,6 +2,7 @@ import type { Response } from "express";
 import cloudinary from "../config/cloudinary";
 import { billingService } from "../services/billing.service";
 import { SalesBookingRequestModel } from "../models/salesBookingRequest.model";
+import { SalesAppointmentModel } from "../models/salesAppointment.model";
 import type { AuthRequest } from "../types/AuthRequest";
 
 const approaches = ["spin", "automatic_paragraph", "direct_service", "catalog"];
@@ -10,9 +11,10 @@ const objections = ["price_no_response", "think_about_it", "out_of_budget", "cur
 export async function getSalesEligibility(req: AuthRequest, res: Response): Promise<void> {
   const workspaceId = String(req.params.workspaceId);
   const userId = String(req.user!._id);
-  const [request, billingCompletion] = await Promise.all([
+  const [request, billingCompletion, salesAppointment] = await Promise.all([
     SalesBookingRequestModel.findOne({ workspaceId, userId }).lean(),
     billingService.getCurrentMonthCompletion(userId, workspaceId),
+    SalesAppointmentModel.findOne({ workspaceId, userId, status: { $nin: ["cancelled", "canceled"] } }).sort({ startsAt: -1 }).lean(),
   ]);
 
   const hasSalesInformation = !!request && request.lostSaleEvidence.length > 0;
@@ -21,6 +23,7 @@ export async function getSalesEligibility(req: AuthRequest, res: Response): Prom
     hasSalesInformation,
     isBillingUpToDate: billingCompletion.isComplete,
     missingBillingDates: billingCompletion.missingDates,
+    salesAppointment: salesAppointment ?? null,
     request: request ?? null,
   });
 }
@@ -51,7 +54,16 @@ export async function submitSalesBookingRequest(req: AuthRequest, res: Response)
       return;
     }
 
-    const evidence = await Promise.all(files.map(async (file) => {
+    let metadata: { description?: string }[] = [];
+    try {
+      metadata = typeof req.body.evidenceMetadata === "string" ? JSON.parse(req.body.evidenceMetadata) : [];
+      if (!Array.isArray(metadata)) metadata = [];
+    } catch {
+      res.status(400).json({ message: "Las descripciones de evidencia son inválidas." });
+      return;
+    }
+
+    const evidence = await Promise.all(files.map(async (file, index) => {
       const result = await new Promise<{ url: string; publicId: string }>((resolve, reject) => {
         const stream = cloudinary.uploader.upload_stream(
           { folder: `sales-booking/${workspaceId}/${userId}`, resource_type: file.mimetype === "application/pdf" ? "raw" : "image" },
@@ -59,7 +71,8 @@ export async function submitSalesBookingRequest(req: AuthRequest, res: Response)
         );
         stream.end(file.buffer);
       });
-      return { name: file.originalname, url: result.url, publicId: result.publicId, mimeType: file.mimetype };
+      const description = typeof metadata[index]?.description === "string" ? metadata[index].description.trim().slice(0, 300) : undefined;
+      return { name: file.originalname, url: result.url, publicId: result.publicId, mimeType: file.mimetype, description };
     }));
 
     const request = await SalesBookingRequestModel.findOneAndUpdate(

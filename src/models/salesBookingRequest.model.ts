@@ -5,6 +5,7 @@ export interface ISalesBookingEvidence {
   url: string;
   publicId: string;
   mimeType: string;
+  description?: string;
 }
 
 export interface ISalesBookingRequest extends Document {
@@ -31,6 +32,7 @@ const SalesBookingRequestSchema = new Schema<ISalesBookingRequest>(
         url: { type: String, required: true },
         publicId: { type: String, required: true },
         mimeType: { type: String, required: true },
+        description: { type: String, trim: true, maxlength: 300 },
       },
     ],
   },
