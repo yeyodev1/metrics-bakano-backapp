@@ -89,7 +89,11 @@ export async function getAdsInsights(req: Request, res: Response, next: NextFunc
     // Prefer passed explicitly from query or fallback to workspace saved one
     const adAccountId = (req.query.adAccountId as string) || workspace?.metaAds?.adAccountId;
 
-    if (!workspace || !workspace.metaAds?.accessToken || !adAccountId) {
+    // Prefer the centrally-managed global token (workspace-level tokens are often expired).
+    const globalToken = await metaService.getGlobalAccessToken().catch(() => null);
+    const token = globalToken || workspace?.metaAds?.accessToken;
+
+    if (!workspace || !token || !adAccountId) {
       res.status(HttpStatusCode.BadRequest).send({ message: "Meta integration or Ad account missing." });
       return;
     }
@@ -101,9 +105,9 @@ export async function getAdsInsights(req: Request, res: Response, next: NextFunc
     const timeRange = since && until ? { since, until } : undefined;
 
     const [insightsRes, spendByPlatform, adsSpendByPlatform] = await Promise.all([
-      metaService.getAdInsights(adAccountId, workspace.metaAds.accessToken, datePreset, timeRange),
-      metaService.getSpendByPlatform(adAccountId, workspace.metaAds.accessToken, datePreset, timeRange).catch(() => []),
-      metaService.getAdsSpendByPlatform(adAccountId, workspace.metaAds.accessToken, datePreset, timeRange).catch(() => []),
+      metaService.getAdInsights(adAccountId, token, datePreset, timeRange),
+      metaService.getSpendByPlatform(adAccountId, token, datePreset, timeRange).catch(() => []),
+      metaService.getAdsSpendByPlatform(adAccountId, token, datePreset, timeRange).catch(() => []),
     ]);
 
     res.status(HttpStatusCode.Ok).send({
@@ -229,6 +233,18 @@ export async function manuallyLinkGlobalAccount(req: AuthRequest, res: Response,
     }
     const workspace = await metaService.manuallyLinkGlobalAccount(workspaceId, { adAccountId, instagramAccountId });
     res.status(HttpStatusCode.Ok).send({ message: "Cuenta Meta vinculada correctamente.", workspace });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function refreshGlobalTokens(_req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const refreshedWorkspaces = await metaService.refreshLinkedWorkspaceTokens();
+    res.status(HttpStatusCode.Ok).send({
+      message: `Tokens actualizados en ${refreshedWorkspaces} workspace(s) vinculado(s).`,
+      refreshedWorkspaces,
+    });
   } catch (error) {
     next(error);
   }

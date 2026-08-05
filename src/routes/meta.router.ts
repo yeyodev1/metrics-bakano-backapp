@@ -28,6 +28,7 @@ metaRouter.get("/global/linked", superadminMiddleware, metaController.getLinkedG
 metaRouter.get("/global/all-accounts", superadminMiddleware, metaController.getAllGlobalAccounts);
 metaRouter.post("/global/manual-link", superadminMiddleware, metaController.manuallyLinkGlobalAccount);
 metaRouter.post("/global/unlink", superadminMiddleware, metaController.unlinkGlobalAccount);
+metaRouter.post("/global/refresh-tokens", superadminMiddleware, metaController.refreshGlobalTokens);
 
 // Read-only endpoints for Ads data (Access to Collaborators)
 metaRouter.get("/:workspaceId/adaccounts", workspaceAccessMiddleware, metaController.getAdAccounts);

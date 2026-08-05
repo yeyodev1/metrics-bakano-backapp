@@ -107,10 +107,142 @@ export class MetaService {
         { $set: { encryptedAccessToken: this.encrypt(token), facebookUserId: profileResponse.data.id, facebookUserName: profileResponse.data.name, expiresAt } },
         { upsert: true, new: true, setDefaultsOnInsert: true }
       );
-      return { name: profileResponse.data.name, expiresAt };
+
+      // Refresh all linked workspaces with fresh tokens derived from the new global connection.
+      const refreshed = await this.refreshLinkedWorkspaceTokens(token).catch((err) => {
+        console.error("[MetaService] refreshLinkedWorkspaceTokens failed:", err?.message || err);
+        return 0;
+      });
+
+      return { name: profileResponse.data.name, expiresAt, refreshedWorkspaces: refreshed };
     } catch (error: any) {
       throw this.metaError(error, "No fue posible conectar el perfil de Facebook.");
     }
+  }
+
+  /**
+   * Refreshes every linked workspace with fresh tokens derived from the freshly
+   * reconnected global admin profile. Updates the user access token, a fresh page
+   * access token (when a pageId is present), and the profile picture.
+   * Returns the number of workspaces refreshed.
+   */
+  async refreshLinkedWorkspaceTokens(freshGlobalToken?: string): Promise<number> {
+    const token = freshGlobalToken || (await this.getGlobalAccessToken());
+
+    // Build a map of pageId -> fresh page access token from the admin's pages.
+    const pageTokenMap = new Map<string, { accessToken: string; name?: string; pictureUrl?: string; igId?: string; igUsername?: string; igName?: string; igPicture?: string }>();
+    try {
+      const pages = await this.fetchAllPaginated<any>(`${this.graphUrl}/me/accounts`, {
+        access_token: token,
+        fields: "id,name,access_token,picture{url},instagram_business_account{id,username,profile_picture_url,name}",
+        limit: 100,
+      });
+      for (const page of pages) {
+        if (page.id) {
+          const ig = page.instagram_business_account;
+          pageTokenMap.set(page.id, {
+            accessToken: page.access_token,
+            name: page.name,
+            pictureUrl: page.picture?.data?.url,
+            igId: ig?.id,
+            igUsername: ig?.username,
+            igName: ig?.name,
+            igPicture: ig?.profile_picture_url,
+          });
+        }
+      }
+    } catch (err: any) {
+      console.error("[MetaService] Could not fetch admin pages for token refresh:", err?.response?.data || err?.message);
+    }
+
+    // Also build a map keyed by IG id (via managed pages) so we can resolve most
+    // Instagram pictures WITHOUT a per-workspace API call.
+    const igByIdFromPages = new Map<string, { pictureUrl?: string; username?: string; name?: string; pageId: string }>();
+    for (const [pageId, data] of pageTokenMap.entries()) {
+      if (data.igId) {
+        igByIdFromPages.set(data.igId, { pictureUrl: data.igPicture, username: data.igUsername, name: data.igName, pageId });
+      }
+    }
+
+    // Any workspace with any Meta linkage should be refreshed.
+    const workspaces = await models.workspaces.find({
+      $or: [
+        { "metaAds.adAccountId": { $exists: true, $ne: null } },
+        { "metaAds.instagramAccountId": { $exists: true, $ne: null } },
+        { "metaAds.pageId": { $exists: true, $ne: null } },
+        { "metaAds.accessToken": { $exists: true, $ne: null } },
+      ],
+    }).select("metaAds").lean();
+
+    const now = new Date();
+
+    // Build all updates. Only workspaces whose IG picture cannot be resolved from
+    // managed pages need a live Graph call — those are done in parallel chunks.
+    const bulkOps: any[] = [];
+    const needsIgFetch: Array<{ id: any; igId: string; base: Record<string, unknown> }> = [];
+
+    for (const ws of workspaces) {
+      if (!ws.metaAds) continue;
+      const update: Record<string, unknown> = {
+        "metaAds.accessToken": token,
+        "metaAds.lastSyncedAt": now,
+      };
+
+      // Refresh page access token + page picture if we manage this page.
+      if (ws.metaAds.pageId && pageTokenMap.has(ws.metaAds.pageId)) {
+        const pageData = pageTokenMap.get(ws.metaAds.pageId)!;
+        if (pageData.accessToken) update["metaAds.pageAccessToken"] = pageData.accessToken;
+        if (pageData.name) update["metaAds.pageName"] = pageData.name;
+        if (pageData.pictureUrl) update["metaAds.pictureUrl"] = pageData.pictureUrl;
+      }
+
+      // Resolve IG picture/name from the managed pages map (no extra API call).
+      if (ws.metaAds.instagramAccountId && igByIdFromPages.has(ws.metaAds.instagramAccountId)) {
+        const ig = igByIdFromPages.get(ws.metaAds.instagramAccountId)!;
+        if (ig.pictureUrl) update["metaAds.pictureUrl"] = ig.pictureUrl;
+        if (ig.username || ig.name) {
+          update["metaAds.instagramAccountName"] = ig.username ? `@${ig.username}` : (ig.name || ws.metaAds.instagramAccountId);
+        }
+      } else if (ws.metaAds.instagramAccountId) {
+        // Not covered by a managed page — needs a live fetch (done in parallel below).
+        needsIgFetch.push({ id: ws._id, igId: ws.metaAds.instagramAccountId, base: update });
+      }
+
+      // Fallback picture from Facebook Page graph avatar.
+      if (!update["metaAds.pictureUrl"] && !ws.metaAds.pictureUrl && ws.metaAds.pageId) {
+        update["metaAds.pictureUrl"] = `https://graph.facebook.com/${ws.metaAds.pageId}/picture?type=normal`;
+      }
+
+      bulkOps.push({ updateOne: { filter: { _id: ws._id }, update: { $set: update } } });
+    }
+
+    // Resolve remaining IG pictures in parallel (chunked) to stay within serverless limits.
+    const CHUNK = 12;
+    for (let i = 0; i < needsIgFetch.length; i += CHUNK) {
+      const slice = needsIgFetch.slice(i, i + CHUNK);
+      await Promise.allSettled(
+        slice.map(async (item) => {
+          try {
+            const igRes = await axios.get(`${this.graphUrl}/${item.igId}`, {
+              params: { access_token: token, fields: "id,name,username,profile_picture_url" },
+              timeout: 8000,
+            });
+            if (igRes.data?.profile_picture_url) item.base["metaAds.pictureUrl"] = igRes.data.profile_picture_url;
+            if (igRes.data?.username || igRes.data?.name) {
+              item.base["metaAds.instagramAccountName"] = igRes.data.username ? `@${igRes.data.username}` : (igRes.data.name || item.igId);
+            }
+          } catch {
+            // Non-blocking; keep prior picture/name.
+          }
+        })
+      );
+    }
+
+    if (bulkOps.length > 0) {
+      await models.workspaces.bulkWrite(bulkOps, { ordered: false });
+    }
+
+    return bulkOps.length;
   }
 
   async getGlobalConnectionStatus() {
@@ -119,7 +251,7 @@ export class MetaService {
     return { connected: true, name: integration.facebookUserName, expiresAt: integration.expiresAt, expired: !!integration.expiresAt && integration.expiresAt <= new Date() };
   }
 
-  private async getGlobalAccessToken() {
+  async getGlobalAccessToken() {
     const integration = await models.metaGlobalIntegration.findOne({ key: "facebook-profile" }).lean();
     if (!integration) throw new CustomError("Conecta primero el perfil de Facebook que administra los portafolios de clientes.", 503);
     if (integration.expiresAt && integration.expiresAt <= new Date()) throw new CustomError("La conexión de Facebook expiró. Reconecta el perfil administrador.", 401);
