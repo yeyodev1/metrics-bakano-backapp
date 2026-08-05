@@ -2,10 +2,11 @@ import axios from "axios";
 import { Types } from "mongoose";
 import { SalesDailySummaryModel } from "../models/salesDailySummary.model";
 import { TumeseroUsageModel } from "../models/tumeseroUsage.model";
+import { CustomError } from "../errors/customError.error";
 
 // ── Constants ──────────────────────────────────────────────────────────────────
-const TUMESERO_API_URL = "https://www.tumesero.com/api_sesiones_kuikers.php";
-const TUMESERO_TOKEN = "SLKDJ20934831SKDJkjsooK3O399jgrehlhb90764aaqTYH_387JJyu";
+const TUMESERO_API_URL = process.env.TUMESERO_API_URL || "https://www.tumesero.com/api_sesiones_kuikers.php";
+const TUMESERO_TOKEN = process.env.TUMESERO_TOKEN || "SLKDJ20934831SKDJkjsooK3O399jgrehlhb90764aaqTYH_387JJyu";
 const BOLONCITY_WORKSPACE_ID = "69bdadc67386136fc3682734";
 const DAILY_CALL_LIMIT = 50;
 
@@ -96,20 +97,31 @@ export class TumeseroService {
       { upsert: true, new: true }
     );
 
-    const response = await axios.get<TumeseroApiResponse>(TUMESERO_API_URL, {
-      params: { desde, hasta, token: TUMESERO_TOKEN, limit: 1000 },
-      timeout: 15000,
-    });
+    try {
+      const response = await axios.get<TumeseroApiResponse>(TUMESERO_API_URL, {
+        params: { desde, hasta, token: TUMESERO_TOKEN, limit: 1000 },
+        timeout: 15000,
+      });
 
-    if (response.data.status !== "ok") {
-      throw new Error(`Tumesero API returned non-ok status: ${response.data.status}`);
+      if (response.data.status !== "ok") {
+        throw new CustomError(`Tumesero API returned non-ok status: ${response.data.status}`, 502);
+      }
+
+      if (!Array.isArray(response.data.data)) {
+        throw new CustomError("Tumesero API returned malformed data (expected array)", 502);
+      }
+
+      return response.data.data;
+    } catch (err: any) {
+      if (err instanceof CustomError) throw err;
+      if (axios.isAxiosError(err) && err.response?.status === 401) {
+        throw new CustomError(
+          "El token de la integración con Tumesero ha expirado o es inválido (401 Unauthorized de Tumesero). Configura un nuevo TUMESERO_TOKEN en las variables de entorno del backend.",
+          502
+        );
+      }
+      throw new CustomError(err.message || "Error al conectar con la API de Tumesero.", err.statusCode || 502);
     }
-
-    if (!Array.isArray(response.data.data)) {
-      throw new Error("Tumesero API returned malformed data (expected array)");
-    }
-
-    return response.data.data;
   }
 
   /**

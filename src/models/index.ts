@@ -17,6 +17,7 @@ import { EvaluationModel } from "./evaluation.model";
 import { FlorindaDailySalesModel } from "./florindaDailySales.model";
 import { SalesBookingRequestModel } from "./salesBookingRequest.model";
 import { SalesAppointmentModel } from "./salesAppointment.model";
+import { MetaGlobalIntegrationModel } from "./metaGlobalIntegration.model";
 
 const models = {
   users: UserModel,
@@ -38,6 +39,7 @@ const models = {
   florindaDailySales: FlorindaDailySalesModel,
   salesBookingRequests: SalesBookingRequestModel,
   salesAppointments: SalesAppointmentModel,
+  metaGlobalIntegration: MetaGlobalIntegrationModel,
 };
 
 export default models;

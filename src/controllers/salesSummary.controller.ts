@@ -84,7 +84,8 @@ export async function triggerManualSync(req: AuthRequest, res: Response): Promis
     res.json({ message: "Sincronización completada.", result });
   } catch (error: any) {
     console.error("[SalesSummary] triggerManualSync error:", error.message);
-    res.status(500).json({ message: error.message || "Error al sincronizar." });
+    const status = error.statusCode || error.status || 500;
+    res.status(status).json({ message: error.message || "Error al sincronizar." });
   }
 }
 

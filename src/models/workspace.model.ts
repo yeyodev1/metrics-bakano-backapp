@@ -52,6 +52,9 @@ export interface IWorkspace extends Document {
     pageName: string;
     adAccountId?: string;
     adAccountName?: string;
+    instagramAccountId?: string;
+    instagramAccountName?: string;
+    pictureUrl?: string;
     lastSyncedAt: Date;
   };
   brandProfile?: IBrandProfile;
@@ -147,6 +150,9 @@ const WorkspaceSchema = new Schema<IWorkspace>(
       pageName: String,
       adAccountId: String,
       adAccountName: String,
+      instagramAccountId: String,
+      instagramAccountName: String,
+      pictureUrl: String,
       lastSyncedAt: Date,
     },
     brandProfile: {
