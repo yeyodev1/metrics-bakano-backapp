@@ -14,6 +14,9 @@ import visitLogRouter from "./visitLog.router";
 import changelogRouter from "./changelog.router";
 import salesSummaryRouter from "./salesSummary.router";
 import cronRouter from "./cron.router";
+import scriptPerformanceRouter from "./scriptPerformance.router";
+import engramRouter from "./engram.router";
+import scriptFeedbackRouter from "./scriptFeedback.router";
 import publicMetricsRouter from "./publicMetrics.router";
 import { onboardingRouter } from "./onboarding.router";
 import { resourceRouter } from "./resource.router";
@@ -22,6 +25,8 @@ import evaluationRouter from "./evaluation.router";
 import florindaSalesRouter from "./florindaSales.router";
 import bookingRouter from "./booking.router";
 import salesExecutiveRouter from "./salesExecutive.router";
+import agentFeedRouter from "./agentFeed.router";
+import financeIntegrationRouter from "./financeIntegration.router";
 
 function routerApi(app: Application) {
   const router = express.Router();
@@ -35,6 +40,9 @@ function routerApi(app: Application) {
   router.use("/surveys", surveyRouter);
   router.use("/planning-entries", planningEntriesRouter);
   router.use("/video-planning", videoPlanningRouter);
+  router.use("/script-performance", scriptPerformanceRouter);
+  router.use("/engram", engramRouter);
+  router.use("/script-feedback", scriptFeedbackRouter);
   router.use("/meetings", clientMeetingRouter);
   router.use("/notifications", notificationRouter);
   router.use("/billing", billingRouter);
@@ -50,6 +58,8 @@ function routerApi(app: Application) {
   router.use("/florinda-sales", florindaSalesRouter);
   router.use("/booking", bookingRouter);
   router.use("/sales-executive", salesExecutiveRouter);
+  router.use("/agent-feed", agentFeedRouter);
+  router.use("/integrations/finance", financeIntegrationRouter);
 
   // Webhooks are top-level on v1
   app.use("/v1/webhooks", webhookRouter);

@@ -3,6 +3,7 @@ import { HttpStatusCode } from "axios";
 import { Types } from "mongoose";
 import { AuthRequest } from "../types/AuthRequest";
 import { VideoPlanningService } from "../services/videoPlanning.service";
+import { metaService } from "../services/meta.service";
 import models from "../models";
 import cloudinary from "../config/cloudinary";
 
@@ -378,6 +379,175 @@ export async function getEditorCompletedItems(
     res.status(HttpStatusCode.Ok).json({ items: result });
   } catch (error: any) {
     console.error("getEditorCompletedItems error:", error);
+    next(error);
+  }
+}
+
+// ── POST /video-planning/:planningId/items/:itemId/link-reel ──────────────
+export async function linkReelMedia(
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+) {
+  try {
+    const { planningId, itemId } = req.params as { planningId: string; itemId: string };
+    const { igMediaId, igPermalink, metaAdId, casoUsoRef } = req.body;
+
+    if (!igMediaId) {
+      res.status(HttpStatusCode.BadRequest).json({ message: "igMediaId es requerido." });
+      return;
+    }
+
+    const planning = await service.linkReelMedia(planningId, itemId, {
+      igMediaId,
+      igPermalink,
+      metaAdId,
+      casoUsoRef,
+    });
+
+    res.status(HttpStatusCode.Ok).json({ message: "Reel vinculado exitosamente con el guion.", planning });
+  } catch (error: any) {
+    console.error("linkReelMedia error:", error);
+    next(error);
+  }
+}
+
+// ── POST /video-planning/:planningId/items/:itemId/sync-metrics ───────────
+export async function syncVideoItemMetrics(
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+) {
+  try {
+    const { planningId, itemId } = req.params as { planningId: string; itemId: string };
+    const planning = await service.syncVideoItemMetrics(planningId, itemId);
+    res.status(HttpStatusCode.Ok).json({ message: "Métricas del video actualizadas.", planning });
+  } catch (error: any) {
+    console.error("syncVideoItemMetrics error:", error);
+    next(error);
+  }
+}
+
+// ── GET /video-planning/workspace/:workspaceId/items ───────────────────────
+export async function getWorkspaceItems(
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+) {
+  try {
+    const { workspaceId } = req.params as { workspaceId: string };
+    const items = await service.getWorkspaceItems(workspaceId);
+    res.status(HttpStatusCode.Ok).json({ items });
+  } catch (error: any) {
+    if (error.message === "INVALID_ID") {
+      res.status(HttpStatusCode.BadRequest).json({ message: "workspaceId inválido." });
+      return;
+    }
+    console.error("getWorkspaceItems error:", error);
+    next(error);
+  }
+}
+
+// ── GET /video-planning/workspace/:workspaceId/ads ─────────────────────────
+export async function getWorkspaceAds(
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+) {
+  try {
+    const { workspaceId } = req.params as { workspaceId: string };
+    const limit = Number(req.query["limit"]) || 10;
+    const after = typeof req.query["after"] === "string" ? req.query["after"] : undefined;
+
+    const page = await metaService.getAdsPage(workspaceId, { limit, after });
+
+    res.status(HttpStatusCode.Ok).json({
+      ads: page.ads,
+      nextCursor: page.nextCursor,
+      adAccountName: page.adAccountName,
+    });
+  } catch (error: any) {
+    console.error("getWorkspaceAds error:", error);
+    next(error);
+  }
+}
+
+// ── POST /video-planning/:planningId/items/:itemId/classify ────────────────
+export async function classifyItemScript(
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+) {
+  try {
+    const { planningId, itemId } = req.params as { planningId: string; itemId: string };
+    const force = req.body?.force === true;
+
+    const result = await service.classifyItemScript(planningId, itemId, { force });
+
+    if (result.skipped === "NOT_ENOUGH_TEXT") {
+      res.status(HttpStatusCode.UnprocessableEntity).json({
+        message: "El guión no tiene suficiente texto para clasificarse.",
+        scriptMeta: null,
+      });
+      return;
+    }
+
+    res.status(HttpStatusCode.Ok).json({
+      message:
+        result.skipped === "HUMAN_CLASSIFIED"
+          ? "El guión ya fue clasificado manualmente. Usa force=true para sobrescribir."
+          : "Guión clasificado.",
+      scriptMeta: result.scriptMeta,
+      skipped: result.skipped,
+    });
+  } catch (error: any) {
+    if (error.message === "INVALID_ID") {
+      res.status(HttpStatusCode.BadRequest).json({ message: "ID inválido." });
+      return;
+    }
+    if (error.message === "NOT_FOUND" || error.message === "ITEM_NOT_FOUND") {
+      res.status(HttpStatusCode.NotFound).json({ message: "Planificación o video no encontrado." });
+      return;
+    }
+    console.error("classifyItemScript error:", error);
+    next(error);
+  }
+}
+
+// ── GET /video-planning/workspace/:workspaceId/published-reels ─────────────
+export async function getPublishedReelsForWorkspace(
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+) {
+  try {
+    const { workspaceId } = req.params as { workspaceId: string };
+    const workspace = await models.workspaces.findById(workspaceId).select("metaAds name").lean();
+
+    if (!workspace) {
+      res.status(HttpStatusCode.NotFound).json({ message: "Workspace no encontrado." });
+      return;
+    }
+
+    const instagramAccountId = workspace.metaAds?.instagramAccountId;
+    if (!instagramAccountId) {
+      res.status(HttpStatusCode.Ok).json({ reels: [], message: "El workspace no tiene cuenta de Instagram vinculada." });
+      return;
+    }
+
+    // Paginated: the picker asks for a page at a time instead of the whole feed.
+    const limit = Number(req.query["limit"]) || 10;
+    const after = typeof req.query["after"] === "string" ? req.query["after"] : undefined;
+
+    const page = await metaService.getInstagramMediaPage(workspaceId, { limit, after });
+
+    res.status(HttpStatusCode.Ok).json({
+      reels: page.reels,
+      nextCursor: page.nextCursor,
+      accountName: page.accountName,
+    });
+  } catch (error: any) {
+    console.error("getPublishedReelsForWorkspace error:", error);
     next(error);
   }
 }

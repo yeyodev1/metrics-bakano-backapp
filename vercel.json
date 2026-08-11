@@ -3,7 +3,8 @@
   "builds": [
     {
       "src": "src/index.ts",
-      "use": "@vercel/node"
+      "use": "@vercel/node",
+      "config": { "maxDuration": 60 }
     }
   ],
   "rewrites": [
@@ -20,6 +21,10 @@
     {
       "path": "/api/cron/florinda-sales-sync",
       "schedule": "15 4 * * *"
+    },
+    {
+      "path": "/api/cron/meta-metrics-sync",
+      "schedule": "0 5 * * *"
     }
   ]
 }

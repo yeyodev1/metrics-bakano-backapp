@@ -1,0 +1,187 @@
+import { Types } from "mongoose";
+import models from "../models";
+import { CustomError } from "../errors/customError.error";
+import { WorkspaceService } from "./workspace.service";
+
+const workspaceService = new WorkspaceService();
+
+export interface FinanceWorkspaceImage {
+  name: string;
+  url: string;
+  categoria: string;
+  tipo?: string;
+}
+
+export interface FinanceWorkspace {
+  _id: string;
+  name: string;
+  isActive: boolean;
+  adminId: string | null;
+  adminName: string | null;
+  adminEmail: string | null;
+  adminPhotoUrl: string | null;
+  createdAt: Date | null;
+  /** Imagen principal para mostrar en finanzas: logo del cliente, o la foto de la página de Meta. */
+  imageUrl: string | null;
+  /** Logo subido en recursos (categoria "logo"). */
+  logoUrl: string | null;
+  /** Foto de la página de Facebook conectada. */
+  pictureUrl: string | null;
+  /** Galería: logos y línea gráfica. */
+  images: FinanceWorkspaceImage[];
+  pageName: string | null;
+  instagramAccountName: string | null;
+  tipoNegocio: string | null;
+  vertical: string | null;
+}
+
+type LeanResource = {
+  nombre?: string;
+  url?: string;
+  tipo?: string;
+  categoria?: string;
+};
+
+type LeanWorkspace = {
+  _id: Types.ObjectId;
+  name: string;
+  isActive?: boolean;
+  createdAt?: Date;
+  adminId?:
+    | { _id: Types.ObjectId; name?: string; email?: string; photoUrl?: string }
+    | Types.ObjectId
+    | null;
+  metaAds?: { pictureUrl?: string; pageName?: string; instagramAccountName?: string };
+  resources?: LeanResource[];
+  brandProfile?: { tipoNegocio?: string; vertical?: string; archivos?: LeanResource[] } | null;
+};
+
+const FINANCE_PROJECTION = {
+  name: 1,
+  isActive: 1,
+  adminId: 1,
+  createdAt: 1,
+  "metaAds.pictureUrl": 1,
+  "metaAds.pageName": 1,
+  "metaAds.instagramAccountName": 1,
+  resources: 1,
+  "brandProfile.tipoNegocio": 1,
+  "brandProfile.vertical": 1,
+  "brandProfile.archivos": 1,
+} as const;
+
+const IMAGE_EXT = /\.(png|jpe?g|webp|gif|svg|avif)(\?|$)/i;
+
+function isImage(resource: LeanResource): boolean {
+  if (!resource.url) return false;
+  if (resource.tipo && resource.tipo.startsWith("image/")) return true;
+  return IMAGE_EXT.test(resource.url);
+}
+
+function collectImages(workspace: LeanWorkspace): FinanceWorkspaceImage[] {
+  const pool = [...(workspace.resources ?? []), ...(workspace.brandProfile?.archivos ?? [])];
+
+  return pool
+    .filter(isImage)
+    .filter((r) => r.categoria !== "otro" || pool.length <= 4)
+    .slice(0, 12)
+    .map((r) => ({
+      name: r.nombre ?? "Recurso",
+      url: r.url as string,
+      categoria: r.categoria ?? "otro",
+      tipo: r.tipo,
+    }));
+}
+
+function mapWorkspace(workspace: LeanWorkspace): FinanceWorkspace {
+  const admin = workspace.adminId && !(workspace.adminId instanceof Types.ObjectId)
+    ? (workspace.adminId as {
+        _id: Types.ObjectId;
+        name?: string;
+        email?: string;
+        photoUrl?: string;
+      })
+    : null;
+
+  const adminId = admin
+    ? admin._id.toString()
+    : workspace.adminId
+      ? workspace.adminId.toString()
+      : null;
+
+  const images = collectImages(workspace);
+  const logoUrl = images.find((i) => i.categoria === "logo")?.url ?? null;
+  const pictureUrl = workspace.metaAds?.pictureUrl ?? null;
+
+  return {
+    _id: workspace._id.toString(),
+    name: workspace.name,
+    isActive: workspace.isActive ?? false,
+    adminId,
+    adminName: admin?.name ?? null,
+    adminEmail: admin?.email ?? null,
+    adminPhotoUrl: admin?.photoUrl ?? null,
+    createdAt: workspace.createdAt ?? null,
+    imageUrl: logoUrl ?? pictureUrl ?? images[0]?.url ?? null,
+    logoUrl,
+    pictureUrl,
+    images,
+    pageName: workspace.metaAds?.pageName ?? null,
+    instagramAccountName: workspace.metaAds?.instagramAccountName ?? null,
+    tipoNegocio: workspace.brandProfile?.tipoNegocio ?? null,
+    vertical: workspace.brandProfile?.vertical ?? null,
+  };
+}
+
+export async function listWorkspacesForFinance(): Promise<FinanceWorkspace[]> {
+  const workspaces = await models.workspaces
+    .find({}, FINANCE_PROJECTION)
+    .populate({ path: "adminId", select: "name email photoUrl" })
+    .sort({ name: 1 })
+    .lean();
+
+  return (workspaces as unknown as LeanWorkspace[]).map(mapWorkspace);
+}
+
+export async function getWorkspaceForFinance(workspaceId: string): Promise<FinanceWorkspace> {
+  if (!Types.ObjectId.isValid(workspaceId)) {
+    throw new CustomError("Identificador de workspace inválido.", 400);
+  }
+
+  const workspace = await models.workspaces
+    .findById(workspaceId, FINANCE_PROJECTION)
+    .populate({ path: "adminId", select: "name email photoUrl" })
+    .lean();
+
+  if (!workspace) {
+    throw new CustomError("Workspace no encontrado.", 404);
+  }
+
+  return mapWorkspace(workspace as unknown as LeanWorkspace);
+}
+
+export async function setWorkspaceActiveForFinance(
+  workspaceId: string,
+  isActive: boolean,
+  reason?: string
+): Promise<FinanceWorkspace> {
+  if (!Types.ObjectId.isValid(workspaceId)) {
+    throw new CustomError("Identificador de workspace inválido.", 400);
+  }
+
+  try {
+    await workspaceService.toggleWorkspaceActive(workspaceId, isActive);
+  } catch (error: any) {
+    if (error?.message === "NOT_FOUND") {
+      throw new CustomError("Workspace no encontrado.", 404);
+    }
+    if (error?.message === "INVALID_ID") {
+      throw new CustomError("Identificador de workspace inválido.", 400);
+    }
+    throw error;
+  }
+
+  console.log(`[finance] workspace ${workspaceId} -> isActive=${isActive} (${reason ?? "sin motivo"})`);
+
+  return getWorkspaceForFinance(workspaceId);
+}

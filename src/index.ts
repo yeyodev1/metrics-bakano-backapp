@@ -4,6 +4,7 @@ import { createApp } from "./app";
 import { seedSuperadmin } from "./utils/seeders";
 import { initBillingCrons } from "./crons/billing.cron";
 import { initBrandProfileCrons } from "./crons/brandProfile.cron";
+import { initMetaMetricsCrons } from "./crons/metaMetrics.cron";
 
 
 const { app, server } = createApp();
@@ -14,6 +15,7 @@ async function main() {
   await seedSuperadmin();
   initBillingCrons();
   initBrandProfileCrons();
+  initMetaMetricsCrons();
 
   server.timeout = 10 * 60 * 1000;
 

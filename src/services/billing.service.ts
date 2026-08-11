@@ -2,6 +2,7 @@ import axios from "axios";
 import { Types } from "mongoose";
 import models from "../models";
 import { resendService } from "./resend.service";
+import { metaService } from "./meta.service";
 
 export class BillingService {
   private readonly graphUrl = "https://graph.facebook.com/v22.0";
@@ -89,26 +90,31 @@ export class BillingService {
 
     // Fetch Meta spend for the day
     let metaSpend = 0;
-    const accessToken = workspace.metaAds?.accessToken;
     const adAccountId = workspace.metaAds?.adAccountId;
 
-    if (accessToken && adAccountId) {
+    if (adAccountId) {
       try {
-        const dateStr = this.dateToEcuadorString(today);
-        const dayInsights = await axios.get(
-          `${this.graphUrl}/act_${adAccountId}/insights`,
-          {
-            params: {
-              access_token: accessToken,
-              level: "account",
-              fields: "spend",
-              time_range: JSON.stringify({ since: dateStr, until: dateStr }),
-            },
-          }
-        );
-        metaSpend = parseFloat(
-          dayInsights.data.data?.[0]?.spend || "0"
-        );
+        // Prefer the centrally-managed global token (workspace-level tokens are often expired).
+        const globalToken = await metaService.getGlobalAccessToken().catch(() => null);
+        const token = globalToken || workspace.metaAds?.accessToken;
+        if (token) {
+          const cleanAdId = adAccountId.replace(/^act_/, "");
+          const dateStr = this.dateToEcuadorString(today);
+          const dayInsights = await axios.get(
+            `${this.graphUrl}/act_${cleanAdId}/insights`,
+            {
+              params: {
+                access_token: token,
+                level: "account",
+                fields: "spend",
+                time_range: JSON.stringify({ since: dateStr, until: dateStr }),
+              },
+            }
+          );
+          metaSpend = parseFloat(
+            dayInsights.data.data?.[0]?.spend || "0"
+          );
+        }
       } catch (error: any) {
         console.error("[BillingService] Failed to fetch Meta spend:", error.response?.data || error.message);
         metaSpend = 0;
@@ -192,11 +198,90 @@ export class BillingService {
       date: Date;
       dateStr: string;
       totalAmount: number;
+      totalOnlineRevenue: number;
       totalMetaSpend: number;
       avgROAS: number;
       entries: any[];
+      entryCount: number;
     }>;
   }> {
+    const workspace = await models.workspaces.findById(workspaceId).select("metaAds name").lean();
+    let adAccountId = workspace?.metaAds?.adAccountId;
+
+    // Fallback: Check if this workspace is linked to an ad account in global integrations or matches by name
+    if (!adAccountId) {
+      try {
+        const globalAccounts = await metaService.getAllGlobalAccounts().catch(() => null);
+        let matched = globalAccounts?.adAccounts?.find((a: any) => a.linkedWorkspace?.id === workspaceId);
+        if (!matched && workspace?.name && globalAccounts?.adAccounts) {
+          const wsName = workspace.name.toLowerCase().trim();
+          matched = globalAccounts.adAccounts.find((a: any) => {
+            const aName = (a.name || "").toLowerCase().trim();
+            return aName && wsName && (aName.includes(wsName) || wsName.includes(aName));
+          });
+        }
+        if (matched) {
+          adAccountId = (matched.accountId || matched.id).replace(/^act_/, "");
+          await models.workspaces.findByIdAndUpdate(workspaceId, {
+            $set: {
+              "metaAds.adAccountId": adAccountId,
+              "metaAds.adAccountName": matched.name,
+              "metaAds.lastSyncedAt": new Date(),
+            },
+          });
+        }
+      } catch {
+        // Fallback
+      }
+    }
+
+    // Fetch monthly Meta spend by day from Meta Graph API if adAccountId is present
+    const metaSpendMap = new Map<string, number>();
+    if (adAccountId) {
+      try {
+        // Prefer the centrally-managed global token (workspace-level tokens are often expired).
+        const globalToken = await metaService.getGlobalAccessToken().catch(() => null);
+        const token = globalToken || workspace?.metaAds?.accessToken;
+        if (token) {
+          const cleanAdId = adAccountId.replace(/^act_/, "");
+          const sinceStr = `${year}-${String(month).padStart(2, "0")}-01`;
+          const lastDay = new Date(year, month, 0).getDate();
+          const rawUntilStr = `${year}-${String(month).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
+          const todayStr = this.dateToEcuadorString(new Date());
+
+          // Clamp untilStr so it never requests future dates from Meta Insights API
+          const untilStr = rawUntilStr > todayStr ? todayStr : rawUntilStr;
+
+          if (sinceStr <= todayStr) {
+            const now = new Date();
+            const isCurrentMonth = year === now.getFullYear() && month === (now.getMonth() + 1);
+            const dateParams = isCurrentMonth
+              ? { date_preset: "this_month" }
+              : { time_range: JSON.stringify({ since: sinceStr, until: untilStr }) };
+
+            const insightsRes = await axios.get(`${this.graphUrl}/act_${cleanAdId}/insights`, {
+              params: {
+                access_token: token,
+                level: "account",
+                fields: "spend,date_start",
+                ...dateParams,
+                time_increment: 1,
+                limit: 100,
+              },
+            });
+
+            for (const item of insightsRes.data?.data || []) {
+              if (item.date_start && item.spend) {
+                metaSpendMap.set(item.date_start, parseFloat(item.spend || "0"));
+              }
+            }
+          }
+        }
+      } catch (error: any) {
+        console.error("[BillingService] Failed to fetch monthly Meta spend for workspace", workspaceId, error.response?.data || error.message);
+      }
+    }
+
     // Month is 1-indexed. Build start/end in Ecuador midnight UTC.
     const startDate = new Date(Date.UTC(year, month - 1, 1, 5, 0, 0, 0));
     const endDate = new Date(Date.UTC(year, month, 1, 5, 0, 0, 0));
@@ -209,30 +294,44 @@ export class BillingService {
       .sort({ date: 1 })
       .lean();
 
-    // Group by date
+    // Group by dateStr (YYYY-MM-DD)
     const dayMap = new Map<string, typeof entries>();
     for (const entry of entries) {
-      const key = entry.date.toISOString();
+      const key = this.dateToEcuadorString(entry.date);
       if (!dayMap.has(key)) dayMap.set(key, []);
       dayMap.get(key)!.push(entry);
     }
 
-    const days = Array.from(dayMap.entries()).map(([isoDate, dayEntries]) => {
+    const daysInMonth = new Date(year, month, 0).getDate();
+    const todayStr = this.dateToEcuadorString(new Date());
+    const now = new Date();
+    const isCurrentMonth = year === now.getFullYear() && month === (now.getMonth() + 1);
+    const maxDay = isCurrentMonth ? parseInt(todayStr.split("-")[2], 10) : daysInMonth;
+
+    const days: any[] = [];
+    for (let d = 1; d <= maxDay; d++) {
+      const dateStr = `${year}-${String(month).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+      const dayEntries = dayMap.get(dateStr) || [];
       const totalAmount = dayEntries.reduce((sum, e) => sum + e.amount, 0);
       const totalOnlineRevenue = dayEntries.reduce((sum, e) => sum + (e.onlineRevenue ?? 0), 0);
-      const totalMetaSpend = dayEntries[0]?.metaSpend ?? 0;
+      const metaSpendFromApi = metaSpendMap.get(dateStr);
+      const totalMetaSpend = metaSpendFromApi !== undefined ? metaSpendFromApi : (dayEntries[0]?.metaSpend ?? 0);
       const avgROAS = totalMetaSpend > 0 ? totalAmount / totalMetaSpend : 0;
-      const dateObj = new Date(isoDate);
-      return {
+      const dateObj = new Date(dateStr + "T12:00:00.000Z");
+
+      days.push({
         date: dateObj,
-        dateStr: this.dateToEcuadorString(dateObj),
+        dateStr,
         totalAmount,
         totalOnlineRevenue,
         totalMetaSpend,
         avgROAS,
         entries: dayEntries,
-      };
-    });
+        entryCount: dayEntries.length,
+      });
+    }
+
+    return { days };
 
     return { days };
   }

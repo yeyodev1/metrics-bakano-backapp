@@ -85,8 +85,20 @@ export class WorkspaceService {
       models.workspaces.countDocuments(query)
     ]);
 
+    const enrichedWorkspaces = workspaces.map((ws: any) => {
+      if (ws.metaAds && !ws.metaAds.pictureUrl) {
+        if (ws.metaAds.pageId) {
+          ws.metaAds.pictureUrl = `https://graph.facebook.com/${ws.metaAds.pageId}/picture?type=normal`;
+        } else if (ws.resources && Array.isArray(ws.resources)) {
+          const logo = ws.resources.find((r: any) => r.categoria === "logo");
+          if (logo?.url) ws.metaAds.pictureUrl = logo.url;
+        }
+      }
+      return ws;
+    });
+
     return {
-      workspaces,
+      workspaces: enrichedWorkspaces,
       total,
       page,
       limit,
@@ -139,6 +151,15 @@ export class WorkspaceService {
         userRole = wsAccess.role;
       } else if (user.workspaceId && user.workspaceId.toString() === ws._id.toString()) {
         userRole = (user.role === "admin") ? "admin" : "colaborador";
+      }
+
+      if (ws.metaAds && !ws.metaAds.pictureUrl) {
+        if (ws.metaAds.pageId) {
+          ws.metaAds.pictureUrl = `https://graph.facebook.com/${ws.metaAds.pageId}/picture?type=normal`;
+        } else if (ws.resources && Array.isArray(ws.resources)) {
+          const logo = ws.resources.find((r: any) => r.categoria === "logo");
+          if (logo?.url) ws.metaAds.pictureUrl = logo.url;
+        }
       }
 
       return { ...ws, userRole };

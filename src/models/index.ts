@@ -17,6 +17,10 @@ import { EvaluationModel } from "./evaluation.model";
 import { FlorindaDailySalesModel } from "./florindaDailySales.model";
 import { SalesBookingRequestModel } from "./salesBookingRequest.model";
 import { SalesAppointmentModel } from "./salesAppointment.model";
+import { MetaGlobalIntegrationModel } from "./metaGlobalIntegration.model";
+import { VideoMetricSnapshotModel } from "./videoMetricSnapshot.model";
+import { EngramModel } from "./engram.model";
+import { ScriptFeedbackModel } from "./scriptFeedback.model";
 
 const models = {
   users: UserModel,
@@ -38,6 +42,10 @@ const models = {
   florindaDailySales: FlorindaDailySalesModel,
   salesBookingRequests: SalesBookingRequestModel,
   salesAppointments: SalesAppointmentModel,
+  metaGlobalIntegration: MetaGlobalIntegrationModel,
+  videoMetricSnapshots: VideoMetricSnapshotModel,
+  engrams: EngramModel,
+  scriptFeedback: ScriptFeedbackModel,
 };
 
 export default models;

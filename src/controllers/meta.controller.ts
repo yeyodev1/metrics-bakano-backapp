@@ -2,6 +2,7 @@ import type { Request, Response, NextFunction } from "express";
 import { metaService } from "../services/meta.service";
 import { HttpStatusCode } from "axios";
 import models from "../models";
+import { AuthRequest } from "../types/AuthRequest";
 
 /**
  * Controller to handle Meta integration requests
@@ -88,7 +89,11 @@ export async function getAdsInsights(req: Request, res: Response, next: NextFunc
     // Prefer passed explicitly from query or fallback to workspace saved one
     const adAccountId = (req.query.adAccountId as string) || workspace?.metaAds?.adAccountId;
 
-    if (!workspace || !workspace.metaAds?.accessToken || !adAccountId) {
+    // Prefer the centrally-managed global token (workspace-level tokens are often expired).
+    const globalToken = await metaService.getGlobalAccessToken().catch(() => null);
+    const token = globalToken || workspace?.metaAds?.accessToken;
+
+    if (!workspace || !token || !adAccountId) {
       res.status(HttpStatusCode.BadRequest).send({ message: "Meta integration or Ad account missing." });
       return;
     }
@@ -100,9 +105,9 @@ export async function getAdsInsights(req: Request, res: Response, next: NextFunc
     const timeRange = since && until ? { since, until } : undefined;
 
     const [insightsRes, spendByPlatform, adsSpendByPlatform] = await Promise.all([
-      metaService.getAdInsights(adAccountId, workspace.metaAds.accessToken, datePreset, timeRange),
-      metaService.getSpendByPlatform(adAccountId, workspace.metaAds.accessToken, datePreset, timeRange).catch(() => []),
-      metaService.getAdsSpendByPlatform(adAccountId, workspace.metaAds.accessToken, datePreset, timeRange).catch(() => []),
+      metaService.getAdInsights(adAccountId, token, datePreset, timeRange),
+      metaService.getSpendByPlatform(adAccountId, token, datePreset, timeRange).catch(() => []),
+      metaService.getAdsSpendByPlatform(adAccountId, token, datePreset, timeRange).catch(() => []),
     ]);
 
     res.status(HttpStatusCode.Ok).send({
@@ -143,6 +148,136 @@ export async function getOrganicInsights(req: Request, res: Response, next: Next
       recentPosts,
       recentPostsIg,
     });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function autoMatchGlobalAccounts(_req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const result = await metaService.autoMatchGlobalAccounts();
+    res.status(HttpStatusCode.Ok).send({ message: "Mapeo automático completado.", ...result });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function getGlobalOAuthUrl(_req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
+  try {
+    res.status(HttpStatusCode.Ok).send({ authUrl: await metaService.getOAuthUrl() });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function completeGlobalOAuth(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const code = req.query.code as string | undefined;
+    const state = req.query.state as string | undefined;
+    if (!code || !state) throw new Error("Facebook no devolvió los datos de autorización requeridos.");
+    await metaService.completeOAuth(code, state);
+    const appUrl = process.env.APP_URL || "https://testing-storybrand-frontend.bakano.ec";
+    res.redirect(`${appUrl}/app/superadmin/meta-integrations?meta=connected`);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function getGlobalConnectionStatus(_req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
+  try {
+    res.status(HttpStatusCode.Ok).send(await metaService.getGlobalConnectionStatus());
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function getPendingGlobalAccounts(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const page = Math.max(Number(req.query.page) || 1, 1);
+    const limit = Math.max(Number(req.query.limit) || 10, 1);
+    const search = typeof req.query.search === "string" ? req.query.search : undefined;
+    const result = await metaService.getPendingGlobalAccounts(page, limit, search);
+    res.status(HttpStatusCode.Ok).send(result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function getLinkedGlobalAccounts(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const page = Math.max(Number(req.query.page) || 1, 1);
+    const limit = Math.max(Number(req.query.limit) || 10, 1);
+    const search = typeof req.query.search === "string" ? req.query.search : undefined;
+    const result = await metaService.getLinkedGlobalAccounts(page, limit, search);
+    res.status(HttpStatusCode.Ok).send(result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function getAllGlobalAccounts(_req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const result = await metaService.getAllGlobalAccounts();
+    res.status(HttpStatusCode.Ok).send(result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function manuallyLinkGlobalAccount(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const { workspaceId, adAccountId, instagramAccountId } = req.body;
+    if (!workspaceId || typeof workspaceId !== "string") {
+      res.status(HttpStatusCode.BadRequest).send({ message: "workspaceId es requerido." });
+      return;
+    }
+    const workspace = await metaService.manuallyLinkGlobalAccount(workspaceId, { adAccountId, instagramAccountId });
+    res.status(HttpStatusCode.Ok).send({ message: "Cuenta Meta vinculada correctamente.", workspace });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function refreshGlobalTokens(_req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const refreshedWorkspaces = await metaService.refreshLinkedWorkspaceTokens();
+    res.status(HttpStatusCode.Ok).send({
+      message: `Tokens actualizados en ${refreshedWorkspaces} workspace(s) vinculado(s).`,
+      refreshedWorkspaces,
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function unlinkGlobalAccount(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const { workspaceId, type } = req.body;
+    if (!workspaceId || typeof workspaceId !== "string") {
+      res.status(HttpStatusCode.BadRequest).send({ message: "workspaceId es requerido." });
+      return;
+    }
+    if (type !== "ad_account" && type !== "instagram") {
+      res.status(HttpStatusCode.BadRequest).send({ message: "Tipo inválido." });
+      return;
+    }
+    const workspace = await metaService.unlinkGlobalAccount(workspaceId, type);
+    res.status(HttpStatusCode.Ok).send({ message: "Cuenta desvinculada correctamente.", workspace });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function getUnifiedDashboard(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const since = req.query.since as string | undefined;
+    const until = req.query.until as string | undefined;
+    const dashboard = await metaService.getUnifiedDashboard(
+      req.params.workspaceId as string,
+      (req.query.datePreset as string) || "this_month",
+      since && until ? { since, until } : undefined
+    );
+    res.status(HttpStatusCode.Ok).send(dashboard);
   } catch (error) {
     next(error);
   }
