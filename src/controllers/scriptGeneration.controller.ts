@@ -5,6 +5,7 @@ import { AuthRequest } from "../types/AuthRequest";
 import models from "../models";
 import { geminiService } from "../services/gemini.service";
 import type { GeminiFileResult, ScriptContext } from "../services/gemini.service";
+import { engramService } from "../services/engram.service";
 
 const TIPO_REEL_TO_GUION: Record<string, "TOFU" | "MOFU" | "BOFU"> = {
   "Educativo": "TOFU",
@@ -27,6 +28,48 @@ export async function getLLMStatus(
 }
 
 // ── POST /video-planning/:videoItemId/generate-script ──────────────────────
+/**
+ * What the model actually had in front of it.
+ *
+ * Without this the writer cannot tell a weak script from a well-written script
+ * built on a half-empty brand profile — and would blame the AI for missing data.
+ */
+function describeContext(
+  workspace: any,
+  brandProfile: any,
+  videoItem: any,
+  tipoGuion: string,
+  usedEngram: boolean
+) {
+  const caso = (brandProfile.customerJourneyCases ?? []).find(
+    (c: any) => c.casoNumero === videoItem.casoUsoRef
+  );
+
+  return {
+    cliente: workspace?.name ?? null,
+    vertical: brandProfile.vertical || null,
+    tipoNegocio: brandProfile.tipoNegocio ?? null,
+    tema: videoItem.tema,
+    etapaEmbudo: tipoGuion,
+    casoJourney: caso
+      ? {
+          numero: caso.casoNumero,
+          nombre: caso.nombreCaso || `Caso ${caso.casoNumero}`,
+          dolor: caso.efectoAnuncio,
+        }
+      : null,
+    usoAprendizajes: usedEngram,
+    // Named so a thin result can be traced to thin inputs.
+    datosDisponibles: {
+      propuestaValor: !!brandProfile.propuestaValor,
+      segmentos: (brandProfile.segmentosMercado ?? []).length,
+      canales: (brandProfile.canalesDetail ?? []).length,
+      casosJourney: (brandProfile.customerJourneyCases ?? []).length,
+      archivosDeMarca: (brandProfile.archivos ?? []).length,
+    },
+  };
+}
+
 export async function generateScript(
   req: AuthRequest,
   res: Response,
@@ -34,7 +77,18 @@ export async function generateScript(
 ) {
   try {
     const videoItemId = req.params["videoItemId"] as string;
-    const { contextoMes, tipoGuion: tipoGuionOverride }: { contextoMes?: ScriptContext; tipoGuion?: "TOFU" | "MOFU" | "BOFU" } = req.body;
+    const {
+      contextoMes,
+      tipoGuion: tipoGuionOverride,
+      objetivo,
+      variantes,
+    }: {
+      contextoMes?: ScriptContext;
+      tipoGuion?: "TOFU" | "MOFU" | "BOFU";
+      objetivo?: "feed" | "anuncio";
+      /** How many alternatives to return. 1 saves directly; >1 returns options. */
+      variantes?: number;
+    } = req.body;
 
     if (!Types.ObjectId.isValid(videoItemId)) {
       res.status(HttpStatusCode.BadRequest).send({ message: "Invalid videoItemId." });
@@ -97,18 +151,42 @@ export async function generateScript(
       }
     }
 
-    // Generate script via Gemini
-    const guionIA = await geminiService.generateScript({
+    // What this brand's own results have already taught us. Never blocking:
+    // a missing engram must not stop script generation.
+    const engramBlock = await engramService
+      .getActivePromptBlock(planning.workspaceId.toString())
+      .catch(() => "");
+
+    const generationParams = {
       brandProfile,
       videoItem: {
         tema: videoItem.tema,
         tipo: videoItem.tipo,
         numero: videoItem.numero,
         tipoGuion: tipoGuion as any,
+        casoUsoRef: videoItem.casoUsoRef,
       },
       contextoMes,
       fileUris: fileUris.length > 0 ? fileUris : undefined,
-    });
+      engramBlock: engramBlock || undefined,
+      // Explicit override wins; otherwise reuse what was already classified.
+      objetivo: objetivo ?? videoItem.scriptMeta?.objetivo,
+    };
+
+    // Several angles to choose from. Nothing is saved yet — the writer picks
+    // and edits first, then saves. Auto-saving one of three would overwrite
+    // whatever was already there with a version nobody chose.
+    if (variantes && variantes > 1) {
+      const opciones = await geminiService.generateScriptVariants(generationParams, variantes);
+      res.status(HttpStatusCode.Ok).send({
+        message: "Versiones generadas.",
+        opciones,
+        contexto: describeContext(workspace, brandProfile, videoItem, tipoGuion, !!engramBlock),
+      });
+      return;
+    }
+
+    const guionIA = await geminiService.generateScript(generationParams);
 
     // Save result back to videoItem
     const guionIADoc = {
@@ -170,12 +248,16 @@ export async function generateScriptQuick(
       tipo,
       contextoMes,
       tipoGuion: tipoGuionOverride,
+      objetivo,
+      casoUsoRef,
     }: {
       workspaceId: string;
       tema: string;
       tipo?: string;
       contextoMes?: ScriptContext;
       tipoGuion?: "TOFU" | "MOFU" | "BOFU";
+      objetivo?: "feed" | "anuncio";
+      casoUsoRef?: number;
     } = req.body;
 
     if (!workspaceId || !tema) {
@@ -210,11 +292,17 @@ export async function generateScriptQuick(
       }
     }
 
+    const engramBlock = await engramService
+      .getActivePromptBlock(workspaceId)
+      .catch(() => "");
+
     const guionIA = await geminiService.generateScript({
       brandProfile,
-      videoItem: { tema, tipo, numero: 1, tipoGuion },
+      videoItem: { tema, tipo, numero: 1, tipoGuion, casoUsoRef },
       contextoMes,
       fileUris: fileUris.length > 0 ? fileUris : undefined,
+      engramBlock: engramBlock || undefined,
+      objetivo,
     });
 
     res.status(HttpStatusCode.Ok).send({

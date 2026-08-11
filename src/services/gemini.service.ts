@@ -1,11 +1,14 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { GoogleAIFileManager } from "@google/generative-ai/server";
 import type { IBrandProfile } from "../models/workspace.model";
+import type { ObjetivoGuion } from "../models/videoPlanning.model";
+import { buildSystemInstruction } from "../prompts/promptBuilder";
+import { buildBrandSchemaBlock } from "../prompts/brandSchema";
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
 const GEMINI_MODEL = "gemini-2.5-flash";
 
-const SYSTEM_PROMPT = `Eres el "Content Planner Estratégico" de una agencia de marketing y ventas de alto rendimiento. Tu objetivo es crear planificaciones mensuales de contenido (20 videos verticales cortos de 30-60 seg para Reels de Instagram/Facebook) para 50 clientes de distintas verticales.
+const SYSTEM_PROMPT = `Eres el "Content Planner Estratégico" de una agencia de marketing y ventas de alto rendimiento. Tu objetivo es crear planificaciones mensuales de contenido (20 videos verticales cortos de máximo 45 seg para Reels de Instagram/Facebook) para 50 clientes de distintas verticales.
 
 Tu Estilo y Enfoque:
 Eres directo, persuasivo y entiendes perfectamente los embudos de venta (TOFU, MOFU, BOFU).
@@ -304,9 +307,15 @@ export interface GenerateScriptParams {
     tipo?: string;
     numero: number;
     tipoGuion?: "TOFU" | "MOFU" | "BOFU";
+    /** Which Customer Journey case this script targets. */
+    casoUsoRef?: number;
   };
   contextoMes?: ScriptContext;
   fileUris?: GeminiFileResult[];
+  /** Rendered engram (this brand's learned patterns), if one is active. */
+  engramBlock?: string;
+  /** Where this script will run. Defaults to `feed`. */
+  objetivo?: ObjetivoGuion;
 }
 
 export interface GuionIAResult {
@@ -350,7 +359,11 @@ export class GeminiService {
   }
 
   async generateScript(params: GenerateScriptParams): Promise<GuionIAResult> {
-    const { brandProfile, videoItem, contextoMes, fileUris } = params;
+    const { brandProfile, videoItem, contextoMes, fileUris, engramBlock } = params;
+
+    // The agency's strategic schema (segments, channels, activities, journey).
+    // Stored on every workspace but never sent to the model until now.
+    const brandSchemaBlock = buildBrandSchemaBlock(brandProfile, videoItem.casoUsoRef);
 
     const tipoGuionLabel =
       videoItem.tipoGuion || this.inferTipoGuion(videoItem.numero);
@@ -373,6 +386,10 @@ VIDEO A GENERAR:
 - Tipo de contenido: ${videoItem.tipo || "No especificado"}
 - Tipo de guión (embudo): ${tipoGuionLabel}`;
 
+    if (brandSchemaBlock) {
+      userPrompt += `\n\n${brandSchemaBlock}`;
+    }
+
     if (contextoMes) {
       userPrompt += `\n\nCONTEXTO DEL MES:`;
       if (contextoMes.productoMes) {
@@ -393,20 +410,32 @@ VIDEO A GENERAR:
 - El CTA debe incluir el nombre del presentador/marca y una acción clara y específica.
 - Tono y lenguaje: adapta exactamente al tono indicado en el perfil de marca.
 - Sigue el estilo de los ejemplos de referencia del system prompt.
+- DOBLE HOOK OBLIGATORIO: el campo "gancho" contiene el HOOK 1 (0-3 seg, nace del dolor del caso del Journey). El campo "cuerpo" ABRE con el HOOK 2 — el giro que reengancha — y recién después desarrolla. Un guión con un solo hook está mal.
+- DURACIÓN MÁXIMA 45 SEGUNDOS en total. Si no cabe, corta contenido.
+- LENGUAJE HUMANO: frases cortas, como habla una persona. Sin simetrías perfectas, sin adjetivos apilados. Si al leerlo en voz alta suena a anuncio institucional o a IA, reescríbelo.
 
 Genera el guión completo en JSON con exactamente estos campos:
 {
   "conceptoVisual": "Descripción del concepto visual, dirección de arte y lenguaje corporal del presentador",
-  "gancho": "Gancho de 0-3 segundos, texto hablado — debe activar emoción inmediata",
-  "textoPantalla": "Texto que aparece en pantalla durante el gancho (máx 8 palabras, impactante)",
-  "cuerpo": "Desarrollo del guión de 3-45 segundos con datos concretos del nicho",
+  "gancho": "HOOK 1 (0-3 seg), texto hablado. Nace de cómo se siente al inicio el caso del Customer Journey al que apunta este video",
+  "textoPantalla": "Texto que aparece en pantalla durante el gancho (máx 8 palabras, impactante). Debe sostener el mensaje aunque el video se vea sin sonido",
+  "cuerpo": "Empieza con el HOOK 2 (el giro que reengancha) y luego desarrolla, hasta completar 45 segundos como máximo. Con datos concretos del nicho",
   "cta": "Call to action final con nombre del presentador y palabra clave para comentar",
   "broll": "Lista de tomas de apoyo y recursos visuales específicos al nicho/servicio"
 }`;
 
+    // base rules → high-ticket framework for this vertical → feed vs ad →
+    // what this brand's own metrics already proved.
+    const { systemInstruction } = buildSystemInstruction({
+      base: SYSTEM_PROMPT,
+      brandProfile,
+      objetivo: params.objetivo,
+      engramBlock,
+    });
+
     const model = this.genAI.getGenerativeModel({
       model: GEMINI_MODEL,
-      systemInstruction: SYSTEM_PROMPT,
+      systemInstruction,
     });
 
     const contentParts: any[] = [];
@@ -440,6 +469,54 @@ Genera el guión completo en JSON con exactamente estos campos:
 
     const parsed: GuionIAResult = JSON.parse(jsonText);
     return parsed;
+  }
+
+  /**
+   * Several takes on the same brief, generated in parallel.
+   *
+   * One script gives nothing to compare against; three let the writer pick a
+   * direction and edit from there. Each call gets a different angle so the
+   * options are genuinely distinct instead of three rewordings.
+   */
+  async generateScriptVariants(
+    params: GenerateScriptParams,
+    count = 3
+  ): Promise<Array<GuionIAResult & { angulo: string }>> {
+    const ANGLES = [
+      "Abre por el DOLOR: nombra la frustración concreta antes que nada.",
+      "Abre por el DATO: una cifra o hecho verificable que descoloque.",
+      "Abre por la ESCENA: mete al espectador dentro de una situación reconocible.",
+    ];
+
+    const angles = ANGLES.slice(0, Math.min(Math.max(count, 1), ANGLES.length));
+
+    const settled = await Promise.allSettled(
+      angles.map((angulo) =>
+        this.generateScript({
+          ...params,
+          contextoMes: {
+            ...(params.contextoMes ?? {}),
+            referenciasAdicionales: [
+              params.contextoMes?.referenciasAdicionales,
+              `ÁNGULO OBLIGATORIO PARA ESTA VERSIÓN: ${angulo}`,
+            ]
+              .filter(Boolean)
+              .join("\n"),
+          },
+        }).then((guion) => ({ ...guion, angulo }))
+      )
+    );
+
+    const ok = settled
+      .filter((s): s is PromiseFulfilledResult<GuionIAResult & { angulo: string }> =>
+        s.status === "fulfilled"
+      )
+      .map((s) => s.value);
+
+    // One angle failing should not lose the other two.
+    if (!ok.length) throw new Error("No fue posible generar ninguna versión del guión.");
+
+    return ok;
   }
 
   async checkHealth(): Promise<{ available: boolean; model: string; error?: string }> {
