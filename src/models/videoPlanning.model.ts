@@ -24,6 +24,59 @@ export interface IGuionIA {
   };
 }
 
+// ── ScriptMeta subdocument ─────────────────────────────────────────────────
+/** Where the script is meant to run. Feed and ads need different structures. */
+export type ObjetivoGuion = "feed" | "anuncio";
+export type HookType =
+  | "pregunta"
+  | "dato"
+  | "testimonio"
+  | "polemica"
+  | "pov"
+  | "problema"
+  | "oferta";
+export type FormatoContenido = "reel" | "carrusel" | "estatico" | "historia";
+
+/**
+ * Structural attributes of a script. Without these there is nothing to group
+ * performance by — "which kind of script works best" is unanswerable.
+ */
+export interface IScriptMeta {
+  objetivo?: ObjetivoGuion;
+  hookType?: HookType;
+  formato?: FormatoContenido;
+  duracionSeg?: number;
+  /** The high-ticket checklist: what the script actually contains. */
+  elementos?: {
+    testimonio?: boolean;
+    autoridad?: boolean;
+    oferta?: boolean;
+    ctaExplicito?: boolean;
+    problemaNecesidad?: boolean;
+  };
+  clasificadoPor?: "ia" | "humano";
+  clasificadoEn?: Date;
+}
+
+export interface IVideoItemMetrics {
+  views?: number;
+  reach?: number;
+  impressions?: number;
+  likes?: number;
+  comments?: number;
+  saved?: number;
+  shares?: number;
+  /** Taps to the profile from this post — organic lead-intent proxy. */
+  profileVisits?: number;
+  /** Follows attributed to this post — organic lead-intent proxy. */
+  follows?: number;
+  adSpend?: number;
+  /** Real leads from Meta Ads (`actions[action_type=lead]`). */
+  adLeads?: number;
+  adROAS?: number;
+  lastSyncedAt?: Date;
+}
+
 // ── VideoItem subdocument ──────────────────────────────────────────────────
 export interface IVideoItem {
   _id: Types.ObjectId;
@@ -36,7 +89,9 @@ export interface IVideoItem {
   lugarGrabacion?: string;
   guion?: string;
   tipoGuion?: TipoGuion;
+  scriptMeta?: IScriptMeta;
   guionIA?: IGuionIA;
+  casoUsoRef?: number;
   estadoIdea: EstadoIdea;
   estadoProduccion: EstadoProduccion;
   edicion: EstadoEdicion;
@@ -48,6 +103,11 @@ export interface IVideoItem {
   fechaPublicacion?: Date;
   copyPublicacion?: string;
   order: number;
+  // Instagram / Facebook Published Media Linking & Metrics
+  igMediaId?: string;
+  igPermalink?: string;
+  metaAdId?: string;
+  metrics?: IVideoItemMetrics;
   // Instagram scheduling
   igContainerId?: string;
   igScheduleStatus?: 'SCHEDULED' | 'FAILED';
@@ -76,6 +136,28 @@ const GuionIASchema = new Schema(
   { _id: false }
 );
 
+const ScriptMetaSchema = new Schema(
+  {
+    objetivo: { type: String, enum: ["feed", "anuncio"] },
+    hookType: {
+      type: String,
+      enum: ["pregunta", "dato", "testimonio", "polemica", "pov", "problema", "oferta"],
+    },
+    formato: { type: String, enum: ["reel", "carrusel", "estatico", "historia"] },
+    duracionSeg: { type: Number },
+    elementos: {
+      testimonio: { type: Boolean, default: false },
+      autoridad: { type: Boolean, default: false },
+      oferta: { type: Boolean, default: false },
+      ctaExplicito: { type: Boolean, default: false },
+      problemaNecesidad: { type: Boolean, default: false },
+    },
+    clasificadoPor: { type: String, enum: ["ia", "humano"] },
+    clasificadoEn: { type: Date },
+  },
+  { _id: false }
+);
+
 const VideoItemSchema = new Schema<IVideoItem>(
   {
     numero: { type: Number, required: true },
@@ -90,6 +172,7 @@ const VideoItemSchema = new Schema<IVideoItem>(
       type: String,
       enum: ["TOFU", "MOFU", "BOFU"],
     },
+    scriptMeta: { type: ScriptMetaSchema },
     guionIA: { type: GuionIASchema },
     estadoIdea: {
       type: String,
@@ -122,6 +205,25 @@ const VideoItemSchema = new Schema<IVideoItem>(
     fechaPublicacion: { type: Date },
     copyPublicacion: { type: String, trim: true },
     order: { type: Number, default: 0 },
+    casoUsoRef: { type: Number },
+    igMediaId: { type: String, trim: true },
+    igPermalink: { type: String, trim: true },
+    metaAdId: { type: String, trim: true },
+    metrics: {
+      views: { type: Number, default: 0 },
+      reach: { type: Number, default: 0 },
+      impressions: { type: Number, default: 0 },
+      likes: { type: Number, default: 0 },
+      comments: { type: Number, default: 0 },
+      saved: { type: Number, default: 0 },
+      shares: { type: Number, default: 0 },
+      profileVisits: { type: Number, default: 0 },
+      follows: { type: Number, default: 0 },
+      adSpend: { type: Number, default: 0 },
+      adLeads: { type: Number, default: 0 },
+      adROAS: { type: Number, default: 0 },
+      lastSyncedAt: { type: Date },
+    },
     igContainerId: { type: String, trim: true },
     igScheduleStatus: { type: String, enum: ['SCHEDULED', 'FAILED'] },
     igScheduleError: { type: String, trim: true },
