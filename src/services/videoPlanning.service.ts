@@ -1,8 +1,12 @@
+import axios from "axios";
 import { Types } from "mongoose";
 import models from "../models";
-import type { IVideoPlanning, IVideoItem, ClienteAprobacion } from "../models/videoPlanning.model";
+import type { IVideoPlanning, IVideoItem, IScriptMeta, ClienteAprobacion } from "../models/videoPlanning.model";
 import { notificationService } from "./notification.service";
+import { scriptClassifierService } from "./scriptClassifier.service";
 import { metaService } from "./meta.service";
+import { getTodayEcuador } from "./tumesero.service";
+import { extractLeadActions } from "../utils/metaActions";
 import cloudinary from "../config/cloudinary";
 
 /** Extract Cloudinary public_id from a secure_url */
@@ -21,6 +25,167 @@ async function deleteCloudinaryAsset(url: string): Promise<void> {
     await cloudinary.uploader.destroy(publicId, { resource_type: resourceType });
   } catch (err: any) {
     console.warn("[VideoPlanningService] Cloudinary delete failed:", err.message);
+  }
+}
+
+// ── Meta Graph helpers ──────────────────────────────────────────────────────
+const GRAPH_URL = "https://graph.facebook.com/v22.0";
+
+/** GET a Graph endpoint. Returns `null` instead of throwing on any failure. */
+async function graphGet(path: string, params: Record<string, any>): Promise<any | null> {
+  try {
+    const res = await axios.get(`${GRAPH_URL}/${path}`, { params });
+    return res.data ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Flatten an insights `data[]` payload into `{ metricName: value }`. */
+function flattenInsights(payload: any): Record<string, number> {
+  if (!payload?.data) return {};
+  return Object.fromEntries(
+    payload.data.map((m: any) => [m.name, Number(m.values?.[0]?.value ?? m.value ?? 0)])
+  );
+}
+
+/**
+ * Instagram media insights.
+ *
+ * Graph rejects the whole request when a single metric is unsupported for the
+ * media type, so the calls are split: a core set, an optional lead-intent set,
+ * and a legacy fallback for pre-v22 media that still only exposes `plays`.
+ */
+async function fetchIgMediaInsights(
+  mediaId: string,
+  token: string
+): Promise<Record<string, number> | null> {
+  const core = await graphGet(`${mediaId}/insights`, {
+    access_token: token,
+    metric: "views,reach,likes,comments,saved,shares,total_interactions",
+  });
+
+  let values = flattenInsights(core);
+
+  if (!core) {
+    // Older media (feed images, pre-v22 videos): legacy metric names.
+    const legacy = await graphGet(`${mediaId}/insights`, {
+      access_token: token,
+      metric: "reach,impressions,plays,saved,total_interactions",
+    });
+    values = flattenInsights(legacy);
+  }
+
+  // Best-effort: not exposed for every media type or permission set.
+  const intent = await graphGet(`${mediaId}/insights`, {
+    access_token: token,
+    metric: "profile_visits,follows",
+  });
+  values = { ...values, ...flattenInsights(intent) };
+
+  return Object.keys(values).length ? values : null;
+}
+
+/** Facebook page-post insights + engagement counts. */
+async function fetchFbPostInsights(
+  postId: string,
+  token: string
+): Promise<{
+  views: number;
+  reach: number;
+  impressions: number;
+  likes: number;
+  comments: number;
+  shares: number;
+} | null> {
+  const [post, insights] = await Promise.all([
+    graphGet(`${postId}`, {
+      access_token: token,
+      fields:
+        "shares,likes.summary(true).limit(0),comments.summary(true).limit(0)",
+    }),
+    graphGet(`${postId}/insights`, {
+      access_token: token,
+      metric: "post_impressions,post_impressions_unique,post_video_views",
+    }),
+  ]);
+
+  if (!post && !insights) return null;
+
+  const v = flattenInsights(insights);
+  return {
+    views: Number(v.post_video_views ?? 0),
+    reach: Number(v.post_impressions_unique ?? 0),
+    impressions: Number(v.post_impressions ?? 0),
+    likes: Number(post?.likes?.summary?.total_count ?? 0),
+    comments: Number(post?.comments?.summary?.total_count ?? 0),
+    shares: Number(post?.shares?.count ?? 0),
+  };
+}
+
+/** Whole days between publication and today (Ecuador calendar). */
+function ageInDays(fechaPublicacion: Date | undefined, today: string): number | undefined {
+  if (!fechaPublicacion) return undefined;
+  const published = Date.parse(
+    `${new Date(fechaPublicacion).toISOString().slice(0, 10)}T00:00:00Z`
+  );
+  const current = Date.parse(`${today}T00:00:00Z`);
+  if (Number.isNaN(published) || Number.isNaN(current)) return undefined;
+  return Math.max(0, Math.round((current - published) / 86_400_000));
+}
+
+/**
+ * Upsert today's immutable snapshot for this item.
+ *
+ * `item.metrics` is a destructive overwrite; this is what makes age-normalized
+ * comparison and growth curves possible. Never throws — a failed snapshot must
+ * not break the sync.
+ */
+async function recordMetricSnapshot(
+  planning: IVideoPlanning,
+  item: IVideoItem,
+  metrics: any,
+  sawOrganic: boolean,
+  sawPaid: boolean
+): Promise<void> {
+  if (!sawOrganic && !sawPaid) return;
+
+  try {
+    const date = getTodayEcuador();
+    const source = sawOrganic && sawPaid ? "merged" : sawPaid ? "ads" : "organic";
+
+    await models.videoMetricSnapshots.findOneAndUpdate(
+      { videoItemId: item._id, date },
+      {
+        $set: {
+          workspaceId: planning.workspaceId,
+          planningId: planning._id,
+          igMediaId: item.igMediaId,
+          fbPostId: item.fbPostId,
+          metaAdId: item.metaAdId,
+          ageDays: ageInDays(item.fechaPublicacion, date),
+          views: Number(metrics.views || 0),
+          reach: Number(metrics.reach || 0),
+          impressions: Number(metrics.impressions || 0),
+          likes: Number(metrics.likes || 0),
+          comments: Number(metrics.comments || 0),
+          saved: Number(metrics.saved || 0),
+          shares: Number(metrics.shares || 0),
+          profileVisits: Number(metrics.profileVisits || 0),
+          follows: Number(metrics.follows || 0),
+          adSpend: Number(metrics.adSpend || 0),
+          adLeads: Number(metrics.adLeads || 0),
+          adROAS: Number(metrics.adROAS || 0),
+          source,
+        },
+      },
+      { upsert: true, new: true }
+    );
+  } catch (err: any) {
+    console.warn(
+      `[VideoPlanningService] Snapshot upsert failed for item ${item._id}:`,
+      err.message
+    );
   }
 }
 
@@ -146,6 +311,8 @@ export class VideoPlanningService {
       "lugarGrabacion", "guion", "estadoIdea", "estadoProduccion",
       "edicion", "estadoPublicacion", "comentario", "motivoRechazo",
       "linkVideo", "fechaPublicacion", "copyPublicacion",
+      "casoUsoRef", "igMediaId", "igPermalink", "metaAdId", "metrics",
+      "scriptMeta",
     ]);
 
     const wasPublicado = item.estadoPublicacion === "PUBLICADO";
@@ -342,10 +509,318 @@ export class VideoPlanningService {
             linkVideo: item.linkVideo,
             fechaPublicacion: item.fechaPublicacion,
             copyPublicacion: item.copyPublicacion,
+            // Same attributes the builder shows, so an event on the calendar
+            // and a row in the matrix are recognisably the same thing.
+            tipoGuion: item.tipoGuion ?? null,
+            objetivo: item.scriptMeta?.objetivo ?? null,
+            casoUsoRef: item.casoUsoRef ?? null,
+            tieneGuion: !!(item.guion || item.guionIA?.gancho),
+            igMediaId: item.igMediaId ?? null,
+            metaAdId: item.metaAdId ?? null,
           });
         }
       }
     }
     return result;
+  }
+
+  // ── LINK PUBLISHED REEL MEDIA ─────────────────────────────────────────────
+  async linkReelMedia(
+    planningId: string,
+    itemId: string,
+    data: { igMediaId: string; igPermalink?: string; metaAdId?: string; casoUsoRef?: number }
+  ): Promise<IVideoPlanning> {
+    if (!Types.ObjectId.isValid(planningId) || !Types.ObjectId.isValid(itemId)) {
+      throw new Error("INVALID_ID");
+    }
+
+    const planning = await models.videoPlanning.findById(planningId);
+    if (!planning) throw new Error("NOT_FOUND");
+
+    const item = planning.items.find((i) => i._id.toString() === itemId);
+    if (!item) throw new Error("ITEM_NOT_FOUND");
+
+    item.igMediaId = data.igMediaId;
+    if (data.igPermalink) item.igPermalink = data.igPermalink;
+    if (data.metaAdId) item.metaAdId = data.metaAdId;
+    if (data.casoUsoRef !== undefined) item.casoUsoRef = data.casoUsoRef;
+    item.estadoPublicacion = "PUBLICADO";
+
+    await planning.save();
+
+    // Trigger metrics fetch immediately for the newly linked Reel
+    try {
+      await this.syncVideoItemMetrics(planningId, itemId);
+    } catch {
+      // Non-blocking metrics sync
+    }
+
+    return (await models.videoPlanning.findById(planningId)) || planning;
+  }
+
+  // ── SYNC METRICS FOR A SINGLE VIDEO ITEM ─────────────────────────────────
+  async syncVideoItemMetrics(planningId: string, itemId: string): Promise<IVideoPlanning> {
+    if (!Types.ObjectId.isValid(planningId) || !Types.ObjectId.isValid(itemId)) {
+      throw new Error("INVALID_ID");
+    }
+
+    const planning = await models.videoPlanning.findById(planningId);
+    if (!planning) throw new Error("NOT_FOUND");
+
+    const item = planning.items.find((i) => i._id.toString() === itemId);
+    if (!item) throw new Error("ITEM_NOT_FOUND");
+
+    if (!item.igMediaId && !item.metaAdId && !item.fbPostId) {
+      return planning;
+    }
+
+    const token = await metaService.getGlobalAccessToken().catch(() => null);
+    if (!token) return planning;
+
+    const metrics: any = { ...(item.metrics || {}), lastSyncedAt: new Date() };
+    let sawOrganic = false;
+    let sawPaid = false;
+
+    // ── Instagram (organic) ────────────────────────────────────────────────
+    if (item.igMediaId) {
+      try {
+        const [mediaRes, insightsRes] = await Promise.all([
+          graphGet(`${item.igMediaId}`, {
+            access_token: token,
+            fields:
+              "id,caption,media_type,permalink,thumbnail_url,media_url,like_count,comments_count",
+          }),
+          fetchIgMediaInsights(item.igMediaId, token),
+        ]);
+
+        if (mediaRes) {
+          sawOrganic = true;
+          metrics.likes = Number(mediaRes.like_count || 0);
+          metrics.comments = Number(mediaRes.comments_count || 0);
+          if (mediaRes.permalink && !item.igPermalink) item.igPermalink = mediaRes.permalink;
+          if (mediaRes.media_url && !item.linkVideo) item.linkVideo = mediaRes.media_url;
+        }
+
+        if (insightsRes) {
+          sawOrganic = true;
+          // `views` is the v22 native metric; `plays`/`impressions` are
+          // deprecated for Reels and only survive on older media.
+          metrics.views = Number(insightsRes.views ?? insightsRes.plays ?? 0);
+          metrics.reach = Number(insightsRes.reach ?? 0);
+          metrics.impressions = Number(insightsRes.impressions ?? 0);
+          metrics.saved = Number(insightsRes.saved ?? 0);
+          metrics.shares = Number(insightsRes.shares ?? 0);
+          metrics.profileVisits = Number(insightsRes.profile_visits ?? 0);
+          metrics.follows = Number(insightsRes.follows ?? 0);
+          if (insightsRes.likes !== undefined) metrics.likes = Number(insightsRes.likes);
+          if (insightsRes.comments !== undefined) metrics.comments = Number(insightsRes.comments);
+        }
+      } catch (err: any) {
+        console.warn(
+          `[VideoPlanningService] Failed to sync IG media ${item.igMediaId}:`,
+          err.message
+        );
+      }
+    }
+
+    // ── Facebook post (organic) ────────────────────────────────────────────
+    // Only used when there is no IG media, so a cross-posted Reel does not get
+    // its Instagram numbers overwritten by the Facebook copy.
+    if (item.fbPostId && !item.igMediaId) {
+      try {
+        const fb = await fetchFbPostInsights(item.fbPostId, token);
+        if (fb) {
+          sawOrganic = true;
+          metrics.views = fb.views;
+          metrics.reach = fb.reach;
+          metrics.impressions = fb.impressions;
+          metrics.likes = fb.likes;
+          metrics.comments = fb.comments;
+          metrics.shares = fb.shares;
+        }
+      } catch (err: any) {
+        console.warn(
+          `[VideoPlanningService] Failed to sync FB post ${item.fbPostId}:`,
+          err.message
+        );
+      }
+    }
+
+    // ── Meta Ads (paid) ────────────────────────────────────────────────────
+    if (item.metaAdId) {
+      try {
+        const adRes = await graphGet(`${item.metaAdId}/insights`, {
+          access_token: token,
+          // Lifetime numbers — a video's total performance, not a rolling window.
+          date_preset: "maximum",
+          fields: "spend,clicks,impressions,reach,actions,purchase_roas",
+        });
+
+        const row = adRes?.data?.[0];
+        if (row) {
+          sawPaid = true;
+          metrics.adSpend = Number(row.spend || 0);
+          metrics.adLeads = extractLeadActions(row.actions);
+          const roasVal = row.purchase_roas?.[0]?.value;
+          metrics.adROAS = roasVal ? Number(roasVal) : 0;
+        }
+      } catch (err: any) {
+        console.warn(
+          `[VideoPlanningService] Failed to sync Meta Ad ${item.metaAdId}:`,
+          err.message
+        );
+      }
+    }
+
+    item.metrics = metrics;
+    await planning.save();
+
+    await recordMetricSnapshot(planning, item, metrics, sawOrganic, sawPaid);
+
+    return planning;
+  }
+
+  // ── ALL ITEMS OF A WORKSPACE ──────────────────────────────────────────────
+  /**
+   * Every script of a workspace, across all of its plannings.
+   *
+   * The Content Builder works at workspace level, not per monthly planning, so
+   * it needs one flat list. Each item carries its `planningId` because updating
+   * an item requires knowing which planning document holds it.
+   */
+  async getWorkspaceItems(
+    workspaceId: string
+  ): Promise<Array<IVideoItem & { planningId: string; planningEntryId: string }>> {
+    if (!Types.ObjectId.isValid(workspaceId)) throw new Error("INVALID_ID");
+
+    const plannings = await models.videoPlanning
+      .find({ workspaceId: new Types.ObjectId(workspaceId) })
+      .sort({ createdAt: -1 })
+      .lean<IVideoPlanning[]>();
+
+    const result: Array<
+      IVideoItem & { planningId: string; planningEntryId: string; planningCreatedAt: Date }
+    > = [];
+    for (const planning of plannings) {
+      for (const item of planning.items || []) {
+        result.push({
+          ...(item as any),
+          planningId: String(planning._id),
+          planningEntryId: String(planning.planningEntryId),
+          planningCreatedAt: planning.createdAt,
+        });
+      }
+    }
+
+    /**
+     * Newest first.
+     *
+     * Most items have no `fechaPublicacion` — the team rarely fills it — so
+     * sorting on it alone dumped almost everything into one undated bucket in
+     * arbitrary order. The planning's own date stands in for those, which keeps
+     * the months in order, and the script number orders within a month.
+     */
+    const sortKey = (i: (typeof result)[number]) =>
+      new Date(i.fechaPublicacion ?? i.planningCreatedAt ?? 0).getTime();
+
+    return result.sort((a, b) => {
+      const diff = sortKey(b) - sortKey(a);
+      if (diff !== 0) return diff;
+      return (b.numero ?? 0) - (a.numero ?? 0);
+    });
+  }
+
+  // ── CLASSIFY SCRIPT STRUCTURE ─────────────────────────────────────────────
+  /**
+   * Tag one item's script with its structural attributes.
+   *
+   * A human classification is never overwritten unless `force` is set — the
+   * team's judgement outranks the model's.
+   */
+  async classifyItemScript(
+    planningId: string,
+    itemId: string,
+    options: { force?: boolean } = {}
+  ): Promise<{ planning: IVideoPlanning; scriptMeta: IScriptMeta | null; skipped?: string }> {
+    if (!Types.ObjectId.isValid(planningId) || !Types.ObjectId.isValid(itemId)) {
+      throw new Error("INVALID_ID");
+    }
+
+    const planning = await models.videoPlanning.findById(planningId);
+    if (!planning) throw new Error("NOT_FOUND");
+
+    const item = planning.items.find((i) => i._id.toString() === itemId);
+    if (!item) throw new Error("ITEM_NOT_FOUND");
+
+    if (item.scriptMeta?.clasificadoPor === "humano" && !options.force) {
+      return { planning, scriptMeta: item.scriptMeta, skipped: "HUMAN_CLASSIFIED" };
+    }
+
+    const scriptMeta = await scriptClassifierService.classify(item);
+    if (!scriptMeta) {
+      return { planning, scriptMeta: null, skipped: "NOT_ENOUGH_TEXT" };
+    }
+
+    item.scriptMeta = scriptMeta;
+    await planning.save();
+
+    return { planning, scriptMeta };
+  }
+
+  // ── BULK DAILY SYNC (cron) ────────────────────────────────────────────────
+  /**
+   * Re-sync every linked video published within `windowDays`.
+   *
+   * Runs strictly sequentially with a small delay: there is no job queue in
+   * this project and Graph API throttles hard per app.
+   */
+  async syncRecentMetrics(
+    options: { windowDays?: number; workspaceId?: string; delayMs?: number } = {}
+  ): Promise<{ scanned: number; synced: number; failed: number }> {
+    const windowDays = options.windowDays ?? 90;
+    const delayMs = options.delayMs ?? 350;
+
+    const since = new Date(Date.now() - windowDays * 86_400_000);
+
+    const query: Record<string, any> = {
+      "items.fechaPublicacion": { $gte: since },
+    };
+    if (options.workspaceId && Types.ObjectId.isValid(options.workspaceId)) {
+      query.workspaceId = new Types.ObjectId(options.workspaceId);
+    }
+
+    const plannings = await models.videoPlanning.find(query).select("_id items");
+
+    const targets: Array<{ planningId: string; itemId: string }> = [];
+    for (const planning of plannings) {
+      for (const item of planning.items) {
+        const linked = item.igMediaId || item.metaAdId || item.fbPostId;
+        if (!linked) continue;
+        if (!item.fechaPublicacion || item.fechaPublicacion < since) continue;
+        targets.push({
+          planningId: planning._id!.toString(),
+          itemId: item._id.toString(),
+        });
+      }
+    }
+
+    let synced = 0;
+    let failed = 0;
+
+    for (const target of targets) {
+      try {
+        await this.syncVideoItemMetrics(target.planningId, target.itemId);
+        synced++;
+      } catch (err: any) {
+        failed++;
+        console.warn(
+          `[VideoPlanningService] Bulk sync failed for item ${target.itemId}:`,
+          err.message
+        );
+      }
+      if (delayMs > 0) await new Promise((r) => setTimeout(r, delayMs));
+    }
+
+    return { scanned: targets.length, synced, failed };
   }
 }

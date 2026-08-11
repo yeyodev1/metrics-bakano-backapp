@@ -1,6 +1,7 @@
 import { Router, Request, Response } from "express";
 import { tumeseroService, getTodayEcuador } from "../services/tumesero.service";
 import { florindaSalesService, FLORINDA_WORKSPACE_ID } from "../services/florindaSales.service";
+import { runMetaMetricsSync } from "../crons/metaMetrics.cron";
 
 const cronRouter = Router();
 
@@ -55,6 +56,26 @@ cronRouter.get("/florinda-sales-sync", async (req: Request, res: Response) => {
     res.json({ ok: true, result });
   } catch (err: any) {
     console.error("[Cron] Florinda sales sync failed:", err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// GET /api/cron/meta-metrics-sync
+// Called by Vercel Cron Jobs at 05:00 UTC (= 12AM Ecuador) every day.
+// Snapshots each linked video's Instagram/Facebook/Ads metrics for the day so
+// the Pareto engine can compare videos age-normalized.
+cronRouter.get("/meta-metrics-sync", async (req: Request, res: Response) => {
+  const secret = process.env.CRON_SECRET;
+  if (!secret || req.headers["authorization"] !== `Bearer ${secret}`) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+
+  try {
+    const result = await runMetaMetricsSync();
+    res.json({ ok: true, result });
+  } catch (err: any) {
+    console.error("[Cron] Meta metrics sync failed:", err.message);
     res.status(500).json({ ok: false, error: err.message });
   }
 });

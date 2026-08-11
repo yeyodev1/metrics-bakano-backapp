@@ -2,6 +2,7 @@ import axios from "axios";
 import crypto from "crypto";
 import models from "../models";
 import { CustomError } from "../errors/customError.error";
+import { extractLeadActions } from "../utils/metaActions";
 
 type MetaAccount = {
   id: string;
@@ -809,21 +810,255 @@ export class MetaService {
     }
   }
 
+  /** Max media pulled when listing a profile's videos (4 pages of 50). */
+  private static readonly IG_MEDIA_MAX = 200;
+  private static readonly IG_MEDIA_PAGE_SIZE = 50;
+
+  /**
+   * Walk the `/media` edge following `paging.next`.
+   *
+   * A single page of 25 hid every reel older than the last few weeks, so
+   * anything published earlier could never be linked to its script.
+   */
+  private async fetchAllInstagramMedia(
+    instagramAccountId: string,
+    accessToken: string,
+    max = MetaService.IG_MEDIA_MAX
+  ): Promise<any[]> {
+    const fields =
+      "id,caption,media_type,media_product_type,media_url,thumbnail_url,permalink,timestamp,like_count,comments_count";
+
+    const collected: any[] = [];
+    let url: string | null = `${this.graphUrl}/${instagramAccountId}/media`;
+    let params: Record<string, any> | undefined = {
+      access_token: accessToken,
+      fields,
+      limit: MetaService.IG_MEDIA_PAGE_SIZE,
+    };
+
+    while (url && collected.length < max) {
+      const response: any = await axios.get(url, params ? { params } : undefined);
+      collected.push(...(response.data?.data || []));
+
+      // `paging.next` is a fully-formed URL with the cursor and token baked in.
+      url = response.data?.paging?.next || null;
+      params = undefined;
+    }
+
+    return collected.slice(0, max);
+  }
+
+  /** How many insight requests run at once. Graph throttles aggressively. */
+  private static readonly INSIGHTS_CONCURRENCY = 5;
+
+  private static baseVideo(video: any) {
+    return {
+      id: video.id,
+      caption: video.caption || "",
+      mediaUrl: video.media_url || video.thumbnail_url || null,
+      thumbnailUrl: video.thumbnail_url || video.media_url || null,
+      permalink: video.permalink,
+      timestamp: video.timestamp,
+      likes: Number(video.like_count || 0),
+      comments: Number(video.comments_count || 0),
+      reach: 0,
+      impressions: 0,
+      views: 0,
+      saved: 0,
+      shares: 0,
+    };
+  }
+
+  /**
+   * Attach per-media insights, in small concurrent batches.
+   *
+   * When the app lacks `instagram_manage_insights`, Graph answers error #10 for
+   * every single media. Firing one request per video then means hundreds of
+   * guaranteed failures, which stalls the request past the serverless timeout
+   * and the caller ends up with no reels at all. So the first permission error
+   * stops the insight pass and the videos are returned with zeroed metrics —
+   * listing reels must keep working even when metrics are unavailable.
+   */
+  private async attachInsights(videos: any[], accessToken: string) {
+    const results: any[] = [];
+    let insightsBlocked = false;
+
+    for (let i = 0; i < videos.length; i += MetaService.INSIGHTS_CONCURRENCY) {
+      const batch = videos.slice(i, i + MetaService.INSIGHTS_CONCURRENCY);
+
+      const settled = await Promise.all(
+        batch.map(async (video: any) => {
+          const base = MetaService.baseVideo(video);
+          if (insightsBlocked) return base;
+
+          try {
+            // `views` is the v22 native metric; `plays` only survives on older media.
+            const res = await axios.get(`${this.graphUrl}/${video.id}/insights`, {
+              params: {
+                access_token: accessToken,
+                metric: "views,reach,saved,shares,total_interactions",
+              },
+            });
+            const values = Object.fromEntries(
+              (res.data.data || []).map((m: any) => [m.name, m.values?.[0]?.value ?? m.value ?? 0])
+            );
+            return {
+              ...base,
+              reach: Number(values.reach || 0),
+              impressions: Number(values.impressions || 0),
+              views: Number(values.views ?? values.plays ?? 0),
+              saved: Number(values.saved || 0),
+              shares: Number(values.shares || 0),
+            };
+          } catch (error: any) {
+            // #10 = the app itself lacks the permission; retrying per video is pointless.
+            if (error.response?.data?.error?.code === 10) {
+              if (!insightsBlocked) {
+                console.warn(
+                  "[MetaService] Instagram insights unavailable for this app " +
+                    "(missing instagram_manage_insights). Returning reels without metrics."
+                );
+              }
+              insightsBlocked = true;
+            }
+            return base;
+          }
+        })
+      );
+
+      results.push(...settled);
+    }
+
+    return results;
+  }
+
+  /**
+   * One page of published videos, newest first.
+   *
+   * The reel picker used to load the whole feed (163 media for a large account,
+   * ~9s) just to let someone pick one. This walks Graph's own cursor instead,
+   * so the modal opens immediately and loads more on demand.
+   */
+  async getInstagramMediaPage(
+    workspaceId: string,
+    options: { limit?: number; after?: string } = {}
+  ): Promise<{ reels: any[]; nextCursor: string | null; accountName: string | null }> {
+    const workspace: any = await models.workspaces
+      .findById(workspaceId)
+      .select("metaAds")
+      .lean();
+
+    const igId = workspace?.metaAds?.instagramAccountId;
+    if (!igId) return { reels: [], nextCursor: null, accountName: null };
+
+    const token =
+      workspace.metaAds?.accessToken || (await this.getGlobalAccessToken().catch(() => null));
+    if (!token) return { reels: [], nextCursor: null, accountName: null };
+
+    const limit = Math.min(Math.max(options.limit ?? 10, 1), 50);
+
+    try {
+      // Graph returns mixed media, so ask for a bit more than requested to
+      // still fill a page after filtering out photos.
+      const res = await axios.get(`${this.graphUrl}/${igId}/media`, {
+        params: {
+          access_token: token,
+          fields:
+            "id,caption,media_type,media_product_type,media_url,thumbnail_url,permalink,timestamp,like_count,comments_count",
+          limit: limit * 2,
+          ...(options.after ? { after: options.after } : {}),
+        },
+      });
+
+      const data: any[] = res.data?.data ?? [];
+      const videos = data.filter(
+        (m) => m.media_type === "VIDEO" || m.media_product_type === "REELS"
+      );
+
+      return {
+        reels: videos.slice(0, limit).map((v) => MetaService.baseVideo(v)),
+        nextCursor: res.data?.paging?.cursors?.after ?? null,
+        accountName: workspace.metaAds?.instagramAccountName ?? null,
+      };
+    } catch (error: any) {
+      throw this.metaError(error, "No fue posible obtener los Reels de Instagram.");
+    }
+  }
+
+  /**
+   * One page of ads from the workspace's ad account, with lifetime insights.
+   *
+   * Linking an ad used to mean pasting its numeric id by hand. This lets the
+   * picker show name, thumbnail, spend and results so the right one is
+   * recognizable.
+   */
+  async getAdsPage(
+    workspaceId: string,
+    options: { limit?: number; after?: string } = {}
+  ): Promise<{ ads: any[]; nextCursor: string | null; adAccountName: string | null }> {
+    const workspace: any = await models.workspaces
+      .findById(workspaceId)
+      .select("metaAds")
+      .lean();
+
+    const adAccountId = workspace?.metaAds?.adAccountId;
+    if (!adAccountId) return { ads: [], nextCursor: null, adAccountName: null };
+
+    const token =
+      workspace.metaAds?.accessToken || (await this.getGlobalAccessToken().catch(() => null));
+    if (!token) return { ads: [], nextCursor: null, adAccountName: null };
+
+    const limit = Math.min(Math.max(options.limit ?? 10, 1), 50);
+
+    try {
+      const res = await axios.get(`${this.graphUrl}/act_${adAccountId}/ads`, {
+        params: {
+          access_token: token,
+          limit,
+          ...(options.after ? { after: options.after } : {}),
+          fields:
+            "id,name,effective_status,created_time," +
+            "creative{thumbnail_url,effective_object_story_id}," +
+            "insights.date_preset(maximum){spend,impressions,reach,clicks,actions,purchase_roas}",
+        },
+      });
+
+      const ads = (res.data?.data ?? []).map((ad: any) => {
+        const insights = ad.insights?.data?.[0] ?? {};
+        return {
+          id: ad.id,
+          name: ad.name || "Sin nombre",
+          status: ad.effective_status ?? null,
+          createdTime: ad.created_time ?? null,
+          thumbnailUrl: ad.creative?.thumbnail_url ?? null,
+          // Ties the ad back to the organic post it promotes, when it has one.
+          storyId: ad.creative?.effective_object_story_id ?? null,
+          spend: Number(insights.spend || 0),
+          impressions: Number(insights.impressions || 0),
+          reach: Number(insights.reach || 0),
+          clicks: Number(insights.clicks || 0),
+          leads: extractLeadActions(insights.actions),
+          roas: Number(insights.purchase_roas?.[0]?.value || 0),
+        };
+      });
+
+      return {
+        ads,
+        nextCursor: res.data?.paging?.cursors?.after ?? null,
+        adAccountName: workspace.metaAds?.adAccountName ?? null,
+      };
+    } catch (error: any) {
+      throw this.metaError(error, "No fue posible obtener los anuncios de Meta Ads.");
+    }
+  }
+
   private async getGlobalInstagramVideos(instagramAccountId: string, accessToken: string) {
     try {
       const profileResponse = await axios.get(`${this.graphUrl}/${instagramAccountId}`, { params: { access_token: accessToken, fields: "username,followers_count,media_count,profile_picture_url" } });
-      const mediaResponse = await axios.get(`${this.graphUrl}/${instagramAccountId}/media`, { params: { access_token: accessToken, fields: "id,caption,media_type,media_product_type,media_url,thumbnail_url,permalink,timestamp,like_count,comments_count", limit: 25 } });
-      const videos = (mediaResponse.data.data || []).filter((media: any) => media.media_type === "VIDEO" || media.media_product_type === "REELS");
-      const videosWithInsights = await Promise.all(videos.map(async (video: any) => {
-        try {
-          const insightResponse = await axios.get(`${this.graphUrl}/${video.id}/insights`, { params: { access_token: accessToken, metric: "reach,impressions,plays,saved,total_interactions" } });
-          const values = Object.fromEntries((insightResponse.data.data || []).map((metric: any) => [metric.name, metric.values?.[0]?.value ?? metric.value ?? 0]));
-          return { id: video.id, caption: video.caption || "", mediaUrl: video.media_url || video.thumbnail_url || null, thumbnailUrl: video.thumbnail_url || video.media_url || null, permalink: video.permalink, timestamp: video.timestamp, likes: Number(video.like_count || 0), comments: Number(video.comments_count || 0), reach: Number(values.reach || 0), impressions: Number(values.impressions || 0), views: Number(values.plays || 0), saved: Number(values.saved || 0) };
-        } catch (error) {
-          console.warn(`Meta Instagram insights unavailable for media ${video.id}`);
-          return { id: video.id, caption: video.caption || "", mediaUrl: video.media_url || video.thumbnail_url || null, thumbnailUrl: video.thumbnail_url || video.media_url || null, permalink: video.permalink, timestamp: video.timestamp, likes: Number(video.like_count || 0), comments: Number(video.comments_count || 0), reach: 0, impressions: 0, views: 0, saved: 0 };
-        }
-      }));
+      const media = await this.fetchAllInstagramMedia(instagramAccountId, accessToken);
+      const videos = media.filter((media: any) => media.media_type === "VIDEO" || media.media_product_type === "REELS");
+
+      const videosWithInsights = await this.attachInsights(videos, accessToken);
       return { profile: profileResponse.data, videos: videosWithInsights };
     } catch (error: any) {
       throw this.metaError(error, "No fue posible obtener las métricas orgánicas de Instagram.");
