@@ -80,6 +80,10 @@ export async function upsertBrandProfile(
     const {
       descripcion, tipoNegocio, vertical, trafficDirection, trafficLink,
       publicoObjetivo, propuestaValor, tono, productosServicios, problemaResuelto,
+      // Strategic schema (BrandStrategyWizardModal). These were silently
+      // dropped here, so the wizard reported success while saving nothing —
+      // which is why no workspace had a Customer Journey stored.
+      segmentosMercado, canalesDetail, actividadesClave, customerJourneyCases,
     } = req.body;
 
     if (!workspace.brandProfile) {
@@ -96,6 +100,63 @@ export async function upsertBrandProfile(
     if (tono !== undefined) (workspace.brandProfile as any).tono = tono;
     if (productosServicios !== undefined) (workspace.brandProfile as any).productosServicios = productosServicios;
     if (problemaResuelto !== undefined) (workspace.brandProfile as any).problemaResuelto = problemaResuelto;
+
+    // ── Strategic schema ───────────────────────────────────────────────────
+    // This is what the script generator feeds on. Bad shapes are rejected
+    // instead of coerced: a half-saved journey is worse than none.
+    if (segmentosMercado !== undefined) {
+      if (!Array.isArray(segmentosMercado)) {
+        res.status(HttpStatusCode.BadRequest).send({ message: "segmentosMercado debe ser un arreglo." });
+        return;
+      }
+      (workspace.brandProfile as any).segmentosMercado = segmentosMercado
+        .filter((s: any) => s && typeof s === "object")
+        .map((s: any) => ({
+          nombre: String(s.nombre ?? "").trim(),
+          descripcion: String(s.descripcion ?? "").trim(),
+        }))
+        .filter((s: any) => s.nombre || s.descripcion);
+    }
+
+    if (canalesDetail !== undefined) {
+      if (!Array.isArray(canalesDetail)) {
+        res.status(HttpStatusCode.BadRequest).send({ message: "canalesDetail debe ser un arreglo." });
+        return;
+      }
+      (workspace.brandProfile as any).canalesDetail = canalesDetail
+        .map((c: any) => String(c ?? "").trim())
+        .filter(Boolean);
+    }
+
+    if (actividadesClave !== undefined) {
+      if (!Array.isArray(actividadesClave)) {
+        res.status(HttpStatusCode.BadRequest).send({ message: "actividadesClave debe ser un arreglo." });
+        return;
+      }
+      (workspace.brandProfile as any).actividadesClave = actividadesClave
+        .map((a: any) => String(a ?? "").trim())
+        .filter(Boolean);
+    }
+
+    if (customerJourneyCases !== undefined) {
+      if (!Array.isArray(customerJourneyCases)) {
+        res.status(HttpStatusCode.BadRequest).send({ message: "customerJourneyCases debe ser un arreglo." });
+        return;
+      }
+      (workspace.brandProfile as any).customerJourneyCases = customerJourneyCases
+        .filter((c: any) => c && typeof c === "object")
+        .map((c: any, i: number) => ({
+          casoNumero: Number.isFinite(Number(c.casoNumero)) ? Number(c.casoNumero) : i + 1,
+          nombreCaso: c.nombreCaso ? String(c.nombreCaso).trim() : undefined,
+          potencialCliente: String(c.potencialCliente ?? "").trim(),
+          efectoAnuncio: String(c.efectoAnuncio ?? "").trim(),
+          accionEsperada: String(c.accionEsperada ?? "").trim(),
+        }))
+        .filter(
+          (c: any) => c.potencialCliente || c.efectoAnuncio || c.accionEsperada
+        );
+    }
+
     (workspace.brandProfile as any).updatedAt = new Date();
 
     await workspace.save();
