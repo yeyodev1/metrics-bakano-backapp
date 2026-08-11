@@ -9,6 +9,19 @@ export interface IBrandProfileFile {
   geminiFileMimeType?: string;
 }
 
+export interface ICustomerJourneyCase {
+  casoNumero: number;
+  nombreCaso?: string;
+  potencialCliente: string;
+  efectoAnuncio: string;
+  accionEsperada: string;
+}
+
+export interface ISegmentoMercado {
+  nombre: string;
+  descripcion: string;
+}
+
 export interface IBrandProfile {
   descripcion: string;
   tipoNegocio?: "SERVICIOS" | "PRODUCTOS";
@@ -21,6 +34,10 @@ export interface IBrandProfile {
   trafficDirection?: "WHATSAPP" | "GHL";
   trafficLink: string;
   archivos: IBrandProfileFile[];
+  segmentosMercado?: ISegmentoMercado[];
+  canalesDetail?: string[];
+  actividadesClave?: string[];
+  customerJourneyCases?: ICustomerJourneyCase[];
   updatedAt?: Date;
 }
 
@@ -104,6 +121,25 @@ const ResourceSchema = new Schema(
   { _id: true }
 );
 
+const CustomerJourneyCaseSchema = new Schema(
+  {
+    casoNumero: { type: Number, required: true },
+    nombreCaso: { type: String, trim: true },
+    potencialCliente: { type: String, trim: true, default: "" },
+    efectoAnuncio: { type: String, trim: true, default: "" },
+    accionEsperada: { type: String, trim: true, default: "" },
+  },
+  { _id: false }
+);
+
+const SegmentoMercadoSchema = new Schema(
+  {
+    nombre: { type: String, trim: true, required: true },
+    descripcion: { type: String, trim: true, default: "" },
+  },
+  { _id: false }
+);
+
 const BrandProfileSchema = new Schema(
   {
     descripcion: { type: String, trim: true, default: "" },
@@ -123,6 +159,10 @@ const BrandProfileSchema = new Schema(
     },
     trafficLink: { type: String, trim: true, default: "" },
     archivos: { type: [BrandProfileFileSchema], default: [] },
+    segmentosMercado: { type: [SegmentoMercadoSchema], default: [] },
+    canalesDetail: { type: [String], default: [] },
+    actividadesClave: { type: [String], default: [] },
+    customerJourneyCases: { type: [CustomerJourneyCaseSchema], default: [] },
     updatedAt: { type: Date },
   },
   { _id: false }

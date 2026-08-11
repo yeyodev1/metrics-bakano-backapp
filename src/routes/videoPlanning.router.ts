@@ -11,6 +11,12 @@ import {
   reopenPlanning,
   getCalendarItems,
   getEditorCompletedItems,
+  linkReelMedia,
+  syncVideoItemMetrics,
+  getPublishedReelsForWorkspace,
+  classifyItemScript,
+  getWorkspaceItems,
+  getWorkspaceAds,
 } from "../controllers/videoPlanning.controller";
 import { generateScript, generateScriptQuick, getLLMStatus } from "../controllers/scriptGeneration.controller";
 import { uploadMedia } from "../middlewares/upload.middleware";
@@ -52,6 +58,42 @@ videoPlanningRouter.get(
   authMiddleware,
   internalOrSuperadminMiddleware,
   getEditorCompletedItems
+);
+
+videoPlanningRouter.get(
+  "/workspace/:workspaceId/published-reels",
+  authMiddleware,
+  getPublishedReelsForWorkspace
+);
+// GET /api/video-planning/workspace/:workspaceId/items
+videoPlanningRouter.get(
+  "/workspace/:workspaceId/items",
+  authMiddleware,
+  getWorkspaceItems
+);
+// GET /api/video-planning/workspace/:workspaceId/ads
+videoPlanningRouter.get(
+  "/workspace/:workspaceId/ads",
+  authMiddleware,
+  getWorkspaceAds
+);
+videoPlanningRouter.post(
+  "/:planningId/items/:itemId/link-reel",
+  authMiddleware,
+  internalOrSuperadminMiddleware,
+  linkReelMedia
+);
+videoPlanningRouter.post(
+  "/:planningId/items/:itemId/sync-metrics",
+  authMiddleware,
+  syncVideoItemMetrics
+);
+// POST /api/video-planning/:planningId/items/:itemId/classify
+videoPlanningRouter.post(
+  "/:planningId/items/:itemId/classify",
+  authMiddleware,
+  internalOrSuperadminMiddleware,
+  classifyItemScript
 );
 
 videoPlanningRouter.patch(
