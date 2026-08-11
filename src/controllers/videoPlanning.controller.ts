@@ -393,8 +393,13 @@ export async function linkReelMedia(
     const { planningId, itemId } = req.params as { planningId: string; itemId: string };
     const { igMediaId, igPermalink, metaAdId, casoUsoRef } = req.body;
 
-    if (!igMediaId) {
-      res.status(HttpStatusCode.BadRequest).json({ message: "igMediaId es requerido." });
+    // Un video pautado puede existir solo como anuncio, sin publicacion organica
+    // en el feed. Exigir igMediaId dejaba esos guiones imposibles de vincular, y
+    // por lo tanto fuera de todo el analisis de desempeno.
+    if (!igMediaId && !metaAdId) {
+      res
+        .status(HttpStatusCode.BadRequest)
+        .json({ message: "Debes vincular al menos un reel publicado o un anuncio de Meta Ads." });
       return;
     }
 
@@ -405,7 +410,13 @@ export async function linkReelMedia(
       casoUsoRef,
     });
 
-    res.status(HttpStatusCode.Ok).json({ message: "Reel vinculado exitosamente con el guion.", planning });
+    const message = igMediaId && metaAdId
+      ? "Reel y anuncio vinculados al guion."
+      : igMediaId
+        ? "Reel vinculado exitosamente con el guion."
+        : "Anuncio vinculado exitosamente con el guion.";
+
+    res.status(HttpStatusCode.Ok).json({ message, planning });
   } catch (error: any) {
     console.error("linkReelMedia error:", error);
     next(error);
