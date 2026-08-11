@@ -528,7 +528,7 @@ export class VideoPlanningService {
   async linkReelMedia(
     planningId: string,
     itemId: string,
-    data: { igMediaId: string; igPermalink?: string; metaAdId?: string; casoUsoRef?: number }
+    data: { igMediaId?: string; igPermalink?: string; metaAdId?: string; casoUsoRef?: number }
   ): Promise<IVideoPlanning> {
     if (!Types.ObjectId.isValid(planningId) || !Types.ObjectId.isValid(itemId)) {
       throw new Error("INVALID_ID");
@@ -540,11 +540,21 @@ export class VideoPlanningService {
     const item = planning.items.find((i) => i._id.toString() === itemId);
     if (!item) throw new Error("ITEM_NOT_FOUND");
 
-    item.igMediaId = data.igMediaId;
+    // Cada fuente se escribe solo si viene en el body, y una cadena vacia
+    // desvincula. Antes se asignaba igMediaId siempre y metaAdId solo si era
+    // truthy: no habia forma de quitar un anuncio mal vinculado, y un guion
+    // pautado sin reel terminaba con igMediaId en undefined.
+    if (data.igMediaId !== undefined) {
+      item.igMediaId = data.igMediaId || undefined;
+      // El permalink pertenece al reel; si se desvincula, deja de aplicar.
+      if (!data.igMediaId) item.igPermalink = undefined;
+    }
     if (data.igPermalink) item.igPermalink = data.igPermalink;
-    if (data.metaAdId) item.metaAdId = data.metaAdId;
+    if (data.metaAdId !== undefined) item.metaAdId = data.metaAdId || undefined;
     if (data.casoUsoRef !== undefined) item.casoUsoRef = data.casoUsoRef;
-    item.estadoPublicacion = "PUBLICADO";
+
+    // Solo cuenta como publicado si quedo vinculado a algo real.
+    if (item.igMediaId || item.metaAdId) item.estadoPublicacion = "PUBLICADO";
 
     await planning.save();
 
