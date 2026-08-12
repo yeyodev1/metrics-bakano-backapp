@@ -1121,6 +1121,83 @@ export class ResendService {
       console.error("ResendService - Failed to send contract email:", error);
     }
   }
+
+  /**
+   * Enlace para restablecer la contraseña.
+   *
+   * A diferencia de los demás correos, este SÍ propaga el error: si el envío
+   * falla, quien lo pidió debe enterarse en vez de quedarse esperando un correo
+   * que nunca va a llegar.
+   */
+  async sendPasswordResetEmail(params: {
+    to: string;
+    recipientName?: string;
+    resetUrl: string;
+    expiresInMinutes: number;
+  }): Promise<void> {
+    const { to, recipientName, resetUrl, expiresInMinutes } = params;
+    const firstName = recipientName ? recipientName.split(" ")[0] : "Hola";
+
+    const html = `<!DOCTYPE html>
+<html lang="es">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+<body style="margin:0;padding:0;background:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="padding:40px 20px;">
+    <tr><td align="center">
+      <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
+
+        <tr>
+          <td style="background:linear-gradient(135deg,#e6285c 0%,#85529c 100%);padding:32px 40px;text-align:center;">
+            <p style="margin:0;font-size:13px;font-weight:700;color:rgba(255,255,255,0.75);letter-spacing:2px;text-transform:uppercase;">Bakano Ads</p>
+            <h1 style="margin:12px 0 0;font-size:24px;font-weight:800;color:#ffffff;">Restablece tu contraseña</h1>
+          </td>
+        </tr>
+
+        <tr>
+          <td style="padding:32px 40px 24px;">
+            <p style="margin:0 0 20px;font-size:16px;color:#1e293b;">${firstName},</p>
+            <p style="margin:0 0 24px;font-size:15px;color:#475569;line-height:1.7;">
+              Pediste restablecer la contraseña de tu cuenta en Bakano Ads. Usa el botón de abajo para elegir una nueva.
+            </p>
+
+            <div style="text-align:center;margin-bottom:24px;">
+              <a href="${resetUrl}" style="display:inline-block;background:linear-gradient(135deg,#e6285c 0%,#85529c 100%);color:#ffffff;text-decoration:none;padding:14px 36px;border-radius:10px;font-size:15px;font-weight:700;">
+                Elegir contraseña nueva
+              </a>
+              <p style="margin:12px 0 0;font-size:12px;color:#94a3b8;">El enlace vence en ${expiresInMinutes} minutos y sirve una sola vez.</p>
+            </div>
+
+            <div style="background:#fef2f2;border:1.5px solid #fecaca;border-radius:12px;padding:16px 20px;margin-bottom:20px;">
+              <p style="margin:0;font-size:14px;color:#991b1b;line-height:1.6;">
+                <strong>¿No pediste esto?</strong> Ignora este correo: tu contraseña actual sigue funcionando y nadie puede cambiarla sin abrir este enlace.
+              </p>
+            </div>
+
+            <p style="margin:0;font-size:12px;color:#94a3b8;line-height:1.6;word-break:break-all;">
+              Si el botón no funciona, copia y pega esta dirección en tu navegador:<br/>${resetUrl}
+            </p>
+          </td>
+        </tr>
+
+        <tr>
+          <td style="background:#f8fafc;padding:16px 40px;border-top:1px solid #e2e8f0;text-align:center;">
+            <p style="margin:0;color:#94a3b8;font-size:12px;">Enviado automáticamente por <strong>Bakano Ads</strong>.<br/>Si tienes dudas, escríbenos a soporte@bakano.ec</p>
+          </td>
+        </tr>
+
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+
+    await this.client.emails.send({
+      from: this.from,
+      to,
+      subject: "Restablece tu contraseña de Bakano Ads",
+      html,
+    });
+  }
 }
 
 export const resendService = new ResendService();

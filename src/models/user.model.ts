@@ -36,6 +36,12 @@ export interface IUser extends Document {
   phoneExtension?: string;
   apiKey?: string;
   apiKeyCreatedAt?: Date;
+  /**
+   * Recuperación de contraseña. Se guarda el hash del token, nunca el token:
+   * si alguien lee la base de datos no puede usarlo para entrar a una cuenta.
+   */
+  passwordResetTokenHash?: string;
+  passwordResetExpiresAt?: Date;
   createdAt: Date;
   updatedAt: Date;
   photoUrl?: string;
@@ -110,6 +116,15 @@ export const UserSchema = new Schema<IUser>(
     },
     apiKeyCreatedAt: {
       type: Date,
+    },
+    // `select: false` para que ningún endpoint devuelva estos campos por error.
+    passwordResetTokenHash: {
+      type: String,
+      select: false,
+    },
+    passwordResetExpiresAt: {
+      type: Date,
+      select: false,
     },
     photoUrl: {
       type: String,
