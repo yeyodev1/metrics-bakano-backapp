@@ -2,7 +2,12 @@ const mongoose = require('mongoose');
 const axios = require('axios');
 require('dotenv').config();
 
-const DB_URI = process.env.DB_URI || 'mongodb+srv://dreyes_db_user:5ZHHqnOmNE5fHpe7@cluster0.l4ophuv.mongodb.net/?appName=Cluster0';
+const DB_URI = process.env.DB_URI;
+
+if (!DB_URI) {
+  console.error('Falta DB_URI en el .env. Este script no lleva credenciales dentro.');
+  process.exit(1);
+}
 
 const workspaceSchema = new mongoose.Schema({
   name: String,
