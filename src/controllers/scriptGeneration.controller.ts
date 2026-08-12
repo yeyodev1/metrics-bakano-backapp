@@ -82,12 +82,15 @@ export async function generateScript(
       tipoGuion: tipoGuionOverride,
       objetivo,
       variantes,
+      dobleHook,
     }: {
       contextoMes?: ScriptContext;
       tipoGuion?: "TOFU" | "MOFU" | "BOFU";
       objetivo?: "feed" | "anuncio";
       /** How many alternatives to return. 1 saves directly; >1 returns options. */
       variantes?: number;
+      /** Saca el Hook 2 a su propio campo en vez de esconderlo en el cuerpo. */
+      dobleHook?: boolean;
     } = req.body;
 
     if (!Types.ObjectId.isValid(videoItemId)) {
@@ -171,6 +174,7 @@ export async function generateScript(
       engramBlock: engramBlock || undefined,
       // Explicit override wins; otherwise reuse what was already classified.
       objetivo: objetivo ?? videoItem.scriptMeta?.objetivo,
+      dobleHook: Boolean(dobleHook),
     };
 
     // Several angles to choose from. Nothing is saved yet — the writer picks
@@ -250,6 +254,7 @@ export async function generateScriptQuick(
       tipoGuion: tipoGuionOverride,
       objetivo,
       casoUsoRef,
+      dobleHook,
     }: {
       workspaceId: string;
       tema: string;
@@ -258,6 +263,7 @@ export async function generateScriptQuick(
       tipoGuion?: "TOFU" | "MOFU" | "BOFU";
       objetivo?: "feed" | "anuncio";
       casoUsoRef?: number;
+      dobleHook?: boolean;
     } = req.body;
 
     if (!workspaceId || !tema) {
@@ -303,6 +309,7 @@ export async function generateScriptQuick(
       fileUris: fileUris.length > 0 ? fileUris : undefined,
       engramBlock: engramBlock || undefined,
       objetivo,
+      dobleHook: Boolean(dobleHook),
     });
 
     res.status(HttpStatusCode.Ok).send({

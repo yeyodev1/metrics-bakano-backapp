@@ -316,15 +316,48 @@ export interface GenerateScriptParams {
   engramBlock?: string;
   /** Where this script will run. Defaults to `feed`. */
   objetivo?: ObjetivoGuion;
+  /**
+   * Saca el Hook 2 a su propio campo en vez de dejarlo escondido dentro del
+   * cuerpo. Lo pidió contenido para poder grabar y medir los dos ganchos.
+   */
+  dobleHook?: boolean;
 }
 
 export interface GuionIAResult {
   conceptoVisual: string;
   gancho: string;
   textoPantalla: string;
+  /** Solo cuando se pidió doble hook: el giro que reengancha, aparte. */
+  hook2?: string;
   cuerpo: string;
+  /** Cierre por defecto; espeja al final que corresponde al `objetivo` pedido. */
   cta: string;
+  ctaFeed: string;
+  ctaAds: string;
   broll: string;
+}
+
+/**
+ * Deja los dos finales siempre presentes.
+ *
+ * El modelo a veces devuelve solo `cta` (guiones viejos, o cuando ignora el
+ * campo nuevo). En vez de dejar la tarjeta vacía en la interfaz, se rellena
+ * con lo que haya, y `cta` queda espejando el final del objetivo pedido para
+ * no romper lo que ya leía ese campo.
+ */
+function normalizeFinales(
+  parsed: GuionIAResult,
+  objetivo?: ObjetivoGuion
+): GuionIAResult {
+  const feed = (parsed.ctaFeed || parsed.cta || "").trim();
+  const ads = (parsed.ctaAds || parsed.cta || "").trim();
+
+  return {
+    ...parsed,
+    ctaFeed: feed,
+    ctaAds: ads,
+    cta: objetivo === "anuncio" ? ads : feed,
+  };
 }
 
 export class GeminiService {
@@ -410,7 +443,11 @@ VIDEO A GENERAR:
 - El CTA debe incluir el nombre del presentador/marca y una acción clara y específica.
 - Tono y lenguaje: adapta exactamente al tono indicado en el perfil de marca.
 - Sigue el estilo de los ejemplos de referencia del system prompt.
-- DOBLE HOOK OBLIGATORIO: el campo "gancho" contiene el HOOK 1 (0-3 seg, nace del dolor del caso del Journey). El campo "cuerpo" ABRE con el HOOK 2 — el giro que reengancha — y recién después desarrolla. Un guión con un solo hook está mal.
+- ${
+      params.dobleHook
+        ? 'DOBLE HOOK SEPARADO: "gancho" es el HOOK 1 (0-3 seg, nace del dolor del caso del Journey). "hook2" es el HOOK 2 en su propio campo: el giro que reengancha en el segundo 3-5, una o dos frases, distinto al primero y no una reformulación. El "cuerpo" arranca DESPUÉS del Hook 2 y no lo repite.'
+        : 'DOBLE HOOK OBLIGATORIO: el campo "gancho" contiene el HOOK 1 (0-3 seg, nace del dolor del caso del Journey). El campo "cuerpo" ABRE con el HOOK 2 — el giro que reengancha — y recién después desarrolla. Un guión con un solo hook está mal.'
+    }
 - DURACIÓN MÁXIMA 45 SEGUNDOS en total. Si no cabe, corta contenido.
 - LENGUAJE HUMANO: frases cortas, como habla una persona. Sin simetrías perfectas, sin adjetivos apilados. Si al leerlo en voz alta suena a anuncio institucional o a IA, reescríbelo.
 
@@ -418,11 +455,25 @@ Genera el guión completo en JSON con exactamente estos campos:
 {
   "conceptoVisual": "Descripción del concepto visual, dirección de arte y lenguaje corporal del presentador",
   "gancho": "HOOK 1 (0-3 seg), texto hablado. Nace de cómo se siente al inicio el caso del Customer Journey al que apunta este video",
-  "textoPantalla": "Texto que aparece en pantalla durante el gancho (máx 8 palabras, impactante). Debe sostener el mensaje aunque el video se vea sin sonido",
-  "cuerpo": "Empieza con el HOOK 2 (el giro que reengancha) y luego desarrolla, hasta completar 45 segundos como máximo. Con datos concretos del nicho",
-  "cta": "Call to action final con nombre del presentador y palabra clave para comentar",
+  "textoPantalla": "Texto que aparece en pantalla durante el gancho (máx 8 palabras, impactante). Debe sostener el mensaje aunque el video se vea sin sonido",${
+      params.dobleHook
+        ? '\n  "hook2": "HOOK 2 (seg 3-5), texto hablado. El giro que reengancha, una o dos frases",'
+        : ""
+    }
+  "cuerpo": "${
+      params.dobleHook
+        ? "Desarrollo que arranca DESPUÉS del Hook 2, sin repetirlo"
+        : "Empieza con el HOOK 2 (el giro que reengancha) y luego desarrolla"
+    }, hasta completar 45 segundos como máximo. Con datos concretos del nicho",
+  "ctaFeed": "Cierre para FEED (orgánico). Bajo compromiso: comentar una palabra clave en MAYÚSCULAS, guardar el video o seguir la cuenta. Incluye el nombre del presentador. Nada de links ni urgencia de venta",
+  "ctaAds": "Cierre para ANUNCIO (pauta pagada). Una sola acción comercial directa e inmediata: tocar el enlace, escribir por WhatsApp o comprar. Nombra el producto explícitamente. Sin pedir comentarios ni seguidores, porque en pauta eso no convierte",
   "broll": "Lista de tomas de apoyo y recursos visuales específicos al nicho/servicio"
-}`;
+}
+
+REGLA DE LOS DOS FINALES: el mismo guión se publica en el feed y también se pauta.
+Por eso "ctaFeed" y "ctaAds" NO son la misma frase reescrita: cambian la acción que
+piden. El cuerpo y el gancho son idénticos para los dos; solo cambia el cierre.
+Cada final va en una o dos frases, listo para leer en cámara.`;
 
     // base rules → high-ticket framework for this vertical → feed vs ad →
     // what this brand's own metrics already proved.
@@ -468,7 +519,7 @@ Genera el guión completo en JSON con exactamente estos campos:
       .trim();
 
     const parsed: GuionIAResult = JSON.parse(jsonText);
-    return parsed;
+    return normalizeFinales(parsed, params.objetivo);
   }
 
   /**

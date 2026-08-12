@@ -13,8 +13,18 @@ export interface IGuionIA {
   conceptoVisual: string;
   gancho: string;
   textoPantalla: string;
+  /** Hook 2 aparte, solo cuando se generó con doble hook separado. */
+  hook2?: string;
   cuerpo: string;
+  /**
+   * Cierre por defecto. Se mantiene por los guiones que ya estaban guardados
+   * antes de que existieran los dos finales.
+   */
   cta: string;
+  /** Cierre suave para el feed: comentar, guardar, seguir. */
+  ctaFeed?: string;
+  /** Cierre duro para pauta: una sola acción comercial. */
+  ctaAds?: string;
   broll: string;
   generadoEn?: Date;
   contextoMes?: {
@@ -123,8 +133,11 @@ const GuionIASchema = new Schema(
     conceptoVisual: { type: String, trim: true, default: "" },
     gancho: { type: String, trim: true, default: "" },
     textoPantalla: { type: String, trim: true, default: "" },
+    hook2: { type: String, trim: true, default: "" },
     cuerpo: { type: String, trim: true, default: "" },
     cta: { type: String, trim: true, default: "" },
+    ctaFeed: { type: String, trim: true, default: "" },
+    ctaAds: { type: String, trim: true, default: "" },
     broll: { type: String, trim: true, default: "" },
     generadoEn: { type: Date },
     contextoMes: {
