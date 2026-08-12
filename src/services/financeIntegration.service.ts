@@ -133,6 +133,44 @@ function mapWorkspace(workspace: LeanWorkspace): FinanceWorkspace {
   };
 }
 
+/**
+ * Crea el espacio de un cliente recién dado de alta en finanzas.
+ *
+ * Es idempotente a propósito: si ya existe uno con ese nombre lo devuelve en
+ * vez de fallar. El alta de cliente en finanzas no debe romperse porque alguien
+ * creara el espacio antes a mano, y devolver el existente es lo que permite
+ * vincularlo igual.
+ */
+export async function createWorkspaceForFinance(name: string): Promise<{
+  workspace: FinanceWorkspace;
+  created: boolean;
+}> {
+  const clean = String(name ?? "").trim();
+  if (clean.length < 2) {
+    throw new CustomError("El nombre del espacio es obligatorio.", 400);
+  }
+
+  // Búsqueda sin distinguir mayúsculas ni espacios: "La Capilla" y "la capilla"
+  // son el mismo negocio y duplicarlos ensucia el listado de finanzas.
+  const escaped = clean.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const existing = await models.workspaces
+    .findOne({ name: { $regex: `^${escaped}$`, $options: "i" } }, FINANCE_PROJECTION)
+    .populate({ path: "adminId", select: "name email photoUrl" })
+    .lean();
+
+  if (existing) {
+    return { workspace: mapWorkspace(existing as unknown as LeanWorkspace), created: false };
+  }
+
+  const created = await workspaceService.createWorkspace({ name: clean });
+  const fresh = await models.workspaces
+    .findById(created._id, FINANCE_PROJECTION)
+    .populate({ path: "adminId", select: "name email photoUrl" })
+    .lean();
+
+  return { workspace: mapWorkspace(fresh as unknown as LeanWorkspace), created: true };
+}
+
 export async function listWorkspacesForFinance(): Promise<FinanceWorkspace[]> {
   const workspaces = await models.workspaces
     .find({}, FINANCE_PROJECTION)

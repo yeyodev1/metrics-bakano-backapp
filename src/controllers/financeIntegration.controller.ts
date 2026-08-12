@@ -1,6 +1,7 @@
 import type { Request, Response, NextFunction } from "express";
 import { HttpStatusCode } from "axios";
 import {
+  createWorkspaceForFinance,
   listWorkspacesForFinance,
   getWorkspaceForFinance,
   setWorkspaceActiveForFinance,
@@ -13,6 +14,26 @@ export async function listFinanceWorkspaces(_req: Request, res: Response, next: 
     return;
   } catch (error) {
     console.error("listFinanceWorkspaces error:", error);
+    next(error);
+  }
+}
+
+export async function createFinanceWorkspace(req: Request, res: Response, next: NextFunction) {
+  try {
+    const { name } = req.body ?? {};
+    if (typeof name !== "string" || !name.trim()) {
+      res.status(HttpStatusCode.BadRequest).send({ message: "El campo name es obligatorio." });
+      return;
+    }
+
+    const { workspace, created } = await createWorkspaceForFinance(name);
+    // 201 si se creó, 200 si ya existía: finanzas distingue los dos casos.
+    res
+      .status(created ? HttpStatusCode.Created : HttpStatusCode.Ok)
+      .send({ message: created ? "Workspace created." : "Workspace already existed.", workspace, created });
+    return;
+  } catch (error) {
+    console.error("createFinanceWorkspace error:", error);
     next(error);
   }
 }
