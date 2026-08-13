@@ -131,13 +131,40 @@ export class WorkspaceService {
     };
   }
 
-  async listWorkspaces(options: { search?: string; page?: number; limit?: number } = {}) {
-    const { search, page = 1, limit = 10 } = options;
+  async listWorkspaces(
+    options: { search?: string; page?: number; limit?: number; minimal?: boolean } = {}
+  ) {
+    const { search, page = 1, limit = 10, minimal = false } = options;
     const skip = (page - 1) * limit;
 
     const query: any = {};
     if (search) {
       query.name = { $regex: search, $options: "i" };
+    }
+
+    /**
+     * Los selectores solo necesitan id y nombre. Sin esto, pintar un
+     * desplegable costaba 1.28 MB: cien documentos completos con perfil de
+     * marca, recursos y los tokens de Meta dentro.
+     */
+    if (minimal) {
+      const [lista, total] = await Promise.all([
+        models.workspaces
+          .find(query, { name: 1, isActive: 1 })
+          .sort({ name: 1 })
+          .skip(skip)
+          .limit(limit)
+          .lean(),
+        models.workspaces.countDocuments(query),
+      ]);
+
+      return {
+        workspaces: lista,
+        total,
+        page,
+        limit,
+        hasMore: total > skip + lista.length,
+      };
     }
 
     const [workspaces, total] = await Promise.all([

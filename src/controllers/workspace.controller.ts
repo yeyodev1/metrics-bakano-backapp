@@ -38,9 +38,11 @@ export async function listWorkspaces(req: AuthRequest, res: Response, next: Next
     const search = req.query["search"] as string;
     const page = parseInt(req.query["page"] as string) || 1;
     const limit = parseInt(req.query["limit"] as string) || 10;
+    // Selectores: solo id y nombre. Ver listWorkspaces.
+    const minimal = req.query["minimal"] === "true";
 
     if (role === 'superadmin') {
-      const data = await workspaceService.listWorkspaces({ search, page, limit });
+      const data = await workspaceService.listWorkspaces({ search, page, limit, minimal });
       res.status(HttpStatusCode.Ok).send({
         message: "Workspaces retrieved successfully.",
         workspaces: data.workspaces,
