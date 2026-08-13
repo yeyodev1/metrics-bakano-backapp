@@ -218,13 +218,11 @@ export class PlanningNotificationService {
             workspaceId: String(workspace._id),
             totalVideos,
             enlace,
-            // Para ramificar en el workflow. El booleano va aparte del tipo
-            // porque una condicion si/no es mas simple de armar en GHL que
-            // comparar cadenas, y los tres casos no son dos.
+            // Una sola señal para ramificar: "enviada" | "recordatorio" |
+            // "revisada". Antes iba ademas un booleano esRecordatorio, pero
+            // era redundante y obligaba a mantener dos campos coherentes.
             tipoAviso,
-            esRecordatorio: tipoAviso === "recordatorio",
             numeroEnvio,
-            titulo: TEXTO_AVISO[tipoAviso],
           },
           { timeout: 10000 }
         );
