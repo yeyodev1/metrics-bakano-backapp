@@ -180,7 +180,8 @@ export async function listAllCollaborators(req: AuthRequest, res: Response, next
   try {
     const search = req.query["search"] as string;
     const workspaceId = req.query["workspaceId"] as string;
-    const users = await workspaceService.listAllCollaborators(search, workspaceId);
+    const soloAdmins = req.query["onlyAccountAdmins"] === "true";
+    const users = await workspaceService.listAllCollaborators(search, workspaceId, soloAdmins);
     res.status(HttpStatusCode.Ok).send({ message: "Collaborators retrieved successfully.", users });
     return;
   } catch (error) {

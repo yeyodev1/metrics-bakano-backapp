@@ -368,7 +368,16 @@ export class WorkspaceService {
     };
   }
 
-  async listAllCollaborators(search?: string, workspaceId?: string) {
+  /**
+   * @param soloAdmins deja fuera al equipo de Bakano y a los colaboradores:
+   *   devuelve solo a quien es administrador de la cuenta de algun cliente.
+   *   La pestana "Admins de cuenta" listaba a todo el mundo, que es otra cosa.
+   */
+  async listAllCollaborators(
+    search?: string,
+    workspaceId?: string,
+    soloAdmins = false
+  ) {
     // Only users who are not superadmins and have workspaces assigned or were legacy workspace owners
     const query: any = { 
       role: { $ne: "superadmin" },
@@ -377,6 +386,12 @@ export class WorkspaceService {
         { workspaceId: { $exists: true } }
       ]
     };
+
+    if (soloAdmins) {
+      query.$and = query.$and || [];
+      query.$and.push({ isInternal: { $ne: true } });
+      query.$and.push({ "workspaces.role": "admin" });
+    }
 
     if (search) {
       const searchRegex = new RegExp(search, "i");
