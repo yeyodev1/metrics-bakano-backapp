@@ -332,3 +332,22 @@ export async function diagnoseMetaConnection(
     return;
   }
 }
+
+/** Actividad publicitaria compacta, para el panel de trafficker. */
+export async function getAdsActivity(
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const workspaceId = req.params["workspaceId"] as string;
+    const year = Number(req.query["year"]) || new Date().getFullYear();
+    const month = Number(req.query["month"]) || new Date().getMonth() + 1;
+    const actividad = await metaService.getAdsActivity(workspaceId, year, month);
+    res.status(HttpStatusCode.Ok).send(actividad);
+    return;
+  } catch (error) {
+    next(error);
+    return;
+  }
+}

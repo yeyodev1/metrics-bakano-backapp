@@ -38,6 +38,88 @@ export class MetaService {
   private readonly graphUrl = "https://graph.facebook.com/v22.0";
 
   /**
+   * Resumen compacto de la actividad publicitaria de un entorno.
+   *
+   * El panel de trafficker mostraba solo gasto y facturacion: un cliente con
+   * campanas corriendo se veia igual que uno parado, porque el gasto del mes
+   * puede ser cero por muchas razones. Esto responde la pregunta real: quien
+   * tiene anuncios ACTIVOS ahora mismo y como van.
+   */
+  async getAdsActivity(
+    workspaceId: string,
+    year: number,
+    month: number
+  ): Promise<{
+    conectado: boolean;
+    activos: number;
+    pausados: number;
+    impresiones: number;
+    clics: number;
+    gasto: number;
+    ctr: number | null;
+    cpc: number | null;
+    error?: string;
+  }> {
+    const vacio = {
+      conectado: false,
+      activos: 0,
+      pausados: 0,
+      impresiones: 0,
+      clics: 0,
+      gasto: 0,
+      ctr: null,
+      cpc: null,
+    };
+
+    const workspace: any = await models.workspaces.findById(workspaceId).lean();
+    const adAccountId = workspace?.metaAds?.adAccountId;
+    const token = workspace?.metaAds?.accessToken;
+    if (!adAccountId || !token) return vacio;
+
+    const desde = new Date(Date.UTC(year, month - 1, 1)).toISOString().slice(0, 10);
+    const hasta = new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10);
+
+    try {
+      const [estados, metricas] = await Promise.all([
+        axios.get(`${this.graphUrl}/act_${adAccountId}/ads`, {
+          params: { access_token: token, fields: "effective_status", limit: 500 },
+        }),
+        axios.get(`${this.graphUrl}/act_${adAccountId}/insights`, {
+          params: {
+            access_token: token,
+            time_range: JSON.stringify({ since: desde, until: hasta }),
+            fields: "spend,impressions,clicks",
+          },
+        }),
+      ]);
+
+      const filas = estados.data?.data ?? [];
+      const activos = filas.filter((a: any) => a.effective_status === "ACTIVE").length;
+
+      const m = metricas.data?.data?.[0] ?? {};
+      const impresiones = Number(m.impressions || 0);
+      const clics = Number(m.clicks || 0);
+      const gasto = Number(m.spend || 0);
+
+      return {
+        conectado: true,
+        activos,
+        pausados: filas.length - activos,
+        impresiones,
+        clics,
+        gasto,
+        ctr: impresiones > 0 ? (clics / impresiones) * 100 : null,
+        cpc: clics > 0 ? gasto / clics : null,
+      };
+    } catch (error: any) {
+      // Un entorno sin permisos no puede tumbar la lista entera: se devuelve el
+      // motivo y la fila lo muestra en vez de quedarse en blanco.
+      return { ...vacio, conectado: true, error: this.explicarErrorMeta(error.response?.data) };
+    }
+  }
+
+
+  /**
    * Permisos que el token tiene concedidos de verdad.
    *
    * Pedir un scope en el login no garantiza tenerlo: el usuario puede

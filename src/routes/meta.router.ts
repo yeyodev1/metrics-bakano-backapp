@@ -39,6 +39,7 @@ metaRouter.post("/global/refresh-tokens", superadminMiddleware, metaController.r
 
 // Read-only endpoints for Ads data (Access to Collaborators)
 metaRouter.get("/:workspaceId/adaccounts", workspaceAccessMiddleware, metaController.getAdAccounts);
+metaRouter.get("/:workspaceId/ads-activity", workspaceAccessMiddleware, metaController.getAdsActivity);
 metaRouter.get("/:workspaceId/ads-insights", workspaceAccessMiddleware, metaController.getAdsInsights);
 metaRouter.get("/:workspaceId/organic-insights", workspaceAccessMiddleware, metaController.getOrganicInsights);
 metaRouter.get("/:workspaceId/unified-dashboard", workspaceAccessMiddleware, metaController.getUnifiedDashboard);
