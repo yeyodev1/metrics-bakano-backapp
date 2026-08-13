@@ -1,7 +1,7 @@
 import axios from "axios";
 import models from "../models";
 import { resendService } from "./resend.service";
-import { normalizarTelefono } from "../utils/telefono";
+import { normalizarTelefono, partirNombre } from "../utils/telefono";
 
 const APP_URL = "https://metrics.bakano.ec";
 
@@ -12,8 +12,16 @@ const APP_URL = "https://metrics.bakano.ec";
  */
 export const RUTA_DESDE_WHATSAPP = "/app/workspaces/new-planning-from-whatsapp";
 
+export interface Contacto {
+  nombre: string;
+  apellido: string;
+  correo: string;
+  /** E.164, listo para WhatsApp. */
+  telefono: string;
+}
+
 export interface ResultadoNotificacion {
-  whatsapp: { enviado: boolean; error?: string; telefonos: string[] };
+  whatsapp: { enviado: boolean; error?: string; contactos: Contacto[] };
   email: { enviado: boolean; error?: string; destinatarios: string[] };
 }
 
@@ -42,12 +50,12 @@ export class PlanningNotificationService {
       .lean();
     if (!workspace) throw new Error("WORKSPACE_NOT_FOUND");
 
-    const { correos, telefonos, sinTelefono } = await this.destinatarios(workspace._id);
+    const { correos, contactos, sinTelefono } = await this.destinatarios(workspace._id);
     const enlace = `${APP_URL}${RUTA_DESDE_WHATSAPP}`;
     const total = planning.items?.length ?? 0;
 
     const [whatsapp, email] = await Promise.all([
-      this.enviarWhatsapp(workspace, telefonos, sinTelefono, enlace, total),
+      this.enviarWhatsapp(workspace, contactos, sinTelefono, enlace, total),
       this.enviarEmail(correos, workspace.name, enlace, total),
     ]);
 
@@ -68,7 +76,7 @@ export class PlanningNotificationService {
     });
     await planning.save();
 
-    return { whatsapp: { ...whatsapp, telefonos }, email: { ...email, destinatarios: correos } };
+    return { whatsapp: { ...whatsapp, contactos }, email: { ...email, destinatarios: correos } };
   }
 
   /**
@@ -79,9 +87,11 @@ export class PlanningNotificationService {
    * campo que no existe en el esquema, asi que el WhatsApp habria fallado
    * siempre con "el entorno no tiene telefono".
    */
-  private async destinatarios(
-    workspaceId: any
-  ): Promise<{ correos: string[]; telefonos: string[]; sinTelefono: string[] }> {
+  private async destinatarios(workspaceId: any): Promise<{
+    correos: string[];
+    contactos: Contacto[];
+    sinTelefono: string[];
+  }> {
     const usuarios = await models.users
       .find({
         isInternal: { $ne: true },
@@ -107,9 +117,16 @@ export class PlanningNotificationService {
     return {
       // El correo si va a todos: leerlo no obliga a nadie a hacer nada.
       correos: usuarios.map((u: any) => u.email).filter(Boolean),
-      telefonos: conTelefono.map((u: any) =>
-        normalizarTelefono(u.phoneNumber, u.phoneExtension || "593").e164
-      ).filter(Boolean),
+      // Un contacto completo por administrador: GHL crea o actualiza el
+      // contacto con estos datos, asi que mandar solo el numero obligaba a
+      // mantener la ficha a mano en dos sitios.
+      contactos: conTelefono
+        .map((u: any) => {
+          const { nombre, apellido } = partirNombre(u.name, u.lastName);
+          const tel = normalizarTelefono(u.phoneNumber, u.phoneExtension || "593");
+          return { nombre, apellido, correo: u.email, telefono: tel.e164 };
+        })
+        .filter((c) => c.telefono),
       sinTelefono: admins
         .filter((u: any) => !u.phoneNumber)
         .map((u: any) => u.name || u.email),
@@ -122,7 +139,7 @@ export class PlanningNotificationService {
    */
   private async enviarWhatsapp(
     workspace: any,
-    telefonos: string[],
+    contactos: Contacto[],
     faltantes: string[],
     enlace: string,
     totalVideos: number
@@ -136,7 +153,7 @@ export class PlanningNotificationService {
       };
     }
 
-    if (!telefonos.length) {
+    if (!contactos.length) {
       const quienes = faltantes.length ? ` Sin teléfono: ${faltantes.join(", ")}.` : "";
       return {
         enviado: false,
@@ -151,7 +168,8 @@ export class PlanningNotificationService {
         {
           workspaceId: String(workspace._id),
           cliente: workspace.name,
-          telefonos,
+          // Uno por administrador, con todo lo que GHL necesita del contacto.
+          contactos,
           totalVideos,
           enlace,
         },

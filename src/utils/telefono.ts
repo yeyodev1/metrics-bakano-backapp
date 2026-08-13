@@ -81,3 +81,23 @@ export function normalizarTelefono(entrada: string, prefijo: string): TelefonoNo
 
   return { valido: true, e164, legible: `+${pais.prefijo} ${grupos}` };
 }
+
+/**
+ * Nombre y apellido separados, que es como los pide GoHighLevel.
+ *
+ * Si hay apellido cargado se usa tal cual. Si no, se parte `name` por el
+ * primer espacio: es una aproximación, y por eso existe el campo explícito
+ * para corregirla cuando el nombre es compuesto.
+ */
+export function partirNombre(
+  name?: string,
+  lastName?: string
+): { nombre: string; apellido: string } {
+  const completo = (name || "").trim();
+  if (lastName?.trim()) {
+    return { nombre: completo, apellido: lastName.trim() };
+  }
+  const partes = completo.split(/\s+/).filter(Boolean);
+  if (partes.length <= 1) return { nombre: completo, apellido: "" };
+  return { nombre: partes[0]!, apellido: partes.slice(1).join(" ") };
+}
