@@ -65,6 +65,61 @@ export class WorkspaceService {
     return workspace;
   }
 
+  /**
+   * Conteos del panel de superadmin.
+   *
+   * El listado viene paginado de 10 en 10, asi que la pantalla no podia decir
+   * cuantos entornos hay activos ni cuantos siguen sin perfil de marca sin
+   * traerse todos los documentos. Un $facet lo resuelve en una sola consulta.
+   */
+  async getWorkspacesSummary() {
+    const [resumen] = await models.workspaces.aggregate([
+      {
+        $facet: {
+          total: [{ $count: "n" }],
+          activos: [{ $match: { isActive: true } }, { $count: "n" }],
+          // El perfil cuenta como puesto solo si tiene descripcion: el
+          // subdocumento existe vacio desde que se crea el entorno.
+          sinPerfilMarca: [
+            {
+              $match: {
+                $or: [
+                  { "brandProfile.descripcion": { $exists: false } },
+                  { "brandProfile.descripcion": "" },
+                ],
+              },
+            },
+            { $count: "n" },
+          ],
+          sinMetaVinculada: [
+            {
+              $match: {
+                $or: [
+                  { metaAdAccountId: { $exists: false } },
+                  { metaAdAccountId: null },
+                  { metaAdAccountId: "" },
+                ],
+              },
+            },
+            { $count: "n" },
+          ],
+        },
+      },
+    ]);
+
+    const n = (arr?: Array<{ n: number }>) => arr?.[0]?.n ?? 0;
+    const total = n(resumen?.total);
+    const activos = n(resumen?.activos);
+
+    return {
+      total,
+      activos,
+      inactivos: total - activos,
+      sinPerfilMarca: n(resumen?.sinPerfilMarca),
+      sinMetaVinculada: n(resumen?.sinMetaVinculada),
+    };
+  }
+
   async listWorkspaces(options: { search?: string; page?: number; limit?: number } = {}) {
     const { search, page = 1, limit = 10 } = options;
     const skip = (page - 1) * limit;

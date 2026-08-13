@@ -76,6 +76,22 @@ export async function listWorkspaces(req: AuthRequest, res: Response, next: Next
   }
 }
 
+/** Números del panel de superadmin, en una sola consulta. */
+export async function getWorkspacesSummary(
+  _req: AuthRequest,
+  res: Response,
+  next: NextFunction
+) {
+  try {
+    const summary = await workspaceService.getWorkspacesSummary();
+    res.status(HttpStatusCode.Ok).send({ message: "Resumen de entornos.", summary });
+    return;
+  } catch (error) {
+    next(error);
+    return;
+  }
+}
+
 export async function getWorkspace(req: AuthRequest, res: Response, next: NextFunction) {
   try {
     const workspaceId = req.params["workspaceId"] as string;
