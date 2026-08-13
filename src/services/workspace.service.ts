@@ -91,13 +91,16 @@ export class WorkspaceService {
             },
             { $count: "n" },
           ],
+          // El campo real es metaAds.adAccountId. Medir "metaAdAccountId",
+          // que no existe en el esquema, daba 110 de 110 sin vincular: una
+          // alarma falsa que habria mandado al equipo a revisar 110 entornos.
           sinMetaVinculada: [
             {
               $match: {
                 $or: [
-                  { metaAdAccountId: { $exists: false } },
-                  { metaAdAccountId: null },
-                  { metaAdAccountId: "" },
+                  { "metaAds.adAccountId": { $exists: false } },
+                  { "metaAds.adAccountId": null },
+                  { "metaAds.adAccountId": "" },
                 ],
               },
             },
@@ -111,12 +114,20 @@ export class WorkspaceService {
     const total = n(resumen?.total);
     const activos = n(resumen?.activos);
 
+    // El panel mostraba este numero descargando TODOS los colaboradores
+    // (168 kB, 1.2 s) para filtrarlos en el navegador. Contar es trabajo del
+    // motor de base de datos.
+    const traffickers = await models.users.countDocuments({
+      internalRole: "trafficker",
+    });
+
     return {
       total,
       activos,
       inactivos: total - activos,
       sinPerfilMarca: n(resumen?.sinPerfilMarca),
       sinMetaVinculada: n(resumen?.sinMetaVinculada),
+      traffickers,
     };
   }
 
