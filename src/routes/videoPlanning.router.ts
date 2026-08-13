@@ -3,6 +3,8 @@ import {
   notificarPlanificacion,
   historialNotificaciones,
   planificacionPendiente,
+  destinatariosPlanificacion,
+  guardarTelefonoDestinatario,
 } from "../controllers/planningNotification.controller";
 import { authMiddleware } from "../middlewares/auth.middleware";
 import { internalOrSuperadminMiddleware } from "../middlewares/internalOrSuperadmin.middleware";
@@ -152,8 +154,37 @@ videoPlanningRouter.post(
 );
 
 // ── Avisos al cliente ──────────────────────────────────────────────────────
-videoPlanningRouter.get("/pending-approval", planificacionPendiente);
-videoPlanningRouter.post("/:planningId/notify", notificarPlanificacion);
-videoPlanningRouter.get("/:planningId/notifications", historialNotificaciones);
+/**
+ * Estas tres rutas nacieron sin `authMiddleware`. Notificar dispara WhatsApp
+ * reales al cliente, asi que cualquiera con un id de planificacion podia
+ * llenarle el chat. Notificar y editar telefonos son cosa del equipo interno;
+ * resolver la pendiente la usa el propio cliente al llegar desde el enlace,
+ * asi que a esa le basta con estar logueado.
+ */
+videoPlanningRouter.get("/pending-approval", authMiddleware, planificacionPendiente);
+videoPlanningRouter.post(
+  "/:planningId/notify",
+  authMiddleware,
+  internalOrSuperadminMiddleware,
+  notificarPlanificacion
+);
+videoPlanningRouter.get(
+  "/:planningId/recipients",
+  authMiddleware,
+  internalOrSuperadminMiddleware,
+  destinatariosPlanificacion
+);
+videoPlanningRouter.patch(
+  "/:planningId/recipients/:userId/phone",
+  authMiddleware,
+  internalOrSuperadminMiddleware,
+  guardarTelefonoDestinatario
+);
+videoPlanningRouter.get(
+  "/:planningId/notifications",
+  authMiddleware,
+  internalOrSuperadminMiddleware,
+  historialNotificaciones
+);
 
 export { planningEntriesRouter, videoPlanningRouter };

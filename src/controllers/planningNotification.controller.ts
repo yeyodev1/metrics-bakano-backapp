@@ -44,6 +44,73 @@ export async function notificarPlanificacion(
   }
 }
 
+/** Quién va a recibir qué, antes de pulsar el botón. */
+export async function destinatariosPlanificacion(
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+) {
+  try {
+    const planningId = req.params["planningId"] as string;
+    const preview = await planningNotificationService.previewDestinatarios(planningId);
+    res.status(HttpStatusCode.Ok).send(preview);
+    return;
+  } catch (error: any) {
+    if (error.message === "NOT_FOUND" || error.message === "WORKSPACE_NOT_FOUND") {
+      res.status(HttpStatusCode.NotFound).send({ message: "Planificación no encontrada." });
+      return;
+    }
+    next(error);
+    return;
+  }
+}
+
+/** Cargar el teléfono de un destinatario sin salir de la pantalla de avisos. */
+export async function guardarTelefonoDestinatario(
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+) {
+  try {
+    const planningId = req.params["planningId"] as string;
+    const userId = req.params["userId"] as string;
+    const { phoneNumber, phoneExtension } = req.body ?? {};
+
+    if (!phoneNumber) {
+      res.status(HttpStatusCode.BadRequest).send({ message: "Falta el número." });
+      return;
+    }
+
+    const usuario = await planningNotificationService.guardarTelefono(
+      planningId,
+      userId,
+      String(phoneNumber),
+      String(phoneExtension || "593")
+    );
+    res.status(HttpStatusCode.Ok).send({ message: "Teléfono guardado.", usuario });
+    return;
+  } catch (error: any) {
+    if (error.message === "TELEFONO_INVALIDO") {
+      res.status(HttpStatusCode.BadRequest).send({
+        message: "Ese número no es válido para el país seleccionado.",
+      });
+      return;
+    }
+    if (error.message === "USER_NOT_IN_WORKSPACE") {
+      res.status(HttpStatusCode.Forbidden).send({
+        message: "Ese usuario no pertenece al entorno de esta planificación.",
+      });
+      return;
+    }
+    if (error.message === "NOT_FOUND" || error.message === "USER_NOT_FOUND") {
+      res.status(HttpStatusCode.NotFound).send({ message: "No encontrado." });
+      return;
+    }
+    next(error);
+    return;
+  }
+}
+
 /** Historial de avisos, para la auditoría de la vista. */
 export async function historialNotificaciones(
   req: AuthRequest,

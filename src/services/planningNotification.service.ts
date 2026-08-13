@@ -32,6 +32,27 @@ export interface Contacto {
   telefono: string;
 }
 
+/**
+ * Un usuario del entorno con sus dos vias ya resueltas.
+ *
+ * La pantalla necesita el id y el telefono sin normalizar para poder editarlo;
+ * el envio necesita el E.164. Los dos salen del mismo sitio a proposito: si la
+ * pantalla lista una cosa y el envio manda otra, el aviso es una loteria.
+ */
+export interface UsuarioAviso {
+  id: string;
+  nombre: string;
+  apellido: string;
+  correo: string;
+  /** Tal como esta guardado en la ficha, sin normalizar. */
+  telefono: string;
+  /** Prefijo de pais guardado. Ecuador por defecto. */
+  extension: string;
+  /** Listo para WhatsApp, o vacio si no hay numero usable. */
+  telefonoE164: string;
+  esAdmin: boolean;
+}
+
 export interface ResultadoNotificacion {
   tipoAviso: TipoAviso;
   numeroEnvio: number;
@@ -124,13 +145,50 @@ export class PlanningNotificationService {
     contactos: Contacto[];
     sinTelefono: string[];
   }> {
+    const usuarios = await this.usuariosDelEntorno(workspaceId);
+    const admins = usuarios.filter((u) => u.esAdmin);
+
+    return {
+      // El correo si va a todos: leerlo no obliga a nadie a hacer nada.
+      correos: usuarios.map((u) => u.correo).filter(Boolean),
+      // Un contacto completo por administrador: GHL crea o actualiza el
+      // contacto con estos datos, asi que mandar solo el numero obligaba a
+      // mantener la ficha a mano en dos sitios.
+      contactos: admins
+        .filter((u) => u.telefonoE164)
+        .map((u) => ({
+          nombre: u.nombre,
+          apellido: u.apellido,
+          correo: u.correo,
+          telefono: u.telefonoE164,
+        })),
+      /**
+       * Se mide por el E.164, no por "tiene algo escrito": un numero que no se
+       * puede normalizar desaparecia de las dos listas y nadie se enteraba de
+       * que a esa persona no le iba a llegar nada.
+       */
+      sinTelefono: admins
+        .filter((u) => !u.telefonoE164)
+        .map((u) => u.nombre || u.correo),
+    };
+  }
+
+  /**
+   * Los usuarios del entorno, ya clasificados por via.
+   *
+   * Preview y envio salen de aqui. `lastName` va en el select porque
+   * `partirNombre` lo lee: sin el, el campo estaba siempre vacio y el apellido
+   * volvia a deducirse partiendo el nombre, que es justo lo que se queria
+   * evitar con nombres compuestos.
+   */
+  private async usuariosDelEntorno(workspaceId: any): Promise<UsuarioAviso[]> {
     const usuarios = await models.users
       .find({
         isInternal: { $ne: true },
         isActive: { $ne: false },
         $or: [{ "workspaces.workspaceId": workspaceId }, { workspaceId }],
       })
-      .select("name email phoneNumber phoneExtension workspaces")
+      .select("name lastName email phoneNumber phoneExtension workspaces")
       .lean();
 
     /**
@@ -143,25 +201,113 @@ export class PlanningNotificationService {
         (w: any) => String(w.workspaceId) === String(workspaceId) && w.role === "admin"
       );
 
-    const admins = usuarios.filter(esAdmin);
-    const conTelefono = admins.filter((u: any) => u.phoneNumber);
+    return usuarios.map((u: any) => {
+      const { nombre, apellido } = partirNombre(u.name, u.lastName);
+      const extension = u.phoneExtension || "593";
+      const tel = u.phoneNumber ? normalizarTelefono(u.phoneNumber, extension) : null;
+
+      return {
+        id: String(u._id),
+        nombre,
+        apellido,
+        correo: u.email,
+        telefono: u.phoneNumber || "",
+        extension,
+        telefonoE164: tel?.valido ? tel.e164 : "",
+        esAdmin: esAdmin(u),
+      };
+    });
+  }
+
+  /**
+   * Lo que la pantalla muestra antes de disparar: quien recibe correo, quien
+   * recibe WhatsApp y a quien le falta el numero.
+   *
+   * Existe porque el boton mandaba a ciegas. Quien notifica tiene que poder
+   * ver a quien le va a llegar antes de que salga, no despues.
+   */
+  async previewDestinatarios(planningId: string): Promise<{
+    entorno: string;
+    totalVideos: number;
+    tipoAviso: TipoAviso;
+    numeroEnvio: number;
+    puedeNotificar: boolean;
+    correo: UsuarioAviso[];
+    whatsapp: UsuarioAviso[];
+  }> {
+    const planning: any = await models.videoPlanning.findById(planningId).lean();
+    if (!planning) throw new Error("NOT_FOUND");
+
+    const workspace: any = await models.workspaces
+      .findById(planning.workspaceId)
+      .lean();
+    if (!workspace) throw new Error("WORKSPACE_NOT_FOUND");
+
+    const usuarios = await this.usuariosDelEntorno(workspace._id);
+    const { tipo, numeroEnvio } = this.deducirTipo(planning);
 
     return {
-      // El correo si va a todos: leerlo no obliga a nadie a hacer nada.
-      correos: usuarios.map((u: any) => u.email).filter(Boolean),
-      // Un contacto completo por administrador: GHL crea o actualiza el
-      // contacto con estos datos, asi que mandar solo el numero obligaba a
-      // mantener la ficha a mano en dos sitios.
-      contactos: conTelefono
-        .map((u: any) => {
-          const { nombre, apellido } = partirNombre(u.name, u.lastName);
-          const tel = normalizarTelefono(u.phoneNumber, u.phoneExtension || "593");
-          return { nombre, apellido, correo: u.email, telefono: tel.e164 };
-        })
-        .filter((c) => c.telefono),
-      sinTelefono: admins
-        .filter((u: any) => !u.phoneNumber)
-        .map((u: any) => u.name || u.email),
+      entorno: workspace.name,
+      totalVideos: planning.items?.length ?? 0,
+      tipoAviso: tipo,
+      numeroEnvio,
+      puedeNotificar: Boolean(planning.notificacionAbierta),
+      correo: usuarios,
+      whatsapp: usuarios.filter((u) => u.esAdmin),
+    };
+  }
+
+  /**
+   * Guarda el telefono en la ficha del usuario desde la misma pantalla.
+   *
+   * Se guarda en el usuario, no en la planificacion: el numero sirve para el
+   * proximo aviso y para el siguiente mes. Escribirlo cada vez seria pedirle
+   * al equipo que mantenga a mano un dato que ya tiene sitio.
+   */
+  async guardarTelefono(
+    planningId: string,
+    userId: string,
+    phoneNumber: string,
+    phoneExtension: string
+  ): Promise<UsuarioAviso> {
+    const planning: any = await models.videoPlanning
+      .findById(planningId)
+      .select("workspaceId")
+      .lean();
+    if (!planning) throw new Error("NOT_FOUND");
+
+    const user: any = await models.users.findById(userId);
+    if (!user) throw new Error("USER_NOT_FOUND");
+
+    // Que el id sea valido no basta: tiene que ser gente de este entorno, o
+    // esta ruta serviria para editar el telefono de cualquier usuario.
+    const pertenece =
+      (user.workspaces ?? []).some(
+        (w: any) => String(w.workspaceId) === String(planning.workspaceId)
+      ) || String(user.workspaceId ?? "") === String(planning.workspaceId);
+    if (!pertenece) throw new Error("USER_NOT_IN_WORKSPACE");
+
+    const extension = phoneExtension || "593";
+    const tel = normalizarTelefono(phoneNumber, extension);
+    if (!tel.valido) throw new Error("TELEFONO_INVALIDO");
+
+    user.phoneNumber = phoneNumber;
+    user.phoneExtension = extension;
+    await user.save();
+
+    const { nombre, apellido } = partirNombre(user.name, user.lastName);
+    return {
+      id: String(user._id),
+      nombre,
+      apellido,
+      correo: user.email,
+      telefono: phoneNumber,
+      extension,
+      telefonoE164: tel.e164,
+      esAdmin: (user.workspaces ?? []).some(
+        (w: any) =>
+          String(w.workspaceId) === String(planning.workspaceId) && w.role === "admin"
+      ),
     };
   }
 
