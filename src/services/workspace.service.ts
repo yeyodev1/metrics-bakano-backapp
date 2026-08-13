@@ -65,13 +65,106 @@ export class WorkspaceService {
     return workspace;
   }
 
-  async listWorkspaces(options: { search?: string; page?: number; limit?: number } = {}) {
-    const { search, page = 1, limit = 10 } = options;
+  /**
+   * Conteos del panel de superadmin.
+   *
+   * El listado viene paginado de 10 en 10, asi que la pantalla no podia decir
+   * cuantos entornos hay activos ni cuantos siguen sin perfil de marca sin
+   * traerse todos los documentos. Un $facet lo resuelve en una sola consulta.
+   */
+  async getWorkspacesSummary() {
+    const [resumen] = await models.workspaces.aggregate([
+      {
+        $facet: {
+          total: [{ $count: "n" }],
+          activos: [{ $match: { isActive: true } }, { $count: "n" }],
+          // El perfil cuenta como puesto solo si tiene descripcion: el
+          // subdocumento existe vacio desde que se crea el entorno.
+          sinPerfilMarca: [
+            {
+              $match: {
+                $or: [
+                  { "brandProfile.descripcion": { $exists: false } },
+                  { "brandProfile.descripcion": "" },
+                ],
+              },
+            },
+            { $count: "n" },
+          ],
+          // El campo real es metaAds.adAccountId. Medir "metaAdAccountId",
+          // que no existe en el esquema, daba 110 de 110 sin vincular: una
+          // alarma falsa que habria mandado al equipo a revisar 110 entornos.
+          sinMetaVinculada: [
+            {
+              $match: {
+                $or: [
+                  { "metaAds.adAccountId": { $exists: false } },
+                  { "metaAds.adAccountId": null },
+                  { "metaAds.adAccountId": "" },
+                ],
+              },
+            },
+            { $count: "n" },
+          ],
+        },
+      },
+    ]);
+
+    const n = (arr?: Array<{ n: number }>) => arr?.[0]?.n ?? 0;
+    const total = n(resumen?.total);
+    const activos = n(resumen?.activos);
+
+    // El panel mostraba este numero descargando TODOS los colaboradores
+    // (168 kB, 1.2 s) para filtrarlos en el navegador. Contar es trabajo del
+    // motor de base de datos.
+    const traffickers = await models.users.countDocuments({
+      internalRole: "trafficker",
+    });
+
+    return {
+      total,
+      activos,
+      inactivos: total - activos,
+      sinPerfilMarca: n(resumen?.sinPerfilMarca),
+      sinMetaVinculada: n(resumen?.sinMetaVinculada),
+      traffickers,
+    };
+  }
+
+  async listWorkspaces(
+    options: { search?: string; page?: number; limit?: number; minimal?: boolean } = {}
+  ) {
+    const { search, page = 1, limit = 10, minimal = false } = options;
     const skip = (page - 1) * limit;
 
     const query: any = {};
     if (search) {
       query.name = { $regex: search, $options: "i" };
+    }
+
+    /**
+     * Los selectores solo necesitan id y nombre. Sin esto, pintar un
+     * desplegable costaba 1.28 MB: cien documentos completos con perfil de
+     * marca, recursos y los tokens de Meta dentro.
+     */
+    if (minimal) {
+      const [lista, total] = await Promise.all([
+        models.workspaces
+          .find(query, { name: 1, isActive: 1 })
+          .sort({ name: 1 })
+          .skip(skip)
+          .limit(limit)
+          .lean(),
+        models.workspaces.countDocuments(query),
+      ]);
+
+      return {
+        workspaces: lista,
+        total,
+        page,
+        limit,
+        hasMore: total > skip + lista.length,
+      };
     }
 
     const [workspaces, total] = await Promise.all([
@@ -275,7 +368,16 @@ export class WorkspaceService {
     };
   }
 
-  async listAllCollaborators(search?: string, workspaceId?: string) {
+  /**
+   * @param soloAdmins deja fuera al equipo de Bakano y a los colaboradores:
+   *   devuelve solo a quien es administrador de la cuenta de algun cliente.
+   *   La pestana "Admins de cuenta" listaba a todo el mundo, que es otra cosa.
+   */
+  async listAllCollaborators(
+    search?: string,
+    workspaceId?: string,
+    soloAdmins = false
+  ) {
     // Only users who are not superadmins and have workspaces assigned or were legacy workspace owners
     const query: any = { 
       role: { $ne: "superadmin" },
@@ -284,6 +386,12 @@ export class WorkspaceService {
         { workspaceId: { $exists: true } }
       ]
     };
+
+    if (soloAdmins) {
+      query.$and = query.$and || [];
+      query.$and.push({ isInternal: { $ne: true } });
+      query.$and.push({ "workspaces.role": "admin" });
+    }
 
     if (search) {
       const searchRegex = new RegExp(search, "i");
@@ -750,12 +858,31 @@ export class WorkspaceService {
     return withoutPassword;
   }
 
-  async toggleWorkspaceActive(workspaceId: string, isActive: boolean) {
+  async toggleWorkspaceActive(
+    workspaceId: string,
+    isActive: boolean,
+    desactivacion?: { motivo: string; nota?: string; porNombre?: string }
+  ) {
     if (!Types.ObjectId.isValid(workspaceId)) throw new Error("INVALID_ID");
+
+    // Al desactivar se exige motivo; al reactivar se limpia, porque si no un
+    // entorno activo seguiria mostrando "suspendido por falta de pago".
+    const cambios: any = { isActive };
+    if (isActive) {
+      cambios.desactivacion = null;
+    } else {
+      if (!desactivacion?.motivo) throw new Error("MOTIVO_REQUERIDO");
+      cambios.desactivacion = {
+        motivo: desactivacion.motivo,
+        nota: desactivacion.nota,
+        porNombre: desactivacion.porNombre,
+        fecha: new Date(),
+      };
+    }
 
     const workspace = await models.workspaces.findByIdAndUpdate(
       workspaceId,
-      { isActive },
+      cambios,
       { new: true }
     );
     if (!workspace) throw new Error("NOT_FOUND");

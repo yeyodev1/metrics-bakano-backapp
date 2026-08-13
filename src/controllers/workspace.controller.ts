@@ -38,9 +38,11 @@ export async function listWorkspaces(req: AuthRequest, res: Response, next: Next
     const search = req.query["search"] as string;
     const page = parseInt(req.query["page"] as string) || 1;
     const limit = parseInt(req.query["limit"] as string) || 10;
+    // Selectores: solo id y nombre. Ver listWorkspaces.
+    const minimal = req.query["minimal"] === "true";
 
     if (role === 'superadmin') {
-      const data = await workspaceService.listWorkspaces({ search, page, limit });
+      const data = await workspaceService.listWorkspaces({ search, page, limit, minimal });
       res.status(HttpStatusCode.Ok).send({
         message: "Workspaces retrieved successfully.",
         workspaces: data.workspaces,
@@ -73,6 +75,22 @@ export async function listWorkspaces(req: AuthRequest, res: Response, next: Next
   } catch (error) {
     console.error("listWorkspaces error:", error);
     next(error);
+  }
+}
+
+/** Números del panel de superadmin, en una sola consulta. */
+export async function getWorkspacesSummary(
+  _req: AuthRequest,
+  res: Response,
+  next: NextFunction
+) {
+  try {
+    const summary = await workspaceService.getWorkspacesSummary();
+    res.status(HttpStatusCode.Ok).send({ message: "Resumen de entornos.", summary });
+    return;
+  } catch (error) {
+    next(error);
+    return;
   }
 }
 
@@ -123,17 +141,27 @@ export async function updateWorkspace(req: AuthRequest, res: Response, next: Nex
 export async function toggleWorkspaceActive(req: AuthRequest, res: Response, next: NextFunction) {
   try {
     const workspaceId = req.params["workspaceId"] as string;
-    const { isActive } = req.body;
+    const { isActive, motivo, nota } = req.body;
     if (typeof isActive !== "boolean") {
       res.status(HttpStatusCode.BadRequest).send({ message: "isActive debe ser un booleano." });
       return;
     }
-    const workspace = await workspaceService.toggleWorkspaceActive(workspaceId, isActive);
+    const workspace = await workspaceService.toggleWorkspaceActive(workspaceId, isActive, {
+      motivo,
+      nota,
+      porNombre: req.user?.email,
+    });
     res.status(HttpStatusCode.Ok).send({
       message: `Entorno ${isActive ? "activado" : "desactivado"} correctamente.`,
       workspace,
     });
   } catch (error: any) {
+    if (error.message === "MOTIVO_REQUERIDO") {
+      res.status(HttpStatusCode.BadRequest).send({
+        message: "Indica por qué se desactiva el entorno.",
+      });
+      return;
+    }
     if (error.message === "INVALID_ID" || error.message === "NOT_FOUND") {
       res.status(HttpStatusCode.NotFound).send({ message: "Entorno no encontrado." });
       return;
@@ -162,7 +190,8 @@ export async function listAllCollaborators(req: AuthRequest, res: Response, next
   try {
     const search = req.query["search"] as string;
     const workspaceId = req.query["workspaceId"] as string;
-    const users = await workspaceService.listAllCollaborators(search, workspaceId);
+    const soloAdmins = req.query["onlyAccountAdmins"] === "true";
+    const users = await workspaceService.listAllCollaborators(search, workspaceId, soloAdmins);
     res.status(HttpStatusCode.Ok).send({ message: "Collaborators retrieved successfully.", users });
     return;
   } catch (error) {

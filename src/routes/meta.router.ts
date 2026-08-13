@@ -16,6 +16,13 @@ metaRouter.use(authMiddleware);
 // Endpoint to start authentication (exchange token)
 metaRouter.post("/authenticate", metaController.authenticateMeta);
 
+// Diagnostico: que permisos tiene de verdad el token guardado de un entorno.
+metaRouter.get(
+  "/:workspaceId/diagnose",
+  workspaceAccessMiddleware,
+  metaController.diagnoseMetaConnection
+);
+
 // Endpoint to save selected page/account (Admin/Superadmin only)
 metaRouter.post("/save-integration", workspaceAdminMiddleware, metaController.saveMetaIntegration);
 
@@ -32,6 +39,7 @@ metaRouter.post("/global/refresh-tokens", superadminMiddleware, metaController.r
 
 // Read-only endpoints for Ads data (Access to Collaborators)
 metaRouter.get("/:workspaceId/adaccounts", workspaceAccessMiddleware, metaController.getAdAccounts);
+metaRouter.get("/:workspaceId/ads-activity", workspaceAccessMiddleware, metaController.getAdsActivity);
 metaRouter.get("/:workspaceId/ads-insights", workspaceAccessMiddleware, metaController.getAdsInsights);
 metaRouter.get("/:workspaceId/organic-insights", workspaceAccessMiddleware, metaController.getOrganicInsights);
 metaRouter.get("/:workspaceId/unified-dashboard", workspaceAccessMiddleware, metaController.getUnifiedDashboard);

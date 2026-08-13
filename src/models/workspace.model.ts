@@ -62,6 +62,17 @@ export interface IWorkspace extends Document {
   name: string;
   adminId?: Types.ObjectId;
   isActive: boolean;
+  /**
+   * Por que se desactivo, quien lo hizo y cuando. Antes un entorno inactivo no
+   * dejaba rastro: nadie podia saber si era falta de pago, fin de contrato o
+   * una pausa acordada sin preguntar por WhatsApp.
+   */
+  desactivacion?: {
+    motivo: "falta_de_pago" | "fin_de_contrato" | "pausa_acordada" | "otro";
+    nota?: string;
+    fecha: Date;
+    porNombre?: string;
+  };
   metaAds?: {
     accessToken: string; // Long-lived user token
     pageAccessToken?: string; // Token específico de la página
@@ -182,6 +193,19 @@ const WorkspaceSchema = new Schema<IWorkspace>(
     isActive: {
       type: Boolean,
       default: true,
+    },
+    desactivacion: {
+      type: {
+        motivo: {
+          type: String,
+          enum: ["falta_de_pago", "fin_de_contrato", "pausa_acordada", "otro"],
+          required: true,
+        },
+        nota: { type: String, trim: true },
+        fecha: { type: Date, default: Date.now },
+        porNombre: { type: String, trim: true },
+      },
+      default: null,
     },
     metaAds: {
       accessToken: String,

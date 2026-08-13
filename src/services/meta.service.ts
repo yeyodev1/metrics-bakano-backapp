@@ -37,6 +37,143 @@ export class MetaService {
   }
   private readonly graphUrl = "https://graph.facebook.com/v22.0";
 
+  /**
+   * Resumen compacto de la actividad publicitaria de un entorno.
+   *
+   * El panel de trafficker mostraba solo gasto y facturacion: un cliente con
+   * campanas corriendo se veia igual que uno parado, porque el gasto del mes
+   * puede ser cero por muchas razones. Esto responde la pregunta real: quien
+   * tiene anuncios ACTIVOS ahora mismo y como van.
+   */
+  async getAdsActivity(
+    workspaceId: string,
+    year: number,
+    month: number
+  ): Promise<{
+    conectado: boolean;
+    activos: number;
+    pausados: number;
+    impresiones: number;
+    clics: number;
+    gasto: number;
+    ctr: number | null;
+    cpc: number | null;
+    error?: string;
+  }> {
+    const vacio = {
+      conectado: false,
+      activos: 0,
+      pausados: 0,
+      impresiones: 0,
+      clics: 0,
+      gasto: 0,
+      ctr: null,
+      cpc: null,
+    };
+
+    const workspace: any = await models.workspaces.findById(workspaceId).lean();
+    const adAccountId = workspace?.metaAds?.adAccountId;
+    const token = workspace?.metaAds?.accessToken;
+    if (!adAccountId || !token) return vacio;
+
+    const desde = new Date(Date.UTC(year, month - 1, 1)).toISOString().slice(0, 10);
+    const hasta = new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10);
+
+    try {
+      const [estados, metricas] = await Promise.all([
+        axios.get(`${this.graphUrl}/act_${adAccountId}/ads`, {
+          params: { access_token: token, fields: "effective_status", limit: 500 },
+        }),
+        axios.get(`${this.graphUrl}/act_${adAccountId}/insights`, {
+          params: {
+            access_token: token,
+            time_range: JSON.stringify({ since: desde, until: hasta }),
+            fields: "spend,impressions,clicks",
+          },
+        }),
+      ]);
+
+      const filas = estados.data?.data ?? [];
+      const activos = filas.filter((a: any) => a.effective_status === "ACTIVE").length;
+
+      const m = metricas.data?.data?.[0] ?? {};
+      const impresiones = Number(m.impressions || 0);
+      const clics = Number(m.clicks || 0);
+      const gasto = Number(m.spend || 0);
+
+      return {
+        conectado: true,
+        activos,
+        pausados: filas.length - activos,
+        impresiones,
+        clics,
+        gasto,
+        ctr: impresiones > 0 ? (clics / impresiones) * 100 : null,
+        cpc: clics > 0 ? gasto / clics : null,
+      };
+    } catch (error: any) {
+      // Un entorno sin permisos no puede tumbar la lista entera: se devuelve el
+      // motivo y la fila lo muestra en vez de quedarse en blanco.
+      return { ...vacio, conectado: true, error: this.explicarErrorMeta(error.response?.data) };
+    }
+  }
+
+
+  /**
+   * Permisos que el token tiene concedidos de verdad.
+   *
+   * Pedir un scope en el login no garantiza tenerlo: el usuario puede
+   * desmarcarlo, y ads_read sobre cuentas de terceros exige Acceso Avanzado
+   * aprobado en la revision de la app. Sin esto, la unica pista era un error
+   * 500 con el JSON crudo de Meta.
+   */
+  async getGrantedPermissions(accessToken: string): Promise<{
+    concedidos: string[];
+    rechazados: string[];
+  }> {
+    try {
+      const { data } = await axios.get(`${this.graphUrl}/me/permissions`, {
+        params: { access_token: accessToken },
+      });
+      const filas: Array<{ permission: string; status: string }> = data?.data ?? [];
+      return {
+        concedidos: filas.filter((f) => f.status === "granted").map((f) => f.permission),
+        rechazados: filas.filter((f) => f.status !== "granted").map((f) => f.permission),
+      };
+    } catch {
+      return { concedidos: [], rechazados: [] };
+    }
+  }
+
+  /**
+   * Traduce el error de Meta a algo accionable.
+   *
+   * El codigo 200 con "has NOT grant ads_management or ads_read" NO se arregla
+   * tocando los scopes del codigo: ads_read ya se pide. Significa una de tres
+   * cosas, y ninguna se resuelve desde aqui.
+   */
+  explicarErrorMeta(metaError: any): string {
+    const codigo = metaError?.error?.code;
+    const mensaje: string = metaError?.error?.message ?? "";
+
+    if (codigo === 200 && /ads_management|ads_read/.test(mensaje)) {
+      return [
+        "Meta no autoriza leer esta cuenta publicitaria.",
+        "Revisa, en este orden:",
+        "1) que quien conecto tenga un rol asignado sobre esa cuenta en el Business Manager;",
+        "2) que la app tenga Acceso Avanzado a ads_read aprobado (con Acceso Estandar solo funcionan las cuentas propias);",
+        "3) que la conexion se haya hecho DESPUES de agregar ads_read: un token viejo no gana permisos solo, hay que volver a conectar.",
+      ].join(" ");
+    }
+
+    if (codigo === 190) {
+      return "La conexion con Meta caduco o fue revocada. Hay que volver a conectar la cuenta.";
+    }
+
+    return mensaje || "Error desconocido de Meta.";
+  }
+
+
   private get encryptionKey() {
     const secret = process.env.META_TOKEN_ENCRYPTION_KEY || process.env.JWT_SECRET;
     if (!secret) {
@@ -1244,7 +1381,7 @@ export class MetaService {
     } catch (error: any) {
       const metaError = error.response?.data || error.message;
       console.error("Meta Ads Insights Error:", metaError);
-      throw new Error(`Failed to fetch Ads insights. Meta Error: ${JSON.stringify(metaError)}`);
+      throw new Error(this.explicarErrorMeta(metaError));
     }
   }
 

@@ -9,6 +9,7 @@ import { ghlController } from "../controllers/ghl.controller";
 import {
   createWorkspace,
   listWorkspaces,
+  getWorkspacesSummary,
   getWorkspace,
   updateWorkspace,
   toggleWorkspaceActive,
@@ -43,6 +44,8 @@ const workspaceRouter = Router();
 workspaceRouter.use(authMiddleware);
 
 // ── GLOBAL Workspace Actions ───────────────────────────────────
+// Antes de "/:id" para que "summary" no se lea como un id.
+workspaceRouter.get("/summary", superadminMiddleware, getWorkspacesSummary);
 workspaceRouter.get("/", listWorkspaces);
 workspaceRouter.get("/all-users", superadminMiddleware, listAllCollaborators);
 workspaceRouter.post("/global-users", superadminMiddleware, createGlobalUser);
