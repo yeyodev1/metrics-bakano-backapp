@@ -858,12 +858,31 @@ export class WorkspaceService {
     return withoutPassword;
   }
 
-  async toggleWorkspaceActive(workspaceId: string, isActive: boolean) {
+  async toggleWorkspaceActive(
+    workspaceId: string,
+    isActive: boolean,
+    desactivacion?: { motivo: string; nota?: string; porNombre?: string }
+  ) {
     if (!Types.ObjectId.isValid(workspaceId)) throw new Error("INVALID_ID");
+
+    // Al desactivar se exige motivo; al reactivar se limpia, porque si no un
+    // entorno activo seguiria mostrando "suspendido por falta de pago".
+    const cambios: any = { isActive };
+    if (isActive) {
+      cambios.desactivacion = null;
+    } else {
+      if (!desactivacion?.motivo) throw new Error("MOTIVO_REQUERIDO");
+      cambios.desactivacion = {
+        motivo: desactivacion.motivo,
+        nota: desactivacion.nota,
+        porNombre: desactivacion.porNombre,
+        fecha: new Date(),
+      };
+    }
 
     const workspace = await models.workspaces.findByIdAndUpdate(
       workspaceId,
-      { isActive },
+      cambios,
       { new: true }
     );
     if (!workspace) throw new Error("NOT_FOUND");
