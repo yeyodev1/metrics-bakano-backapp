@@ -464,8 +464,12 @@ export class VideoPlanningService {
     planning.clienteAprobadoPor = undefined;
 
     // Reabrir la planificacion reabre el ciclo de avisos: hay algo nuevo que
-    // el cliente tiene que mirar, asi que vuelve a poder notificarsele.
+    // el cliente tiene que mirar, asi que vuelve a poder notificarsele. Y
+    // arranca como revision: lo que vera es una version corregida, no algo
+    // que nunca habia visto.
     planning.notificacionAbierta = true;
+    planning.cicloIniciadoEn = new Date();
+    planning.cicloEsRevision = true;
 
     // Reset rejected items back to PENDIENTE
     for (const item of planning.items) {

@@ -276,6 +276,14 @@ export interface IVideoPlanning extends Document {
    * esto el recordatorio seguiria saliendo despues de que el cliente respondio.
    */
   notificacionAbierta: boolean;
+  /**
+   * Cuando empezo el ciclo actual de avisos. Los avisos anteriores siguen en
+   * el historial, asi que sin esta fecha no se puede saber si el que se va a
+   * mandar es el primero DE ESTE ciclo o ya es recordatorio.
+   */
+  cicloIniciadoEn?: Date;
+  /** El ciclo actual arranca por una revision, no por un envio nuevo. */
+  cicloEsRevision?: boolean;
   clienteAprobado: boolean;
   clienteAprobadoAt?: Date;
   clienteAprobadoPor?: Types.ObjectId;
@@ -316,6 +324,8 @@ const VideoPlanningSchema = new Schema<IVideoPlanning>(
       type: Boolean,
       default: true,
     },
+    cicloIniciadoEn: { type: Date, default: Date.now },
+    cicloEsRevision: { type: Boolean, default: false },
     clienteAprobado: { type: Boolean, default: false },
     clienteAprobadoAt: { type: Date },
     clienteAprobadoPor: { type: Schema.Types.ObjectId, ref: "User" },

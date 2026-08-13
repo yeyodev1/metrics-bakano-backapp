@@ -12,6 +12,18 @@ const APP_URL = "https://metrics.bakano.ec";
  */
 export const RUTA_DESDE_WHATSAPP = "/app/workspaces/new-planning-from-whatsapp";
 
+/**
+ * Que le estamos diciendo al cliente. El workflow de GHL ramifica con esto:
+ * no es lo mismo estrenar una planificacion que insistir por tercera vez.
+ */
+export type TipoAviso = "enviada" | "recordatorio" | "revisada";
+
+export const TEXTO_AVISO: Record<TipoAviso, string> = {
+  enviada: "Tu planificación fue enviada",
+  recordatorio: "Recordatorio: tu planificación sigue esperando aprobación",
+  revisada: "Tu planificación fue revisada",
+};
+
 export interface Contacto {
   nombre: string;
   apellido: string;
@@ -21,6 +33,8 @@ export interface Contacto {
 }
 
 export interface ResultadoNotificacion {
+  tipoAviso: TipoAviso;
+  numeroEnvio: number;
   whatsapp: { enviado: boolean; error?: string; contactos: Contacto[] };
   email: { enviado: boolean; error?: string; destinatarios: string[] };
 }
@@ -34,6 +48,23 @@ export class PlanningNotificationService {
    * resultado, porque "no le llegó" y "no se envió" son cosas distintas y hoy
    * no había forma de distinguirlas.
    */
+  /**
+   * Deduce que aviso toca, sin que nadie tenga que elegirlo.
+   *
+   * Primero de un ciclo que nacio de una revision -> "revisada". Primero de un
+   * ciclo normal -> "enviada". Cualquiera despues del primero -> recordatorio,
+   * porque el cliente ya recibio este mismo enlace y no respondio.
+   */
+  private deducirTipo(planning: any): { tipo: TipoAviso; numeroEnvio: number } {
+    const desde = planning.cicloIniciadoEn ?? new Date(0);
+    const previos = (planning.notificaciones ?? []).filter(
+      (n: any) => n.canal === "whatsapp" && n.exito && new Date(n.enviadoEn) >= new Date(desde)
+    ).length;
+
+    if (previos > 0) return { tipo: "recordatorio", numeroEnvio: previos + 1 };
+    return { tipo: planning.cicloEsRevision ? "revisada" : "enviada", numeroEnvio: 1 };
+  }
+
   async notificar(
     planningId: string,
     porNombre?: string
@@ -53,9 +84,10 @@ export class PlanningNotificationService {
     const { correos, contactos, sinTelefono } = await this.destinatarios(workspace._id);
     const enlace = `${APP_URL}${RUTA_DESDE_WHATSAPP}`;
     const total = planning.items?.length ?? 0;
+    const { tipo, numeroEnvio } = this.deducirTipo(planning);
 
     const [whatsapp, email] = await Promise.all([
-      this.enviarWhatsapp(workspace, contactos, sinTelefono, enlace, total),
+      this.enviarWhatsapp(workspace, contactos, sinTelefono, enlace, total, tipo, numeroEnvio),
       this.enviarEmail(correos, workspace.name, enlace, total),
     ]);
 
@@ -76,7 +108,7 @@ export class PlanningNotificationService {
     });
     await planning.save();
 
-    return { whatsapp: { ...whatsapp, contactos }, email: { ...email, destinatarios: correos } };
+    return { tipoAviso: tipo, numeroEnvio, whatsapp: { ...whatsapp, contactos }, email: { ...email, destinatarios: correos } };
   }
 
   /**
@@ -150,7 +182,9 @@ export class PlanningNotificationService {
     contactos: Contacto[],
     faltantes: string[],
     enlace: string,
-    totalVideos: number
+    totalVideos: number,
+    tipoAviso: TipoAviso,
+    numeroEnvio: number
   ): Promise<{ enviado: boolean; error?: string }> {
     const url = process.env.GHL_PLANNING_WEBHOOK_URL;
     if (!url) {
@@ -184,6 +218,13 @@ export class PlanningNotificationService {
             workspaceId: String(workspace._id),
             totalVideos,
             enlace,
+            // Para ramificar en el workflow. El booleano va aparte del tipo
+            // porque una condicion si/no es mas simple de armar en GHL que
+            // comparar cadenas, y los tres casos no son dos.
+            tipoAviso,
+            esRecordatorio: tipoAviso === "recordatorio",
+            numeroEnvio,
+            titulo: TEXTO_AVISO[tipoAviso],
           },
           { timeout: 10000 }
         );
