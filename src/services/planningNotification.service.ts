@@ -12,7 +12,7 @@ const APP_URL = "https://metrics.bakano.ec";
 export const RUTA_DESDE_WHATSAPP = "/app/workspaces/new-planning-from-whatsapp";
 
 export interface ResultadoNotificacion {
-  whatsapp: { enviado: boolean; error?: string };
+  whatsapp: { enviado: boolean; error?: string; telefonos: string[] };
   email: { enviado: boolean; error?: string; destinatarios: string[] };
 }
 
@@ -41,13 +41,13 @@ export class PlanningNotificationService {
       .lean();
     if (!workspace) throw new Error("WORKSPACE_NOT_FOUND");
 
-    const destinatarios = await this.destinatarios(workspace._id);
+    const { correos, telefonos } = await this.destinatarios(workspace._id);
     const enlace = `${APP_URL}${RUTA_DESDE_WHATSAPP}`;
     const total = planning.items?.length ?? 0;
 
     const [whatsapp, email] = await Promise.all([
-      this.enviarWhatsapp(workspace, enlace, total),
-      this.enviarEmail(destinatarios, workspace.name, enlace, total),
+      this.enviarWhatsapp(workspace, telefonos, enlace, total),
+      this.enviarEmail(correos, workspace.name, enlace, total),
     ]);
 
     planning.notificaciones.push({
@@ -67,19 +67,35 @@ export class PlanningNotificationService {
     });
     await planning.save();
 
-    return { whatsapp, email: { ...email, destinatarios } };
+    return { whatsapp: { ...whatsapp, telefonos }, email: { ...email, destinatarios: correos } };
   }
 
-  /** Los usuarios del entorno que deben enterarse. */
-  private async destinatarios(workspaceId: any): Promise<string[]> {
+  /**
+   * Los usuarios del entorno que deben enterarse, con sus dos vias.
+   *
+   * El telefono vive en el usuario, no en el entorno: el aviso va a las
+   * personas, no a la empresa. Antes esto leia workspace.phoneNumber, un
+   * campo que no existe en el esquema, asi que el WhatsApp habria fallado
+   * siempre con "el entorno no tiene telefono".
+   */
+  private async destinatarios(
+    workspaceId: any
+  ): Promise<{ correos: string[]; telefonos: string[] }> {
     const usuarios = await models.users
       .find({
         isInternal: { $ne: true },
+        isActive: { $ne: false },
         $or: [{ "workspaces.workspaceId": workspaceId }, { workspaceId }],
       })
-      .select("email")
+      .select("email phoneNumber phoneExtension")
       .lean();
-    return usuarios.map((u: any) => u.email).filter(Boolean);
+
+    return {
+      correos: usuarios.map((u: any) => u.email).filter(Boolean),
+      telefonos: usuarios
+        .filter((u: any) => u.phoneNumber)
+        .map((u: any) => `${u.phoneExtension || ""}${u.phoneNumber}`.replace(/[^\d+]/g, "")),
+    };
   }
 
   /**
@@ -88,6 +104,7 @@ export class PlanningNotificationService {
    */
   private async enviarWhatsapp(
     workspace: any,
+    telefonos: string[],
     enlace: string,
     totalVideos: number
   ): Promise<{ enviado: boolean; error?: string }> {
@@ -100,11 +117,11 @@ export class PlanningNotificationService {
       };
     }
 
-    const telefono = workspace.phoneNumber || workspace.telefono;
-    if (!telefono) {
+    if (!telefonos.length) {
       return {
         enviado: false,
-        error: "El entorno no tiene teléfono registrado para WhatsApp.",
+        error:
+          "Ningún usuario de este entorno tiene teléfono cargado. Agrégalo en la ficha del usuario para poder avisar por WhatsApp.",
       };
     }
 
@@ -114,7 +131,7 @@ export class PlanningNotificationService {
         {
           workspaceId: String(workspace._id),
           cliente: workspace.name,
-          telefono,
+          telefonos,
           totalVideos,
           enlace,
         },
