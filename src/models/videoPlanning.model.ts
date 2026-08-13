@@ -248,10 +248,34 @@ const VideoItemSchema = new Schema<IVideoItem>(
 );
 
 // ── VideoPlanning document ─────────────────────────────────────────────────
+/** Un intento de aviso al cliente, con su resultado. */
+export interface INotificacionPlanning {
+  canal: "whatsapp" | "email";
+  enviadoEn: Date;
+  porNombre?: string;
+  exito: boolean;
+  error?: string;
+  /** Solo email: lo reporta el webhook de Resend, si esta configurado. */
+  abiertoEn?: Date;
+  clicEn?: Date;
+  proveedorId?: string;
+}
+
 export interface IVideoPlanning extends Document {
   planningEntryId: Types.ObjectId;
   workspaceId: Types.ObjectId;
   items: IVideoItem[];
+  /**
+   * Historial de avisos. Se conserva entero aunque se reabra el ciclo: sirve
+   * para responder "cuantas veces le escribimos antes de que contestara".
+   */
+  notificaciones: INotificacionPlanning[];
+  /**
+   * Mientras este en false no se puede volver a notificar. Se cierra al
+   * aprobar o rechazar y se reabre al mandar una planificacion nueva: sin
+   * esto el recordatorio seguiria saliendo despues de que el cliente respondio.
+   */
+  notificacionAbierta: boolean;
   clienteAprobado: boolean;
   clienteAprobadoAt?: Date;
   clienteAprobadoPor?: Types.ObjectId;
@@ -273,6 +297,25 @@ const VideoPlanningSchema = new Schema<IVideoPlanning>(
       required: true,
     },
     items: { type: [VideoItemSchema], default: [] },
+    notificaciones: {
+      type: [
+        {
+          canal: { type: String, enum: ["whatsapp", "email"], required: true },
+          enviadoEn: { type: Date, default: Date.now },
+          porNombre: { type: String, trim: true },
+          exito: { type: Boolean, default: true },
+          error: { type: String, trim: true },
+          abiertoEn: { type: Date },
+          clicEn: { type: Date },
+          proveedorId: { type: String, trim: true },
+        },
+      ],
+      default: [],
+    },
+    notificacionAbierta: {
+      type: Boolean,
+      default: true,
+    },
     clienteAprobado: { type: Boolean, default: false },
     clienteAprobadoAt: { type: Date },
     clienteAprobadoPor: { type: Schema.Types.ObjectId, ref: "User" },

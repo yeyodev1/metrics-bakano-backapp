@@ -1,4 +1,9 @@
 import { Router } from "express";
+import {
+  notificarPlanificacion,
+  historialNotificaciones,
+  planificacionPendiente,
+} from "../controllers/planningNotification.controller";
 import { authMiddleware } from "../middlewares/auth.middleware";
 import { internalOrSuperadminMiddleware } from "../middlewares/internalOrSuperadmin.middleware";
 import {
@@ -145,5 +150,10 @@ videoPlanningRouter.post(
   internalOrSuperadminMiddleware,
   generateScript
 );
+
+// ── Avisos al cliente ──────────────────────────────────────────────────────
+videoPlanningRouter.get("/pending-approval", planificacionPendiente);
+videoPlanningRouter.post("/:planningId/notify", notificarPlanificacion);
+videoPlanningRouter.get("/:planningId/notifications", historialNotificaciones);
 
 export { planningEntriesRouter, videoPlanningRouter };
