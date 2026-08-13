@@ -1,6 +1,7 @@
 import axios from "axios";
 import models from "../models";
 import { resendService } from "./resend.service";
+import { normalizarTelefono } from "../utils/telefono";
 
 const APP_URL = "https://metrics.bakano.ec";
 
@@ -41,12 +42,12 @@ export class PlanningNotificationService {
       .lean();
     if (!workspace) throw new Error("WORKSPACE_NOT_FOUND");
 
-    const { correos, telefonos } = await this.destinatarios(workspace._id);
+    const { correos, telefonos, sinTelefono } = await this.destinatarios(workspace._id);
     const enlace = `${APP_URL}${RUTA_DESDE_WHATSAPP}`;
     const total = planning.items?.length ?? 0;
 
     const [whatsapp, email] = await Promise.all([
-      this.enviarWhatsapp(workspace, telefonos, enlace, total),
+      this.enviarWhatsapp(workspace, telefonos, sinTelefono, enlace, total),
       this.enviarEmail(correos, workspace.name, enlace, total),
     ]);
 
@@ -80,21 +81,38 @@ export class PlanningNotificationService {
    */
   private async destinatarios(
     workspaceId: any
-  ): Promise<{ correos: string[]; telefonos: string[] }> {
+  ): Promise<{ correos: string[]; telefonos: string[]; sinTelefono: string[] }> {
     const usuarios = await models.users
       .find({
         isInternal: { $ne: true },
         isActive: { $ne: false },
         $or: [{ "workspaces.workspaceId": workspaceId }, { workspaceId }],
       })
-      .select("email phoneNumber phoneExtension")
+      .select("name email phoneNumber phoneExtension workspaces")
       .lean();
 
+    /**
+     * El WhatsApp va solo a quien administra la cuenta: es quien aprueba. Un
+     * colaborador no decide, y llenarle el chat con recordatorios que no puede
+     * atender es la forma mas rapida de que el cliente silencie el canal.
+     */
+    const esAdmin = (u: any) =>
+      (u.workspaces ?? []).some(
+        (w: any) => String(w.workspaceId) === String(workspaceId) && w.role === "admin"
+      );
+
+    const admins = usuarios.filter(esAdmin);
+    const conTelefono = admins.filter((u: any) => u.phoneNumber);
+
     return {
+      // El correo si va a todos: leerlo no obliga a nadie a hacer nada.
       correos: usuarios.map((u: any) => u.email).filter(Boolean),
-      telefonos: usuarios
-        .filter((u: any) => u.phoneNumber)
-        .map((u: any) => `${u.phoneExtension || ""}${u.phoneNumber}`.replace(/[^\d+]/g, "")),
+      telefonos: conTelefono.map((u: any) =>
+        normalizarTelefono(u.phoneNumber, u.phoneExtension || "593").e164
+      ).filter(Boolean),
+      sinTelefono: admins
+        .filter((u: any) => !u.phoneNumber)
+        .map((u: any) => u.name || u.email),
     };
   }
 
@@ -105,6 +123,7 @@ export class PlanningNotificationService {
   private async enviarWhatsapp(
     workspace: any,
     telefonos: string[],
+    faltantes: string[],
     enlace: string,
     totalVideos: number
   ): Promise<{ enviado: boolean; error?: string }> {
@@ -118,10 +137,11 @@ export class PlanningNotificationService {
     }
 
     if (!telefonos.length) {
+      const quienes = faltantes.length ? ` Sin teléfono: ${faltantes.join(", ")}.` : "";
       return {
         enviado: false,
         error:
-          "Ningún usuario de este entorno tiene teléfono cargado. Agrégalo en la ficha del usuario para poder avisar por WhatsApp.",
+          `Ningún administrador de este entorno tiene teléfono cargado.${quienes} Agrégalo en su ficha para poder avisar por WhatsApp.`,
       };
     }
 
