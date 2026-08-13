@@ -16,6 +16,13 @@ metaRouter.use(authMiddleware);
 // Endpoint to start authentication (exchange token)
 metaRouter.post("/authenticate", metaController.authenticateMeta);
 
+// Diagnostico: que permisos tiene de verdad el token guardado de un entorno.
+metaRouter.get(
+  "/:workspaceId/diagnose",
+  workspaceAccessMiddleware,
+  metaController.diagnoseMetaConnection
+);
+
 // Endpoint to save selected page/account (Admin/Superadmin only)
 metaRouter.post("/save-integration", workspaceAdminMiddleware, metaController.saveMetaIntegration);
 

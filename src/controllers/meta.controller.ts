@@ -282,3 +282,53 @@ export async function getUnifiedDashboard(req: Request, res: Response, next: Nex
     next(error);
   }
 }
+
+/**
+ * Diagnostico de la conexion de un entorno con Meta.
+ *
+ * Responde la pregunta que el error crudo no respondia: el token guardado,
+ * ¿tiene ads_read concedido de verdad? Si no lo tiene, ninguna cantidad de
+ * cambios en el codigo va a arreglar el error 200.
+ */
+export async function diagnoseMetaConnection(
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const workspaceId = req.params["workspaceId"] as string;
+    const workspace: any = await models.workspaces.findById(workspaceId).lean();
+
+    if (!workspace) {
+      res.status(HttpStatusCode.NotFound).send({ message: "Entorno no encontrado." });
+      return;
+    }
+
+    const token = workspace?.metaAds?.accessToken;
+    if (!token) {
+      res.status(HttpStatusCode.Ok).send({
+        conectado: false,
+        mensaje: "Este entorno no tiene ninguna cuenta de Meta conectada.",
+      });
+      return;
+    }
+
+    const { concedidos, rechazados } = await metaService.getGrantedPermissions(token);
+    const tieneLectura = concedidos.includes("ads_read") || concedidos.includes("ads_management");
+
+    res.status(HttpStatusCode.Ok).send({
+      conectado: true,
+      adAccountId: workspace.metaAds?.adAccountId ?? null,
+      puedeLeerAnuncios: tieneLectura,
+      concedidos,
+      rechazados,
+      mensaje: tieneLectura
+        ? "El token tiene permiso de lectura de anuncios."
+        : "El token NO tiene ads_read concedido. Hay que volver a conectar la cuenta, y que quien conecte tenga rol sobre esa cuenta publicitaria.",
+    });
+    return;
+  } catch (error) {
+    next(error);
+    return;
+  }
+}

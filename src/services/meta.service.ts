@@ -37,6 +37,61 @@ export class MetaService {
   }
   private readonly graphUrl = "https://graph.facebook.com/v22.0";
 
+  /**
+   * Permisos que el token tiene concedidos de verdad.
+   *
+   * Pedir un scope en el login no garantiza tenerlo: el usuario puede
+   * desmarcarlo, y ads_read sobre cuentas de terceros exige Acceso Avanzado
+   * aprobado en la revision de la app. Sin esto, la unica pista era un error
+   * 500 con el JSON crudo de Meta.
+   */
+  async getGrantedPermissions(accessToken: string): Promise<{
+    concedidos: string[];
+    rechazados: string[];
+  }> {
+    try {
+      const { data } = await axios.get(`${this.graphUrl}/me/permissions`, {
+        params: { access_token: accessToken },
+      });
+      const filas: Array<{ permission: string; status: string }> = data?.data ?? [];
+      return {
+        concedidos: filas.filter((f) => f.status === "granted").map((f) => f.permission),
+        rechazados: filas.filter((f) => f.status !== "granted").map((f) => f.permission),
+      };
+    } catch {
+      return { concedidos: [], rechazados: [] };
+    }
+  }
+
+  /**
+   * Traduce el error de Meta a algo accionable.
+   *
+   * El codigo 200 con "has NOT grant ads_management or ads_read" NO se arregla
+   * tocando los scopes del codigo: ads_read ya se pide. Significa una de tres
+   * cosas, y ninguna se resuelve desde aqui.
+   */
+  explicarErrorMeta(metaError: any): string {
+    const codigo = metaError?.error?.code;
+    const mensaje: string = metaError?.error?.message ?? "";
+
+    if (codigo === 200 && /ads_management|ads_read/.test(mensaje)) {
+      return [
+        "Meta no autoriza leer esta cuenta publicitaria.",
+        "Revisa, en este orden:",
+        "1) que quien conecto tenga un rol asignado sobre esa cuenta en el Business Manager;",
+        "2) que la app tenga Acceso Avanzado a ads_read aprobado (con Acceso Estandar solo funcionan las cuentas propias);",
+        "3) que la conexion se haya hecho DESPUES de agregar ads_read: un token viejo no gana permisos solo, hay que volver a conectar.",
+      ].join(" ");
+    }
+
+    if (codigo === 190) {
+      return "La conexion con Meta caduco o fue revocada. Hay que volver a conectar la cuenta.";
+    }
+
+    return mensaje || "Error desconocido de Meta.";
+  }
+
+
   private get encryptionKey() {
     const secret = process.env.META_TOKEN_ENCRYPTION_KEY || process.env.JWT_SECRET;
     if (!secret) {
@@ -1244,7 +1299,7 @@ export class MetaService {
     } catch (error: any) {
       const metaError = error.response?.data || error.message;
       console.error("Meta Ads Insights Error:", metaError);
-      throw new Error(`Failed to fetch Ads insights. Meta Error: ${JSON.stringify(metaError)}`);
+      throw new Error(this.explicarErrorMeta(metaError));
     }
   }
 
