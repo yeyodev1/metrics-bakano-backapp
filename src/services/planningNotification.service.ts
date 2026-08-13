@@ -137,6 +137,14 @@ export class PlanningNotificationService {
    * El WhatsApp lo manda GoHighLevel: aquí solo se dispara su webhook con los
    * datos que espera la plantilla aprobada.
    */
+  /**
+   * Un disparo del webhook POR PERSONA, con un JSON plano.
+   *
+   * GHL arma el contacto con lo que recibe en la raiz del cuerpo, asi que un
+   * arreglo de contactos en una sola llamada le sirve de poco. Uno por
+   * persona ademas permite saber a quien si le llego y a quien no, en vez de
+   * un unico exito o fracaso para todo el grupo.
+   */
   private async enviarWhatsapp(
     workspace: any,
     contactos: Contacto[],
@@ -149,39 +157,51 @@ export class PlanningNotificationService {
       return {
         enviado: false,
         error:
-          "Falta GHL_PLANNING_WEBHOOK_URL en el backend: sin esa variable no hay a dónde disparar el WhatsApp.",
+          "Falta GHL_PLANNING_WEBHOOK_URL en el backend: sin esa variable no hay a donde disparar el WhatsApp.",
       };
     }
 
     if (!contactos.length) {
-      const quienes = faltantes.length ? ` Sin teléfono: ${faltantes.join(", ")}.` : "";
+      const quienes = faltantes.length ? ` Sin telefono: ${faltantes.join(", ")}.` : "";
       return {
         enviado: false,
-        error:
-          `Ningún administrador de este entorno tiene teléfono cargado.${quienes} Agrégalo en su ficha para poder avisar por WhatsApp.`,
+        error: `Ningun administrador de este entorno tiene telefono cargado.${quienes} Agregalo en su ficha para poder avisar por WhatsApp.`,
       };
     }
 
-    try {
-      await axios.post(
-        url,
-        {
-          workspaceId: String(workspace._id),
-          cliente: workspace.name,
-          // Uno por administrador, con todo lo que GHL necesita del contacto.
-          contactos,
-          totalVideos,
-          enlace,
-        },
-        { timeout: 10000 }
-      );
-      return { enviado: true };
-    } catch (error: any) {
-      return {
-        enviado: false,
-        error: error.response?.data?.message || error.message || "Error al llamar al webhook de GHL.",
-      };
+    const fallos: string[] = [];
+
+    for (const contacto of contactos) {
+      try {
+        await axios.post(
+          url,
+          {
+            nombre: contacto.nombre,
+            apellido: contacto.apellido,
+            correo: contacto.correo,
+            telefono: contacto.telefono,
+            cliente: workspace.name,
+            workspaceId: String(workspace._id),
+            totalVideos,
+            enlace,
+          },
+          { timeout: 10000 }
+        );
+      } catch (error: any) {
+        const motivo = error.response?.data?.message || error.message || "error desconocido";
+        fallos.push(`${contacto.nombre || contacto.telefono}: ${motivo}`);
+      }
     }
+
+    // Exito parcial: si le llego a alguien, el aviso salio; pero se dice a
+    // quien no, que es lo que permite reintentar solo con ese.
+    if (fallos.length === contactos.length) {
+      return { enviado: false, error: `No se pudo avisar a nadie. ${fallos.join(" | ")}` };
+    }
+    if (fallos.length) {
+      return { enviado: true, error: `No llego a: ${fallos.join(" | ")}` };
+    }
+    return { enviado: true };
   }
 
   private async enviarEmail(
