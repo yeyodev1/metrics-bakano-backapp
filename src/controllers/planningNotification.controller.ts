@@ -35,6 +35,13 @@ export async function notificarPlanificacion(
       });
       return;
     }
+    if (error.message === "NO_LISTA") {
+      res.status(HttpStatusCode.Conflict).send({
+        message:
+          "La planificación todavía no está marcada como lista. Márcala lista para poder avisar al cliente.",
+      });
+      return;
+    }
     if (error.message === "NOT_FOUND" || error.message === "WORKSPACE_NOT_FOUND") {
       res.status(HttpStatusCode.NotFound).send({ message: "Planificación no encontrada." });
       return;
@@ -106,6 +113,42 @@ export async function guardarTelefonoDestinatario(
       res.status(HttpStatusCode.NotFound).send({ message: "No encontrado." });
       return;
     }
+    next(error);
+    return;
+  }
+}
+
+/**
+ * El equipo de contenido marca (o desmarca) la planificación como lista.
+ * Es el candado del botón "Notificar al cliente": las fechas llegan después,
+ * al editar cada video, así que la señal de terminado la da una persona.
+ */
+export async function marcarListaPlanificacion(
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+) {
+  try {
+    const planningId = req.params["planningId"] as string;
+    const lista = Boolean(req.body?.lista);
+
+    const planning: any = await models.videoPlanning.findById(planningId);
+    if (!planning) {
+      res.status(HttpStatusCode.NotFound).send({ message: "Planificación no encontrada." });
+      return;
+    }
+
+    planning.listaParaCliente = lista;
+    planning.listaMarcadaEn = lista ? new Date() : undefined;
+    planning.listaMarcadaPor = lista && req.user?._id ? req.user._id : undefined;
+    await planning.save();
+
+    res.status(HttpStatusCode.Ok).send({
+      message: lista ? "Planificación marcada como lista." : "Marca de lista retirada.",
+      planning: planning.toObject(),
+    });
+    return;
+  } catch (error) {
     next(error);
     return;
   }

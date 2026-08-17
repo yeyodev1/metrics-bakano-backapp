@@ -97,6 +97,12 @@ export class PlanningNotificationService {
       throw new Error("CICLO_CERRADO");
     }
 
+    // La marca la pone el equipo de contenido cuando termina la planificacion.
+    // El boton del front ya lo impide; esto cubre los disparos por API directa.
+    if (!planning.listaParaCliente) {
+      throw new Error("NO_LISTA");
+    }
+
     const workspace: any = await models.workspaces
       .findById(planning.workspaceId)
       .lean();
@@ -232,6 +238,7 @@ export class PlanningNotificationService {
     tipoAviso: TipoAviso;
     numeroEnvio: number;
     puedeNotificar: boolean;
+    lista: boolean;
     correo: UsuarioAviso[];
     whatsapp: UsuarioAviso[];
   }> {
@@ -251,7 +258,8 @@ export class PlanningNotificationService {
       totalVideos: planning.items?.length ?? 0,
       tipoAviso: tipo,
       numeroEnvio,
-      puedeNotificar: Boolean(planning.notificacionAbierta),
+      puedeNotificar: Boolean(planning.notificacionAbierta && planning.listaParaCliente),
+      lista: Boolean(planning.listaParaCliente),
       correo: usuarios,
       whatsapp: usuarios.filter((u) => u.esAdmin),
     };
