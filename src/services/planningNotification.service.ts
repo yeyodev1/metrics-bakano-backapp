@@ -434,6 +434,10 @@ export class PlanningNotificationService {
 
     return {
       planningId: String(planning._id),
+      // La pantalla a la que aterriza el cliente desde WhatsApp se arma con el
+      // entry, no con la planificacion: /workspaces/:workspaceId/planning/
+      // :entryId/video-planning/client. Sin esto no hay forma de construir la URL.
+      planningEntryId: String(planning.planningEntryId),
       workspaceId: String(planning.workspaceId),
       totalVideos: planning.items?.length ?? 0,
       pendientes: (planning.items ?? []).filter(
