@@ -284,6 +284,15 @@ export interface IVideoPlanning extends Document {
   cicloIniciadoEn?: Date;
   /** El ciclo actual arranca por una revision, no por un envio nuevo. */
   cicloEsRevision?: boolean;
+  /**
+   * El equipo de contenido da por lista la planificacion para el cliente.
+   * Es la llave del boton "Notificar al cliente": las fechas de publicacion
+   * se ponen despues, al editar cada video, asi que "todo con fecha" no
+   * sirve como senal de terminado.
+   */
+  listaParaCliente: boolean;
+  listaMarcadaEn?: Date;
+  listaMarcadaPor?: Types.ObjectId;
   clienteAprobado: boolean;
   clienteAprobadoAt?: Date;
   clienteAprobadoPor?: Types.ObjectId;
@@ -326,6 +335,9 @@ const VideoPlanningSchema = new Schema<IVideoPlanning>(
     },
     cicloIniciadoEn: { type: Date, default: Date.now },
     cicloEsRevision: { type: Boolean, default: false },
+    listaParaCliente: { type: Boolean, default: false },
+    listaMarcadaEn: { type: Date },
+    listaMarcadaPor: { type: Schema.Types.ObjectId, ref: "User" },
     clienteAprobado: { type: Boolean, default: false },
     clienteAprobadoAt: { type: Date },
     clienteAprobadoPor: { type: Schema.Types.ObjectId, ref: "User" },

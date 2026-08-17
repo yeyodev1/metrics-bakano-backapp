@@ -5,6 +5,7 @@ import {
   planificacionPendiente,
   destinatariosPlanificacion,
   guardarTelefonoDestinatario,
+  marcarListaPlanificacion,
 } from "../controllers/planningNotification.controller";
 import { authMiddleware } from "../middlewares/auth.middleware";
 import { internalOrSuperadminMiddleware } from "../middlewares/internalOrSuperadmin.middleware";
@@ -167,6 +168,12 @@ videoPlanningRouter.post(
   authMiddleware,
   internalOrSuperadminMiddleware,
   notificarPlanificacion
+);
+videoPlanningRouter.patch(
+  "/:planningId/ready",
+  authMiddleware,
+  internalOrSuperadminMiddleware,
+  marcarListaPlanificacion
 );
 videoPlanningRouter.get(
   "/:planningId/recipients",
