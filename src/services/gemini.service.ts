@@ -440,6 +440,7 @@ VIDEO A GENERAR:
 - El guión DEBE usar terminología, datos y contexto específico del perfil de marca de arriba.
 - El gancho DEBE ser una afirmación directa y cruda que haga que el espectador se sienta identificado de inmediato. NUNCA uses preguntas (sin '¿'), NUNCA menciones ofertas, precios o descuentos en el gancho. El formato es: [Dolor/Situación real del público] + ["este video es para ti" o frase de conexión similar]. Ejemplo: "Cansada de no lucir joven, este video es para ti."
 - El cuerpo debe citar cifras, nombres de servicios, regulaciones o situaciones concretas del nicho — NO frases genéricas.
+- Resalta con **doble asterisco** los nombres de ejercicios, productos, pasos o subtítulos de sección (ejemplo: **Sentadilla búlgara:**). Solo palabras o frases clave, nunca párrafos enteros: la app los muestra en negrita.
 - El CTA debe incluir el nombre del presentador/marca y una acción clara y específica.
 - Tono y lenguaje: adapta exactamente al tono indicado en el perfil de marca.
 - Sigue el estilo de los ejemplos de referencia del system prompt.
