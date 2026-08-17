@@ -436,6 +436,10 @@ export class VideoPlanningService {
     planning.clienteAprobadoAt = new Date();
     planning.clienteAprobadoPor = new Types.ObjectId(userId);
 
+    // El cliente ya respondio: se corta el ciclo de avisos. Sin esto el
+    // recordatorio seguiria saliendo despues de que aprobo o rechazo.
+    planning.notificacionAbierta = false;
+
     await planning.save();
     return planning.toObject() as IVideoPlanning;
   }
@@ -458,6 +462,14 @@ export class VideoPlanningService {
     planning.clienteAprobado = false;
     planning.clienteAprobadoAt = undefined;
     planning.clienteAprobadoPor = undefined;
+
+    // Reabrir la planificacion reabre el ciclo de avisos: hay algo nuevo que
+    // el cliente tiene que mirar, asi que vuelve a poder notificarsele. Y
+    // arranca como revision: lo que vera es una version corregida, no algo
+    // que nunca habia visto.
+    planning.notificacionAbierta = true;
+    planning.cicloIniciadoEn = new Date();
+    planning.cicloEsRevision = true;
 
     // Reset rejected items back to PENDIENTE
     for (const item of planning.items) {

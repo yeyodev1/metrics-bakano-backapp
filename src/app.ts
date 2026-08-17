@@ -13,11 +13,17 @@ const whitelist = [
   "http://localhost:8101",
   "https://testing-storybrand-frontend.bakano.ec",
   "https://metrics.bakano.ec",
+  "https://dev-project-front.bakano.ec",
 ];
+
+// Túneles de desarrollo con dominio propio: el front es `<algo>-front.bakano.ec`
+// y este backend es `<algo>-back.bakano.ec`. Se acepta por patrón para no tener
+// que redeployar cada vez que se levanta un túnel nuevo con esa convención.
+const TUNEL_PROPIO = /^https:\/\/[a-z0-9-]+-front\.bakano\.ec$/;
 
 const corsOptions: cors.CorsOptions = {
   origin: (origin, callback) => {
-    if (!origin || whitelist.includes(origin)) {
+    if (!origin || whitelist.includes(origin) || TUNEL_PROPIO.test(origin)) {
       callback(null, true);
     } else {
       callback(new Error("Not allowed by CORS"));

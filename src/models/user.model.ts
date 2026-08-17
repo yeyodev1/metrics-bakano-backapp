@@ -24,6 +24,12 @@ export type InternalRole =
 
 export interface IUser extends Document {
   name?: string;
+  /**
+   * Apellido aparte. GHL crea el contacto con nombre y apellido separados, y
+   * partir `name` por el primer espacio falla con nombres compuestos: "Maria
+   * Jose Perez" da apellido "Jose Perez". Cuando esta cargado, manda este.
+   */
+  lastName?: string;
   email: string;
   password?: string;
   role: "superadmin" | "user" | "admin" | "colaborador";
@@ -51,6 +57,10 @@ export interface IUser extends Document {
 export const UserSchema = new Schema<IUser>(
   {
     name: {
+      type: String,
+      trim: true,
+    },
+    lastName: {
       type: String,
       trim: true,
     },
