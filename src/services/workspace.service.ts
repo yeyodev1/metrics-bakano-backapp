@@ -371,7 +371,10 @@ export class WorkspaceService {
   /**
    * @param soloAdmins deja fuera al equipo de Bakano y a los colaboradores:
    *   devuelve solo a quien es administrador de la cuenta de algun cliente.
-   *   La pestana "Admins de cuenta" listaba a todo el mundo, que es otra cosa.
+   *   Sin el flag devuelve a todo el mundo (menos superadmins): la vista de
+   *   usuarios los separa en secciones (internos / admins / colaboradores),
+   *   porque ocultar a los colaboradores dejaba sin forma de encontrarlos
+   *   para sumarlos a otro entorno.
    */
   async listAllCollaborators(
     search?: string,
@@ -379,11 +382,14 @@ export class WorkspaceService {
     soloAdmins = false
   ) {
     // Only users who are not superadmins and have workspaces assigned or were legacy workspace owners
-    const query: any = { 
+    const query: any = {
       role: { $ne: "superadmin" },
       $or: [
         { workspaces: { $exists: true, $not: { $size: 0 } } },
-        { workspaceId: { $exists: true } }
+        { workspaceId: { $exists: true } },
+        // Un interno recien creado todavia no tiene workspaces y aun asi
+        // debe salir en la seccion "Equipo Bakano".
+        { isInternal: true }
       ]
     };
 
