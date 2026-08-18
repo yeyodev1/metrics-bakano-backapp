@@ -28,6 +28,10 @@ export const uploadResource = async (req: AuthRequest, res: Response, next: Next
         {
           folder: `resources/${workspaceId}`,
           resource_type: isPdf ? "raw" : "image",
+          // En raw la extension SOLO existe si va dentro del public_id. Sin
+          // ella Cloudinary sirve application/octet-stream y el navegador no
+          // puede visualizar el PDF (el iframe queda en blanco).
+          ...(isPdf ? { public_id: `${categoria}-${Date.now()}.pdf` } : {}),
         },
         (error, result) => {
           if (error || !result) return reject(error);

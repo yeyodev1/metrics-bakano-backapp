@@ -115,6 +115,15 @@ export class GhlService {
     // 4. Fetch appointments from GHL
     const appointments = await this.getAppointments(startTime, endTime);
 
+    // Coincidencia por PALABRA completa, no por substring: "juan" dentro de
+    // "Rigel / Juan Gabriel..." hacia que la reunion de Rigel apareciera en
+    // el calendario de CUALQUIER cliente que tuviera un usuario llamado Juan.
+    const contieneComoFrase = (texto: string, frase: string): boolean => {
+      if (!texto || !frase) return false;
+      const esc = frase.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      return new RegExp(`(^|[^\\p{L}\\p{N}])${esc}([^\\p{L}\\p{N}]|$)`, "iu").test(texto);
+    };
+
     // Helper to check if an appointment matches a specific workspace (non-agency)
     const matchesWorkspace = (appt: any, ws: any) => {
       const wsName = (ws.name || "").toLowerCase().trim();
@@ -123,14 +132,14 @@ export class GhlService {
       const apptTitle = (appt.title || appt.name || "").toLowerCase();
       const apptCompanyName = (appt.contact?.companyName || "").toLowerCase();
 
-      // Match by workspace name
-      if (apptTitle.includes(wsName) || apptCompanyName.includes(wsName)) {
+      // Match by workspace name (como frase completa)
+      if (contieneComoFrase(apptTitle, wsName) || contieneComoFrase(apptCompanyName, wsName)) {
         return true;
       }
 
       // Match by client users' emails or names
       const wsClients = getClientUsersForWorkspace(ws._id.toString());
-      
+
       // Check emails
       const apptEmails: string[] = [];
       if (appt.email) apptEmails.push(appt.email.toLowerCase());
@@ -143,9 +152,13 @@ export class GhlService {
       const clientEmails = wsClients.map(c => c.email.toLowerCase());
       if (apptEmails.some(e => clientEmails.includes(e))) return true;
 
-      // Check names
-      const clientNames = wsClients.map(c => c.name?.toLowerCase()).filter(Boolean);
-      if (clientNames.some(name => apptTitle.includes(name))) return true;
+      // Check names: solo nombres COMPLETOS (dos palabras o mas) y como
+      // frase entera. Un nombre de una sola palabra ("Juan") matchea media
+      // agenda ajena.
+      const clientNames = wsClients
+        .map(c => c.name?.toLowerCase().trim())
+        .filter((n): n is string => !!n && n.includes(" ") && n.length >= 7);
+      if (clientNames.some(name => contieneComoFrase(apptTitle, name))) return true;
 
       return false;
     };
@@ -219,11 +232,13 @@ export class GhlService {
         };
       });
 
-      // Infer client attendee from title
+      // Infer client attendee from title (solo nombres completos, como frase)
       const clientAttending = workspaceUsers.find((u: any) => {
         if (!u.name || !u.email) return false;
         if (u.email.toLowerCase().endsWith('@bakano.ec')) return false;
-        return apptTitle.includes(u.name.toLowerCase());
+        const nombre = u.name.toLowerCase().trim();
+        if (!nombre.includes(" ") || nombre.length < 7) return false;
+        return contieneComoFrase(apptTitle, nombre);
       });
 
       if (clientAttending && !mappedAttendees.some((a: any) => a.email === clientAttending.email)) {

@@ -410,12 +410,19 @@ export class BillingService {
       const entryDate = this.normalizeDateToEcuador(entry.date);
       const diffDays = Math.round((today.getTime() - entryDate.getTime()) / (1000 * 60 * 60 * 24));
 
-       if (diffDays > 7 && !entry.isBulkDistribution) {
-        throw new Error("EDIT_NOT_ALLOWED");
-      }
+      // La entrada de HOY la puede corregir cualquiera con acceso a la
+      // facturacion del workspace, sea o no quien la creo: un digito mal
+      // tipeado en el dia no puede quedar esperando a que vuelva el autor.
+      const esDeHoy = diffDays === 0;
 
-      if (entry.userId.toString() !== requesterId) {
-        throw new Error("EDIT_NOT_ALLOWED");
+      if (!esDeHoy) {
+        if (diffDays > 7 && !entry.isBulkDistribution) {
+          throw new Error("EDIT_NOT_ALLOWED");
+        }
+
+        if (entry.userId.toString() !== requesterId) {
+          throw new Error("EDIT_NOT_ALLOWED");
+        }
       }
     }
 
