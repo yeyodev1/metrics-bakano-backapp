@@ -109,7 +109,21 @@ export interface IVideoItem {
   comentario?: string;
   clienteAprobacion: ClienteAprobacion;
   motivoRechazo?: string;
+  /** Categoria estructurada del ultimo rechazo, para poder contar motivos. */
+  motivoCategoria?: string;
+  /**
+   * Responsables del item. Sin esto un rechazo no se puede atribuir a nadie:
+   * se estampan solos (quien guarda el guion / quien marca EDITADO) y el PM
+   * puede corregirlos via PATCH.
+   */
+  guionPorId?: Types.ObjectId;
+  guionPorNombre?: string;
+  editorPorId?: Types.ObjectId;
+  editorPorNombre?: string;
   linkVideo?: string;
+  /** Archivo maestro en la unidad compartida de Drive (entrega al cliente). */
+  driveFileId?: string;
+  driveLink?: string;
   fechaPublicacion?: Date;
   copyPublicacion?: string;
   order: number;
@@ -214,7 +228,14 @@ const VideoItemSchema = new Schema<IVideoItem>(
       default: "PENDIENTE",
     },
     motivoRechazo: { type: String, trim: true },
+    motivoCategoria: { type: String, trim: true },
+    guionPorId: { type: Schema.Types.ObjectId, ref: "User" },
+    guionPorNombre: { type: String, trim: true },
+    editorPorId: { type: Schema.Types.ObjectId, ref: "User" },
+    editorPorNombre: { type: String, trim: true },
     linkVideo: { type: String, trim: true },
+    driveFileId: { type: String, trim: true },
+    driveLink: { type: String, trim: true },
     fechaPublicacion: { type: Date },
     copyPublicacion: { type: String, trim: true },
     order: { type: Number, default: 0 },
@@ -296,6 +317,9 @@ export interface IVideoPlanning extends Document {
   clienteAprobado: boolean;
   clienteAprobadoAt?: Date;
   clienteAprobadoPor?: Types.ObjectId;
+  /** Carpeta del mes en Drive donde viven los archivos maestros del cliente. */
+  driveMonthFolderId?: string;
+  driveMonthFolderLink?: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -341,6 +365,8 @@ const VideoPlanningSchema = new Schema<IVideoPlanning>(
     clienteAprobado: { type: Boolean, default: false },
     clienteAprobadoAt: { type: Date },
     clienteAprobadoPor: { type: Schema.Types.ObjectId, ref: "User" },
+    driveMonthFolderId: { type: String, trim: true },
+    driveMonthFolderLink: { type: String, trim: true },
   },
   {
     timestamps: true,

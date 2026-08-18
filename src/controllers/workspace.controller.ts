@@ -40,9 +40,13 @@ export async function listWorkspaces(req: AuthRequest, res: Response, next: Next
     const limit = parseInt(req.query["limit"] as string) || 10;
     // Selectores: solo id y nombre. Ver listWorkspaces.
     const minimal = req.query["minimal"] === "true";
+    const filterRaw = req.query["filter"] as string | undefined;
+    const filter = ["activos", "inactivos", "sin_perfil", "sin_meta"].includes(filterRaw || "")
+      ? (filterRaw as "activos" | "inactivos" | "sin_perfil" | "sin_meta")
+      : undefined;
 
     if (role === 'superadmin') {
-      const data = await workspaceService.listWorkspaces({ search, page, limit, minimal });
+      const data = await workspaceService.listWorkspaces({ search, page, limit, minimal, filter });
       res.status(HttpStatusCode.Ok).send({
         message: "Workspaces retrieved successfully.",
         workspaces: data.workspaces,

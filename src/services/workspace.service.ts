@@ -132,14 +132,38 @@ export class WorkspaceService {
   }
 
   async listWorkspaces(
-    options: { search?: string; page?: number; limit?: number; minimal?: boolean } = {}
+    options: {
+      search?: string;
+      page?: number;
+      limit?: number;
+      minimal?: boolean;
+      /** Mismos criterios que getWorkspacesSummary: los chips del panel filtran lo que los contadores cuentan. */
+      filter?: "activos" | "inactivos" | "sin_perfil" | "sin_meta";
+    } = {}
   ) {
-    const { search, page = 1, limit = 10, minimal = false } = options;
+    const { search, page = 1, limit = 10, minimal = false, filter } = options;
     const skip = (page - 1) * limit;
 
     const query: any = {};
     if (search) {
       query.name = { $regex: search, $options: "i" };
+    }
+
+    if (filter === "activos") {
+      query.isActive = true;
+    } else if (filter === "inactivos") {
+      query.isActive = { $ne: true };
+    } else if (filter === "sin_perfil") {
+      query.$or = [
+        { "brandProfile.descripcion": { $exists: false } },
+        { "brandProfile.descripcion": "" },
+      ];
+    } else if (filter === "sin_meta") {
+      query.$or = [
+        { "metaAds.adAccountId": { $exists: false } },
+        { "metaAds.adAccountId": null },
+        { "metaAds.adAccountId": "" },
+      ];
     }
 
     /**
@@ -371,7 +395,10 @@ export class WorkspaceService {
   /**
    * @param soloAdmins deja fuera al equipo de Bakano y a los colaboradores:
    *   devuelve solo a quien es administrador de la cuenta de algun cliente.
-   *   La pestana "Admins de cuenta" listaba a todo el mundo, que es otra cosa.
+   *   Sin el flag devuelve a todo el mundo (menos superadmins): la vista de
+   *   usuarios los separa en secciones (internos / admins / colaboradores),
+   *   porque ocultar a los colaboradores dejaba sin forma de encontrarlos
+   *   para sumarlos a otro entorno.
    */
   async listAllCollaborators(
     search?: string,
@@ -379,11 +406,14 @@ export class WorkspaceService {
     soloAdmins = false
   ) {
     // Only users who are not superadmins and have workspaces assigned or were legacy workspace owners
-    const query: any = { 
+    const query: any = {
       role: { $ne: "superadmin" },
       $or: [
         { workspaces: { $exists: true, $not: { $size: 0 } } },
-        { workspaceId: { $exists: true } }
+        { workspaceId: { $exists: true } },
+        // Un interno recien creado todavia no tiene workspaces y aun asi
+        // debe salir en la seccion "Equipo Bakano".
+        { isInternal: true }
       ]
     };
 

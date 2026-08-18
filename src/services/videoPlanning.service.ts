@@ -3,6 +3,7 @@ import { Types } from "mongoose";
 import models from "../models";
 import type { IVideoPlanning, IVideoItem, IScriptMeta, ClienteAprobacion } from "../models/videoPlanning.model";
 import { notificationService } from "./notification.service";
+import { reviewEventService } from "./reviewEvent.service";
 import { scriptClassifierService } from "./scriptClassifier.service";
 import { metaService } from "./meta.service";
 import { getTodayEcuador } from "./tumesero.service";
@@ -288,7 +289,8 @@ export class VideoPlanningService {
     itemId: string,
     fields: Record<string, unknown>,
     internalRole?: string,
-    platformFlags?: { publishToInstagram?: boolean; publishToFacebook?: boolean }
+    platformFlags?: { publishToInstagram?: boolean; publishToFacebook?: boolean },
+    actor?: { id?: string; nombre?: string }
   ): Promise<IVideoPlanning> {
     if (!Types.ObjectId.isValid(planningId) || !Types.ObjectId.isValid(itemId)) {
       throw new Error("INVALID_ID");
@@ -310,12 +312,16 @@ export class VideoPlanningService {
       "tema", "descripcion", "tipo", "tipoGuion", "linkEjemplo", "recursos",
       "lugarGrabacion", "guion", "estadoIdea", "estadoProduccion",
       "edicion", "estadoPublicacion", "comentario", "motivoRechazo",
+      "motivoCategoria", "guionPorId", "guionPorNombre",
+      "editorPorId", "editorPorNombre",
       "linkVideo", "fechaPublicacion", "copyPublicacion",
       "casoUsoRef", "igMediaId", "igPermalink", "metaAdId", "metrics",
       "scriptMeta",
     ]);
 
     const wasPublicado = item.estadoPublicacion === "PUBLICADO";
+    const prevEstadoIdea = item.estadoIdea;
+    const prevEdicion = item.edicion;
 
     for (const [key, value] of Object.entries(fields)) {
       if (!MUTABLE_FIELDS.has(key)) continue;
@@ -323,7 +329,45 @@ export class VideoPlanningService {
       (item as any)[key] = value;
     }
 
+    // Estampar responsables: quien escribe el guion es el content responsable;
+    // quien marca EDITADO o sube el video es el editor responsable. Solo si el
+    // campo esta vacio — el PM puede corregirlo explicitamente via PATCH.
+    if (actor?.id && Types.ObjectId.isValid(actor.id)) {
+      const actorObjectId = new Types.ObjectId(actor.id);
+      const escribioGuion =
+        typeof fields.guion === "string" && fields.guion.trim() && !item.guionPorId;
+      const trabajoEdicion =
+        (fields.edicion === "EDITADO" || (typeof fields.linkVideo === "string" && fields.linkVideo)) &&
+        (internalRole === "editor" || !item.editorPorId);
+
+      if (escribioGuion || trabajoEdicion) {
+        const nombre =
+          actor.nombre ||
+          (await models.users.findById(actor.id).select("name email").lean())?.name ||
+          undefined;
+        if (escribioGuion) {
+          item.guionPorId = actorObjectId;
+          if (nombre) item.guionPorNombre = nombre;
+        }
+        if (trabajoEdicion) {
+          item.editorPorId = actorObjectId;
+          if (nombre) item.editorPorNombre = nombre;
+        }
+      }
+    }
+
     await planning.save();
+
+    // Banderas: registrar transiciones de estado como eventos inmutables.
+    reviewEventService
+      .recordItemTransitions({
+        planning: planning as unknown as IVideoPlanning,
+        item: item as unknown as IVideoItem,
+        prevEstadoIdea,
+        prevEdicion,
+        actorId: actor?.id,
+      })
+      .catch(() => {});
 
     // Notify non-internal workspace users when a video reaches PUBLICADO
     const isNowPublicado = item.estadoPublicacion === "PUBLICADO";
@@ -420,6 +464,7 @@ export class VideoPlanningService {
       if (!Types.ObjectId.isValid(approval.itemId)) continue;
       const item = planning.items.find((i) => i._id.toString() === approval.itemId);
       if (item) {
+        const prevClienteAprobacion = item.clienteAprobacion;
         item.clienteAprobacion = approval.clienteAprobacion;
         // Auto-approve idea when client approves the video
         if (approval.clienteAprobacion === "APROBADO") {
@@ -428,6 +473,16 @@ export class VideoPlanningService {
         if (approval.motivoRechazo !== undefined) {
           item.motivoRechazo = approval.motivoRechazo;
         }
+        // Banderas: el veredicto del cliente sobre el guion queda en el log.
+        reviewEventService
+          .recordClientApproval({
+            planning: planning as unknown as IVideoPlanning,
+            item: item as unknown as IVideoItem,
+            prevClienteAprobacion,
+            actorId: userId,
+            motivo: approval.motivoRechazo,
+          })
+          .catch(() => {});
       }
     }
 

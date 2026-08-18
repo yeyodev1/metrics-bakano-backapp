@@ -95,6 +95,13 @@ export interface IWorkspace extends Document {
     teamName: string;
     teamVideoUrl: string;
   };
+  /**
+   * Carpeta del cliente en la unidad compartida de Drive. Se crea en la
+   * primera entrega y se le aplica "cualquiera con el enlace puede ver";
+   * nunca se borra, ni aunque el workspace se desactive.
+   */
+  driveFolderId?: string;
+  driveFolderLink?: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -257,6 +264,8 @@ const WorkspaceSchema = new Schema<IWorkspace>(
       teamName: { type: String, trim: true },
       teamVideoUrl: { type: String, trim: true },
     },
+    driveFolderId: { type: String, trim: true },
+    driveFolderLink: { type: String, trim: true },
   },
   {
     timestamps: true,
