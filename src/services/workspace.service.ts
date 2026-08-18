@@ -132,14 +132,38 @@ export class WorkspaceService {
   }
 
   async listWorkspaces(
-    options: { search?: string; page?: number; limit?: number; minimal?: boolean } = {}
+    options: {
+      search?: string;
+      page?: number;
+      limit?: number;
+      minimal?: boolean;
+      /** Mismos criterios que getWorkspacesSummary: los chips del panel filtran lo que los contadores cuentan. */
+      filter?: "activos" | "inactivos" | "sin_perfil" | "sin_meta";
+    } = {}
   ) {
-    const { search, page = 1, limit = 10, minimal = false } = options;
+    const { search, page = 1, limit = 10, minimal = false, filter } = options;
     const skip = (page - 1) * limit;
 
     const query: any = {};
     if (search) {
       query.name = { $regex: search, $options: "i" };
+    }
+
+    if (filter === "activos") {
+      query.isActive = true;
+    } else if (filter === "inactivos") {
+      query.isActive = { $ne: true };
+    } else if (filter === "sin_perfil") {
+      query.$or = [
+        { "brandProfile.descripcion": { $exists: false } },
+        { "brandProfile.descripcion": "" },
+      ];
+    } else if (filter === "sin_meta") {
+      query.$or = [
+        { "metaAds.adAccountId": { $exists: false } },
+        { "metaAds.adAccountId": null },
+        { "metaAds.adAccountId": "" },
+      ];
     }
 
     /**
