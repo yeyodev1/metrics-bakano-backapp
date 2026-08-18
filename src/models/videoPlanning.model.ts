@@ -109,6 +109,17 @@ export interface IVideoItem {
   comentario?: string;
   clienteAprobacion: ClienteAprobacion;
   motivoRechazo?: string;
+  /** Categoria estructurada del ultimo rechazo, para poder contar motivos. */
+  motivoCategoria?: string;
+  /**
+   * Responsables del item. Sin esto un rechazo no se puede atribuir a nadie:
+   * se estampan solos (quien guarda el guion / quien marca EDITADO) y el PM
+   * puede corregirlos via PATCH.
+   */
+  guionPorId?: Types.ObjectId;
+  guionPorNombre?: string;
+  editorPorId?: Types.ObjectId;
+  editorPorNombre?: string;
   linkVideo?: string;
   fechaPublicacion?: Date;
   copyPublicacion?: string;
@@ -214,6 +225,11 @@ const VideoItemSchema = new Schema<IVideoItem>(
       default: "PENDIENTE",
     },
     motivoRechazo: { type: String, trim: true },
+    motivoCategoria: { type: String, trim: true },
+    guionPorId: { type: Schema.Types.ObjectId, ref: "User" },
+    guionPorNombre: { type: String, trim: true },
+    editorPorId: { type: Schema.Types.ObjectId, ref: "User" },
+    editorPorNombre: { type: String, trim: true },
     linkVideo: { type: String, trim: true },
     fechaPublicacion: { type: Date },
     copyPublicacion: { type: String, trim: true },

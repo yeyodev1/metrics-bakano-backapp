@@ -17,6 +17,7 @@ import { MetaGlobalIntegrationModel } from "./metaGlobalIntegration.model";
 import { VideoMetricSnapshotModel } from "./videoMetricSnapshot.model";
 import { EngramModel } from "./engram.model";
 import { ScriptFeedbackModel } from "./scriptFeedback.model";
+import { ReviewEventModel } from "./reviewEvent.model";
 
 const models = {
   users: UserModel,
@@ -38,6 +39,7 @@ const models = {
   videoMetricSnapshots: VideoMetricSnapshotModel,
   engrams: EngramModel,
   scriptFeedback: ScriptFeedbackModel,
+  reviewEvents: ReviewEventModel,
 };
 
 export default models;

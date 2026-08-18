@@ -112,10 +112,17 @@ export async function updateItem(
     // internalRole may be in the JWT payload (optional)
     const internalRole = (req.user as any)?.internalRole as string | undefined;
 
-    const planning = await service.updateItem(planningId, itemId, fields, internalRole, {
-      publishToInstagram: !!publishToInstagram,
-      publishToFacebook: !!publishToFacebook,
-    });
+    const planning = await service.updateItem(
+      planningId,
+      itemId,
+      fields,
+      internalRole,
+      {
+        publishToInstagram: !!publishToInstagram,
+        publishToFacebook: !!publishToFacebook,
+      },
+      { id: req.user?._id }
+    );
     res.status(HttpStatusCode.Ok).json({ message: "Item updated.", planning });
   } catch (error: any) {
     if (error.message === "INVALID_ID") {
