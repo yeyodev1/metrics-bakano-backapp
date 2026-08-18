@@ -121,6 +121,9 @@ export interface IVideoItem {
   editorPorId?: Types.ObjectId;
   editorPorNombre?: string;
   linkVideo?: string;
+  /** Archivo maestro en la unidad compartida de Drive (entrega al cliente). */
+  driveFileId?: string;
+  driveLink?: string;
   fechaPublicacion?: Date;
   copyPublicacion?: string;
   order: number;
@@ -231,6 +234,8 @@ const VideoItemSchema = new Schema<IVideoItem>(
     editorPorId: { type: Schema.Types.ObjectId, ref: "User" },
     editorPorNombre: { type: String, trim: true },
     linkVideo: { type: String, trim: true },
+    driveFileId: { type: String, trim: true },
+    driveLink: { type: String, trim: true },
     fechaPublicacion: { type: Date },
     copyPublicacion: { type: String, trim: true },
     order: { type: Number, default: 0 },
@@ -312,6 +317,9 @@ export interface IVideoPlanning extends Document {
   clienteAprobado: boolean;
   clienteAprobadoAt?: Date;
   clienteAprobadoPor?: Types.ObjectId;
+  /** Carpeta del mes en Drive donde viven los archivos maestros del cliente. */
+  driveMonthFolderId?: string;
+  driveMonthFolderLink?: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -357,6 +365,8 @@ const VideoPlanningSchema = new Schema<IVideoPlanning>(
     clienteAprobado: { type: Boolean, default: false },
     clienteAprobadoAt: { type: Date },
     clienteAprobadoPor: { type: Schema.Types.ObjectId, ref: "User" },
+    driveMonthFolderId: { type: String, trim: true },
+    driveMonthFolderLink: { type: String, trim: true },
   },
   {
     timestamps: true,

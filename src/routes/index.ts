@@ -27,6 +27,7 @@ import salesExecutiveRouter from "./salesExecutive.router";
 import agentFeedRouter from "./agentFeed.router";
 import financeIntegrationRouter from "./financeIntegration.router";
 import flagsRouter from "./flags.router";
+import driveRouter from "./drive.router";
 
 function routerApi(app: Application) {
   const router = express.Router();
@@ -61,6 +62,7 @@ function routerApi(app: Application) {
   router.use("/agent-feed", agentFeedRouter);
   router.use("/integrations/finance", financeIntegrationRouter);
   router.use("/flags", flagsRouter);
+  router.use("/drive", driveRouter);
 
   // Webhooks are top-level on v1
   app.use("/v1/webhooks", webhookRouter);
