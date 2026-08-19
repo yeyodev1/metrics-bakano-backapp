@@ -336,6 +336,30 @@ export async function uploadItemMedia(
 }
 
 // ── GET /video-planning/editor/:editorId/edited-items ─────────────────────
+// ── GET /video-planning/editor-queue ───────────────────────────────────────
+export async function getEditorQueue(
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+) {
+  try {
+    // El editor ve SU cola; solo superadmin puede mirar la de otro.
+    const solicitada = req.query["editorId"] as string | undefined;
+    const editorId =
+      solicitada && req.user?.role === "superadmin" ? solicitada : req.user!._id;
+
+    const queue = await service.getEditorQueue(editorId);
+    res.status(HttpStatusCode.Ok).json(queue);
+  } catch (error: any) {
+    if (error.message === "INVALID_ID") {
+      res.status(HttpStatusCode.BadRequest).json({ message: "Invalid editor ID." });
+      return;
+    }
+    console.error("getEditorQueue error:", error);
+    next(error);
+  }
+}
+
 export async function getEditorCompletedItems(
   req: AuthRequest,
   res: Response,

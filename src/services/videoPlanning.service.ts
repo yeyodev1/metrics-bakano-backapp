@@ -4,6 +4,7 @@ import models from "../models";
 import type { IVideoPlanning, IVideoItem, IScriptMeta, ClienteAprobacion } from "../models/videoPlanning.model";
 import { notificationService } from "./notification.service";
 import { reviewEventService } from "./reviewEvent.service";
+import { flagsService } from "./flags.service";
 import { scriptClassifierService } from "./scriptClassifier.service";
 import { metaService } from "./meta.service";
 import { getTodayEcuador } from "./tumesero.service";
@@ -899,5 +900,110 @@ export class VideoPlanningService {
     }
 
     return { scanned: targets.length, synced, failed };
+  }
+
+  // ── EDITOR QUEUE ───────────────────────────────────────────────────────────
+  /**
+   * La cola de trabajo del editor, clasificada por lo que tiene que HACER.
+   * El dashboard del editor era solo un calendario de planificaciones: no
+   * decia que editar, que le rechazaron ni que master falta subir a Drive.
+   */
+  async getEditorQueue(editorId: string) {
+    if (!Types.ObjectId.isValid(editorId)) throw new Error("INVALID_ID");
+
+    const plannings = await models.planning
+      .find({ assignedTo: new Types.ObjectId(editorId) })
+      .select("_id workspaceId")
+      .lean();
+    const planningIds = plannings.map((p) => p._id);
+
+    const videoPlannings = await models.videoPlanning
+      .find({ planningEntryId: { $in: planningIds } })
+      .populate("workspaceId", "name")
+      .lean();
+
+    interface ColaItem {
+      workspaceId: string;
+      workspaceName: string;
+      entryId: string;
+      planningId: string;
+      itemId: string;
+      numero: number;
+      tema: string;
+      fechaPublicacion?: Date;
+      motivoRechazo?: string;
+      estadoProduccion: string;
+      driveLink?: string;
+    }
+
+    const reEditar: ColaItem[] = [];
+    const porEditar: ColaItem[] = [];
+    const porSubirMaster: ColaItem[] = [];
+    let listosCount = 0;
+
+    const inicioMes = new Date();
+    inicioMes.setDate(1);
+    inicioMes.setHours(0, 0, 0, 0);
+
+    for (const vp of videoPlannings) {
+      const ws = vp.workspaceId as any;
+      for (const item of vp.items) {
+        const base: ColaItem = {
+          workspaceId: String(ws?._id ?? ""),
+          workspaceName: ws?.name || "Sin entorno",
+          entryId: String(vp.planningEntryId),
+          planningId: String(vp._id),
+          itemId: String(item._id),
+          numero: item.numero,
+          tema: item.tema,
+          fechaPublicacion: item.fechaPublicacion,
+          motivoRechazo: item.motivoRechazo,
+          estadoProduccion: item.estadoProduccion,
+          driveLink: item.driveLink,
+        };
+
+        if (item.edicion === "RECHAZADO") {
+          reEditar.push(base);
+        } else if (item.edicion === "POR_EDITAR") {
+          // Solo cuenta como trabajo pendiente si hay material grabado.
+          if (item.estadoProduccion === "GRABADO") porEditar.push(base);
+        } else if (item.edicion === "EDITADO") {
+          if (!item.driveFileId) porSubirMaster.push(base);
+          listosCount += 1;
+        }
+      }
+    }
+
+    // Lo que publica antes va primero; sin fecha, al final.
+    const porFecha = (a: ColaItem, b: ColaItem) => {
+      const ta = a.fechaPublicacion ? new Date(a.fechaPublicacion).getTime() : Infinity;
+      const tb = b.fechaPublicacion ? new Date(b.fechaPublicacion).getTime() : Infinity;
+      return ta - tb;
+    };
+    reEditar.sort(porFecha);
+    porEditar.sort(porFecha);
+    porSubirMaster.sort(porFecha);
+
+    // Sus numeros del mes salen del sistema de banderas (mismos criterios
+    // que ve el PM), sin pasar por el gate del router de flags.
+    let stats: { pct: number | null; aprobados: number; rechazados: number; total: number } = {
+      pct: null,
+      aprobados: 0,
+      rechazados: 0,
+      total: 0,
+    };
+    try {
+      const detalle = await flagsService.collaboratorDetail(editorId, "edicion", inicioMes, new Date());
+      stats = {
+        pct: detalle.pct,
+        aprobados: detalle.aprobados,
+        rechazados: detalle.rechazados,
+        total: detalle.total,
+      };
+    } catch {
+      // Sin eventos todavia: la cola sigue siendo util sin los numeros.
+    }
+
+    return { reEditar, porEditar, porSubirMaster, listosCount, stats };
   }
 }
