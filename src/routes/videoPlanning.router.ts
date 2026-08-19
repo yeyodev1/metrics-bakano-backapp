@@ -19,6 +19,7 @@ import {
   reopenPlanning,
   getCalendarItems,
   getEditorCompletedItems,
+  getEditorQueue,
   linkReelMedia,
   syncVideoItemMetrics,
   getPublishedReelsForWorkspace,
@@ -66,6 +67,14 @@ videoPlanningRouter.get(
   authMiddleware,
   internalOrSuperadminMiddleware,
   getEditorCompletedItems
+);
+
+// GET /api/video-planning/editor-queue — la cola de trabajo del editor logueado
+videoPlanningRouter.get(
+  "/editor-queue",
+  authMiddleware,
+  internalOrSuperadminMiddleware,
+  getEditorQueue
 );
 
 videoPlanningRouter.get(
