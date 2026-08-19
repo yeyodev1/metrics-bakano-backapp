@@ -3,8 +3,27 @@ import { HttpStatusCode } from "axios";
 import { AuthRequest } from "../types/AuthRequest";
 import { WorkspaceService } from "../services/workspace.service";
 import { resendService } from "../services/resend.service";
+import { normalizarTelefono } from "../utils/telefono";
 
 const workspaceService = new WorkspaceService();
+
+/**
+ * El telefono es obligatorio al crear usuarios cliente: es la via de los
+ * avisos de WhatsApp. Devuelve el mensaje de error, o null si esta bien.
+ */
+function validarTelefonoObligatorio(
+  phoneNumber?: string,
+  phoneExtension?: string
+): string | null {
+  if (!phoneNumber || !String(phoneNumber).trim()) {
+    return "El numero de telefono es obligatorio: sin el no se le pueden enviar avisos por WhatsApp.";
+  }
+  const tel = normalizarTelefono(String(phoneNumber), phoneExtension || "593");
+  if (!tel.valido) {
+    return "El numero de telefono no es valido. Revisa el numero y el codigo de pais.";
+  }
+  return null;
+}
 
 // ── Workspaces ────────────────────────────────────────────────
 
@@ -256,6 +275,14 @@ export async function createUser(req: AuthRequest, res: Response, next: NextFunc
       return;
     }
 
+    // Sin telefono los avisos de WhatsApp (planificacion y revision de
+    // videos) nacen muertos para este usuario: se exige desde el alta.
+    const errorTelefono = validarTelefonoObligatorio(phoneNumber, phoneExtension);
+    if (errorTelefono) {
+      res.status(HttpStatusCode.BadRequest).send({ message: errorTelefono });
+      return;
+    }
+
     const user = await workspaceService.createUser({ name, email, password, role, workspaceId, phoneNumber, phoneExtension });
 
     if (sendWelcomeEmail && password) {
@@ -344,6 +371,16 @@ export async function createGlobalUser(req: AuthRequest, res: Response, next: Ne
     if (!email || !workspaces || !Array.isArray(workspaces)) {
       res.status(HttpStatusCode.BadRequest).send({ message: "Email and workspaces array are required." });
       return;
+    }
+
+    // A los internos de Bakano no les mandamos avisos de cliente; a todos
+    // los demas si, asi que el numero es obligatorio desde el alta.
+    if (!isInternal) {
+      const errorTelefono = validarTelefonoObligatorio(phoneNumber, phoneExtension);
+      if (errorTelefono) {
+        res.status(HttpStatusCode.BadRequest).send({ message: errorTelefono });
+        return;
+      }
     }
 
     const user = await workspaceService.createGlobalUser({

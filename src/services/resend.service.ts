@@ -1101,6 +1101,88 @@ export class ResendService {
       html,
     });
   }
+  /**
+   * Circuito de REVISION DE VIDEOS terminados. Mismo aviso que sale por
+   * WhatsApp, en su version correo: el tipo decide el texto porque no es lo
+   * mismo estrenar el aviso, insistir, que confirmar que ya reviso.
+   */
+  async sendVideosParaRevisionEmail(params: {
+    to: string[];
+    cliente: string;
+    enlace: string;
+    videosListos: number;
+    tipo: "esperando_revision" | "recordatorio" | "revisado";
+  }): Promise<string | undefined> {
+    const { to, cliente, enlace, videosListos, tipo } = params;
+
+    const textos = {
+      esperando_revision: {
+        titulo: "Tus videos estan listos",
+        cuerpo: `Terminamos la edicion de <strong>${videosListos} videos</strong>. Necesitamos que los revises y nos des tu visto bueno para poder publicarlos.`,
+        boton: "Revisar mis videos",
+        asunto: `${cliente}: tus ${videosListos} videos estan listos para tu revision`,
+      },
+      recordatorio: {
+        titulo: "Tus videos siguen esperando",
+        cuerpo: `Tienes <strong>${videosListos} videos</strong> editados esperando tu revision. Sin tu visto bueno no podemos publicarlos.`,
+        boton: "Revisar ahora",
+        asunto: `Recordatorio: tus ${videosListos} videos esperan tu revision`,
+      },
+      revisado: {
+        titulo: "Recibimos tu revision",
+        cuerpo: `Gracias por revisar tus <strong>${videosListos} videos</strong>. Ya estamos procesando tu respuesta para continuar con la publicacion.`,
+        boton: "Ver mis videos",
+        asunto: `${cliente}: tu revision fue recibida`,
+      },
+    }[tipo];
+
+    const html = `<!DOCTYPE html>
+<html lang="es">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+<body style="margin:0;padding:0;background:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="padding:40px 20px;">
+    <tr><td align="center">
+      <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
+        <tr>
+          <td style="background:linear-gradient(135deg,#e6285c 0%,#85529c 100%);padding:32px 40px;text-align:center;">
+            <p style="margin:0;font-size:13px;font-weight:700;color:rgba(255,255,255,0.75);letter-spacing:2px;text-transform:uppercase;">Bakano</p>
+            <h1 style="margin:12px 0 0;font-size:24px;font-weight:800;color:#ffffff;">${textos.titulo}</h1>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:32px 40px 24px;">
+            <p style="margin:0 0 16px;font-size:16px;color:#1e293b;">Hola <strong>${cliente}</strong>,</p>
+            <p style="margin:0 0 24px;font-size:15px;color:#475569;line-height:1.7;">${textos.cuerpo}</p>
+            <div style="text-align:center;margin-bottom:24px;">
+              <a href="${enlace}" style="display:inline-block;background:linear-gradient(135deg,#e6285c 0%,#85529c 100%);color:#ffffff;text-decoration:none;padding:14px 36px;border-radius:10px;font-size:15px;font-weight:700;">
+                ${textos.boton}
+              </a>
+            </div>
+            <p style="margin:0;font-size:12px;color:#94a3b8;line-height:1.6;word-break:break-all;">
+              Si el boton no funciona, copia esta direccion:<br/>${enlace}
+            </p>
+          </td>
+        </tr>
+        <tr>
+          <td style="background:#f8fafc;padding:16px 40px;border-top:1px solid #e2e8f0;text-align:center;">
+            <p style="margin:0;color:#94a3b8;font-size:12px;">Enviado por <strong>Bakano</strong>. Dudas: soporte@bakano.ec</p>
+          </td>
+        </tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+
+    const { data } = await this.client.emails.send({
+      from: this.from,
+      to,
+      subject: textos.asunto,
+      html,
+    });
+
+    return data?.id;
+  }
 }
 
 export const resendService = new ResendService();

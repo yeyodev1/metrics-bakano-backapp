@@ -133,6 +133,15 @@ export interface IVideoItem {
   edicionRevisadaPorId?: Types.ObjectId;
   edicionRevisadaNombre?: string;
   edicionRevisadaEn?: Date;
+  /**
+   * Veredicto del CLIENTE sobre el video terminado. Distinto de
+   * `clienteAprobacion` (que aprueba el guion antes de grabar): esto se llena
+   * cuando el cliente revisa el video ya editado, y es lo que corta los
+   * recordatorios de revision.
+   */
+  videoClienteAprobacion?: ClienteAprobacion;
+  videoClienteMotivo?: string;
+  videoClienteRevisadoEn?: Date;
   fechaPublicacion?: Date;
   copyPublicacion?: string;
   order: number;
@@ -249,6 +258,12 @@ const VideoItemSchema = new Schema<IVideoItem>(
     edicionRevisadaPorId: { type: Schema.Types.ObjectId, ref: "User" },
     edicionRevisadaNombre: { type: String, trim: true },
     edicionRevisadaEn: { type: Date },
+    videoClienteAprobacion: {
+      type: String,
+      enum: ["PENDIENTE", "APROBADO", "RECHAZADO"],
+    },
+    videoClienteMotivo: { type: String, trim: true },
+    videoClienteRevisadoEn: { type: Date },
     fechaPublicacion: { type: Date },
     copyPublicacion: { type: String, trim: true },
     order: { type: Number, default: 0 },
@@ -295,6 +310,16 @@ export interface INotificacionPlanning {
   proveedorId?: string;
 }
 
+/**
+ * Un aviso del circuito de REVISION DE VIDEOS. Lleva el tipo porque aqui el
+ * recordatorio lo dispara un cron, no una persona: sin el tipo guardado no se
+ * puede auditar que se le dijo al cliente en cada envio.
+ */
+export interface IAvisoRevision extends INotificacionPlanning {
+  tipoAviso: "esperando_revision" | "recordatorio" | "revisado";
+  numeroEnvio: number;
+}
+
 export interface IVideoPlanning extends Document {
   planningEntryId: Types.ObjectId;
   workspaceId: Types.ObjectId;
@@ -327,6 +352,17 @@ export interface IVideoPlanning extends Document {
   listaParaCliente: boolean;
   listaMarcadaEn?: Date;
   listaMarcadaPor?: Types.ObjectId;
+  /**
+   * Ciclo de revision de los videos TERMINADOS. Se abre cuando el equipo
+   * notifica "tus videos estan listos" y se cierra cuando el cliente revisa
+   * todos: mientras este abierto, el cron insiste cada 4 horas.
+   */
+  revisionVideosAbierta: boolean;
+  revisionCicloIniciadoEn?: Date;
+  videosRevisadosEn?: Date;
+  videosRevisadosPor?: Types.ObjectId;
+  /** Historial de avisos de revision de videos, con su tipo y resultado. */
+  avisosRevision: IAvisoRevision[];
   clienteAprobado: boolean;
   clienteAprobadoAt?: Date;
   clienteAprobadoPor?: Types.ObjectId;
@@ -375,6 +411,31 @@ const VideoPlanningSchema = new Schema<IVideoPlanning>(
     listaParaCliente: { type: Boolean, default: false },
     listaMarcadaEn: { type: Date },
     listaMarcadaPor: { type: Schema.Types.ObjectId, ref: "User" },
+    revisionVideosAbierta: { type: Boolean, default: false },
+    revisionCicloIniciadoEn: { type: Date },
+    videosRevisadosEn: { type: Date },
+    videosRevisadosPor: { type: Schema.Types.ObjectId, ref: "User" },
+    avisosRevision: {
+      type: [
+        {
+          canal: { type: String, enum: ["whatsapp", "email"], required: true },
+          enviadoEn: { type: Date, default: Date.now },
+          porNombre: { type: String, trim: true },
+          exito: { type: Boolean, default: true },
+          error: { type: String, trim: true },
+          abiertoEn: { type: Date },
+          clicEn: { type: Date },
+          proveedorId: { type: String, trim: true },
+          tipoAviso: {
+            type: String,
+            enum: ["esperando_revision", "recordatorio", "revisado"],
+            required: true,
+          },
+          numeroEnvio: { type: Number, default: 1 },
+        },
+      ],
+      default: [],
+    },
     clienteAprobado: { type: Boolean, default: false },
     clienteAprobadoAt: { type: Date },
     clienteAprobadoPor: { type: Schema.Types.ObjectId, ref: "User" },
@@ -388,6 +449,8 @@ const VideoPlanningSchema = new Schema<IVideoPlanning>(
 );
 
 VideoPlanningSchema.index({ workspaceId: 1 });
+// El cron de recordatorios barre solo los ciclos abiertos.
+VideoPlanningSchema.index({ revisionVideosAbierta: 1 });
 VideoPlanningSchema.index({ workspaceId: 1, "items.fechaPublicacion": 1 });
 
 export const VideoPlanningModel = model<IVideoPlanning>(
