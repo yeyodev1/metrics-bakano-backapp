@@ -1034,6 +1034,73 @@ export class ResendService {
 
     return data?.id;
   }
+
+  /**
+   * Aviso al PM/Content Manager: un editor marco un video como EDITADO y
+   * espera revision. El link lleva directo a la vista de revision.
+   */
+  async sendVideoReadyForReview(params: {
+    to: string[];
+    workspaceName: string;
+    numero: number;
+    tema: string;
+    editorNombre?: string;
+    driveLink?: string;
+  }): Promise<void> {
+    const { to, workspaceName, numero, tema, editorNombre, driveLink } = params;
+    if (!to.length) return;
+    const reviewUrl = "https://metrics.bakano.ec/app/workspaces/review-videos-from-planning";
+    const num = String(numero).padStart(2, "0");
+
+    const html = `
+<!DOCTYPE html>
+<html lang="es">
+<head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><title>Video listo para revisión</title></head>
+<body style="margin:0;padding:0;background-color:#f0f2f5;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f0f2f5;padding:40px 16px;">
+    <tr><td align="center">
+      <table width="580" cellpadding="0" cellspacing="0" style="max-width:580px;width:100%;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.10);">
+        <tr>
+          <td style="background:linear-gradient(135deg,#191423 0%,#2b2438 100%);padding:32px 40px;text-align:center;">
+            <p style="margin:0 0 14px;color:#ffffff;font-size:20px;font-weight:800;letter-spacing:-0.5px;">Bakano Ads</p>
+            <h1 style="margin:0;color:#ffffff;font-size:22px;font-weight:700;line-height:1.3;">Video listo para revisión</h1>
+            <p style="margin:8px 0 0;color:rgba(255,255,255,0.65);font-size:14px;">${editorNombre ? `${editorNombre} terminó la edición` : "La edición está terminada"} y espera tu visto bueno.</p>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:28px 40px 8px;">
+            <table width="100%" cellpadding="0" cellspacing="0" style="background:#faf9fc;border:1px solid #eceaf1;border-radius:12px;">
+              <tr><td style="padding:16px 20px;">
+                <p style="margin:0 0 4px;font-size:11px;font-weight:800;letter-spacing:0.08em;color:#6b7280;text-transform:uppercase;">${workspaceName}</p>
+                <p style="margin:0;font-size:16px;font-weight:700;color:#191423;">#${num} · ${tema}</p>
+              </td></tr>
+            </table>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:20px 40px 8px;text-align:center;">
+            <a href="${reviewUrl}" style="display:inline-block;background:#e6285c;color:#ffffff;font-size:14px;font-weight:700;text-decoration:none;padding:13px 28px;border-radius:12px;">Revisar ahora</a>
+          </td>
+        </tr>
+        ${driveLink ? `<tr><td style="padding:4px 40px 8px;text-align:center;"><a href="${driveLink}" style="font-size:12.5px;color:#1ea362;font-weight:700;text-decoration:none;">Ver archivo maestro en Drive</a></td></tr>` : ""}
+        <tr>
+          <td style="padding:16px 40px 30px;text-align:center;">
+            <p style="margin:0;font-size:12px;color:#9ca3af;line-height:1.5;">Si lo apruebas queda listo para publicar; si lo rechazas, vuelve a la cola del editor con tu motivo.</p>
+          </td>
+        </tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+
+    await this.client.emails.send({
+      from: this.from,
+      to,
+      subject: `Revisión pendiente · ${workspaceName} #${num} ${tema}`,
+      html,
+    });
+  }
 }
 
 export const resendService = new ResendService();

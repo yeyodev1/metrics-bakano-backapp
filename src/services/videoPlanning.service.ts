@@ -5,6 +5,7 @@ import type { IVideoPlanning, IVideoItem, IScriptMeta, ClienteAprobacion } from 
 import { notificationService } from "./notification.service";
 import { reviewEventService } from "./reviewEvent.service";
 import { flagsService } from "./flags.service";
+import { resendService } from "./resend.service";
 import { scriptClassifierService } from "./scriptClassifier.service";
 import { metaService } from "./meta.service";
 import { getTodayEcuador } from "./tumesero.service";
@@ -314,7 +315,7 @@ export class VideoPlanningService {
       "lugarGrabacion", "guion", "estadoIdea", "estadoProduccion",
       "edicion", "estadoPublicacion", "comentario", "motivoRechazo",
       "motivoCategoria", "guionPorId", "guionPorNombre",
-      "editorPorId", "editorPorNombre",
+      "editorPorId", "editorPorNombre", "edicionRevisada",
       "linkVideo", "fechaPublicacion", "copyPublicacion",
       "casoUsoRef", "igMediaId", "igPermalink", "metaAdId", "metrics",
       "scriptMeta",
@@ -357,7 +358,45 @@ export class VideoPlanningService {
       }
     }
 
+    // Revision interna: marcar EDITADO abre una revision pendiente y avisa
+    // por correo al PM/CM; aprobarla estampa quien y cuando.
+    const seMarcoEditado = prevEdicion !== "EDITADO" && item.edicion === "EDITADO";
+    if (seMarcoEditado) {
+      item.edicionRevisada = false;
+      item.edicionRevisadaPorId = undefined;
+      item.edicionRevisadaNombre = undefined;
+      item.edicionRevisadaEn = undefined;
+    }
+    if (fields.edicionRevisada === true && actor?.id && Types.ObjectId.isValid(actor.id)) {
+      item.edicionRevisadaPorId = new Types.ObjectId(actor.id);
+      item.edicionRevisadaEn = new Date();
+      const revisor = await models.users.findById(actor.id).select("name email").lean();
+      item.edicionRevisadaNombre = revisor?.name || revisor?.email || undefined;
+    }
+
     await planning.save();
+
+    if (seMarcoEditado) {
+      (async () => {
+        const [workspace, revisores] = await Promise.all([
+          models.workspaces.findById(planning.workspaceId).select("name").lean(),
+          models.users
+            .find({ isInternal: true, internalRole: { $in: ["project_manager", "content_manager"] } })
+            .select("email")
+            .lean(),
+        ]);
+        await resendService.sendVideoReadyForReview({
+          to: revisores.map((r) => r.email),
+          workspaceName: workspace?.name || "Cliente",
+          numero: item.numero,
+          tema: item.tema,
+          editorNombre: item.editorPorNombre,
+          driveLink: item.driveLink,
+        });
+      })().catch((err: any) =>
+        console.warn("[VideoPlanningService] review email failed:", err.message)
+      );
+    }
 
     // Banderas: registrar transiciones de estado como eventos inmutables.
     reviewEventService
@@ -1016,5 +1055,47 @@ export class VideoPlanningService {
       listosCount: listos.length,
       stats,
     };
+  }
+
+  // ── REVIEW QUEUE ───────────────────────────────────────────────────────────
+  /**
+   * Videos EDITADOS esperando el visto bueno interno. Solo los marcados
+   * despues de que existe la revision (edicionRevisada === false explicito):
+   * sin ese filtro, todo el historial de editados inundaria la vista.
+   */
+  async getReviewQueue() {
+    const videoPlannings = await models.videoPlanning
+      .find({ items: { $elemMatch: { edicion: "EDITADO", edicionRevisada: false } } })
+      .populate("workspaceId", "name")
+      .lean();
+
+    const pendientes: any[] = [];
+    for (const vp of videoPlannings) {
+      const ws = vp.workspaceId as any;
+      for (const item of vp.items) {
+        if (item.edicion !== "EDITADO" || item.edicionRevisada !== false) continue;
+        pendientes.push({
+          workspaceId: String(ws?._id ?? ""),
+          workspaceName: ws?.name || "Sin entorno",
+          entryId: String(vp.planningEntryId),
+          planningId: String(vp._id),
+          itemId: String(item._id),
+          numero: item.numero,
+          tema: item.tema,
+          fechaPublicacion: item.fechaPublicacion,
+          linkVideo: item.linkVideo,
+          driveLink: item.driveLink,
+          editorNombre: item.editorPorNombre,
+        });
+      }
+    }
+
+    pendientes.sort((a, b) => {
+      const ta = a.fechaPublicacion ? new Date(a.fechaPublicacion).getTime() : Infinity;
+      const tb = b.fechaPublicacion ? new Date(b.fechaPublicacion).getTime() : Infinity;
+      return ta - tb;
+    });
+
+    return { pendientes };
   }
 }
