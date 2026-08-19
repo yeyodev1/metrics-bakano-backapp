@@ -950,8 +950,35 @@ export class VideoPlanningService {
   async getEditorQueue(editorId: string) {
     if (!Types.ObjectId.isValid(editorId)) throw new Error("INVALID_ID");
 
+    // Filtrar solo por `assignedTo` dejaba la cola vacia en produccion: los
+    // plannings se asignan a asistentes y content, casi nunca al editor (4 de
+    // 339 al 19 ago 2026). El trabajo real del editor son los entornos a los
+    // que tiene acceso, asi que la cola sale de sus workspaces y el
+    // assignedTo directo queda como refuerzo.
+    const editor = await models.users
+      .findById(editorId)
+      .select("workspaces")
+      .lean();
+    const workspaceIds = (editor?.workspaces ?? [])
+      .map((w: any) => w.workspaceId)
+      .filter(Boolean);
+
+    // Solo plannings del mes en curso: el flujo de marcar EDITADO existe
+    // desde el 18 ago 2026, asi que los meses viejos estan sin marcar y
+    // meterlos convertiria la cola en un backlog de cientos de items muertos
+    // (332 "por editar" con solo un mes extra, medido en prod).
+    const inicioMesPlanning = new Date();
+    inicioMesPlanning.setDate(1);
+    inicioMesPlanning.setHours(0, 0, 0, 0);
+
     const plannings = await models.planning
-      .find({ assignedTo: new Types.ObjectId(editorId) })
+      .find({
+        date: { $gte: inicioMesPlanning },
+        $or: [
+          { assignedTo: new Types.ObjectId(editorId) },
+          { workspaceId: { $in: workspaceIds } },
+        ],
+      })
       .select("_id workspaceId")
       .lean();
     const planningIds = plannings.map((p) => p._id);
@@ -1002,6 +1029,9 @@ export class VideoPlanningService {
           driveLink: item.driveLink,
           driveMonthFolderLink: vp.driveMonthFolderLink,
         };
+
+        // Una idea rechazada por el cliente no se edita: no es trabajo.
+        if (item.estadoIdea === "RECHAZADO") continue;
 
         if (item.edicion === "RECHAZADO") {
           reEditar.push(base);
