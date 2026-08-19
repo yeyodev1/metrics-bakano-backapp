@@ -7,6 +7,12 @@ import {
   guardarTelefonoDestinatario,
   marcarListaPlanificacion,
 } from "../controllers/planningNotification.controller";
+import {
+  notificarRevisionVideos,
+  registrarRevisionVideos,
+  revisionPendiente,
+  historialAvisosRevision,
+} from "../controllers/videoReviewNotification.controller";
 import { authMiddleware } from "../middlewares/auth.middleware";
 import { internalOrSuperadminMiddleware } from "../middlewares/internalOrSuperadmin.middleware";
 import {
@@ -181,6 +187,28 @@ videoPlanningRouter.post(
  * asi que a esa le basta con estar logueado.
  */
 videoPlanningRouter.get("/pending-approval", authMiddleware, planificacionPendiente);
+
+// ── Revision de videos terminados ─────────────────────────────────────────
+// Notificar es del equipo; entregar la revision y resolver la pendiente son
+// del cliente logueado, igual que en el circuito de aprobacion.
+videoPlanningRouter.get("/pending-review", authMiddleware, revisionPendiente);
+videoPlanningRouter.post(
+  "/:planningId/notify-review",
+  authMiddleware,
+  internalOrSuperadminMiddleware,
+  notificarRevisionVideos
+);
+videoPlanningRouter.post(
+  "/:planningId/video-review",
+  authMiddleware,
+  registrarRevisionVideos
+);
+videoPlanningRouter.get(
+  "/:planningId/review-notifications",
+  authMiddleware,
+  internalOrSuperadminMiddleware,
+  historialAvisosRevision
+);
 videoPlanningRouter.post(
   "/:planningId/notify",
   authMiddleware,

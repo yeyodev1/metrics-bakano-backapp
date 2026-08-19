@@ -80,4 +80,32 @@ cronRouter.get("/meta-metrics-sync", async (req: Request, res: Response) => {
   }
 });
 
+// GET /api/cron/video-review-reminders
+// Vercel Cron cada 4 horas: insiste a los clientes con videos editados sin
+// revisar. Un recordatorio por ciclo abierto, y solo si el ultimo aviso
+// tiene mas de 4 horas — asi el disparo manual del equipo tambien resetea
+// la cuenta y el cliente no recibe dos seguidos.
+cronRouter.get("/video-review-reminders", async (req: Request, res: Response) => {
+  const secret = process.env.CRON_SECRET;
+  if (!secret || req.headers["authorization"] !== `Bearer ${secret}`) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+
+  try {
+    const { videoReviewNotificationService } = await import(
+      "../services/videoReviewNotification.service"
+    );
+    const result = await videoReviewNotificationService.recordatorios();
+    console.log(
+      `[Cron] Recordatorios de revision: ${result.enviados}/${result.revisados} enviados` +
+        (result.errores.length ? ` — errores: ${result.errores.join(" | ")}` : "")
+    );
+    res.json({ ok: true, ...result });
+  } catch (err: any) {
+    console.error("[Cron] Recordatorios de revision fallaron:", err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 export default cronRouter;

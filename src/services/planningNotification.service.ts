@@ -146,7 +146,8 @@ export class PlanningNotificationService {
    * campo que no existe en el esquema, asi que el WhatsApp habria fallado
    * siempre con "el entorno no tiene telefono".
    */
-  private async destinatarios(workspaceId: any): Promise<{
+  // Publico: el circuito de revision de videos avisa a la misma gente.
+  async destinatarios(workspaceId: any): Promise<{
     correos: string[];
     contactos: Contacto[];
     sinTelefono: string[];
