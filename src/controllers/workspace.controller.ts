@@ -20,7 +20,8 @@ function validarTelefonoObligatorio(
   }
   const tel = normalizarTelefono(String(phoneNumber), phoneExtension || "593");
   if (!tel.valido) {
-    return "El numero de telefono no es valido. Revisa el numero y el codigo de pais.";
+    // El motivo concreto (largo, país) ahorra adivinar qué está mal.
+    return tel.error || "El numero de telefono no es valido. Revisa el numero y el codigo de pais.";
   }
   return null;
 }

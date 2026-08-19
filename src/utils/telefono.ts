@@ -47,13 +47,31 @@ export interface TelefonoNormalizado {
  * @param prefijo  el país elegido en el selector
  */
 export function normalizarTelefono(entrada: string, prefijo: string): TelefonoNormalizado {
-  const pais = paisPorPrefijo(prefijo);
+  let pais = paisPorPrefijo(prefijo);
   const fallo = (error: string): TelefonoNormalizado => ({
     valido: false,
     e164: "",
     legible: "",
     error,
   });
+
+  // Si el número ya viene internacional (+593...), su prefijo manda sobre el
+  // selector: el frontend puede mandar una extensión desincronizada o rota
+  // (vue-tel-input llegó a producir "+undefined") con el país correcto dentro
+  // del propio número. Solo se acepta el país cuyo largo calza exacto (con o
+  // sin el 0 nacional), para no confundir +51... de Perú con +593... cortado.
+  if ((entrada || "").trim().startsWith("+")) {
+    const digitosBruto = (entrada || "").replace(/\D/g, "");
+    const porNumero = PAISES.find((p) => {
+      if (!digitosBruto.startsWith(p.prefijo)) return false;
+      const resto = digitosBruto.slice(p.prefijo.length);
+      return (
+        resto.length === p.largoNacional ||
+        (resto.length === p.largoNacional + 1 && resto.startsWith("0"))
+      );
+    });
+    if (porNumero) pais = porNumero;
+  }
 
   if (!pais) return fallo("País no reconocido.");
 
