@@ -134,6 +134,21 @@ function mapWorkspace(workspace: LeanWorkspace): FinanceWorkspace {
 }
 
 /**
+ * Nombre reducido a su esencia para comparar: sin mayúsculas, sin tildes y con
+ * los espacios colapsados. "CASA MIA" y "CASA MÍA" son el mismo negocio; la
+ * tilde bastó para que el alta de finanzas creara un workspace duplicado en
+ * producción (13-14 ago 2026, 13 duplicados).
+ */
+function normalizeName(name: string): string {
+  return name
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
  * Crea el espacio de un cliente recién dado de alta en finanzas.
  *
  * Es idempotente a propósito: si ya existe uno con ese nombre lo devuelve en
@@ -150,13 +165,19 @@ export async function createWorkspaceForFinance(name: string): Promise<{
     throw new CustomError("El nombre del espacio es obligatorio.", 400);
   }
 
-  // Búsqueda sin distinguir mayúsculas ni espacios: "La Capilla" y "la capilla"
-  // son el mismo negocio y duplicarlos ensucia el listado de finanzas.
-  const escaped = clean.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const existing = await models.workspaces
-    .findOne({ name: { $regex: `^${escaped}$`, $options: "i" } }, FINANCE_PROJECTION)
-    .populate({ path: "adminId", select: "name email photoUrl" })
-    .lean();
+  // La colación no cubre tildes ni espacios internos, así que el match exacto
+  // por regex se queda corto. Se comparan todos los nombres normalizados en
+  // memoria: son ~130 workspaces, no vale un índice especial.
+  const target = normalizeName(clean);
+  const candidates = await models.workspaces.find({}, { name: 1 }).lean();
+  const match = candidates.find((w) => normalizeName(String(w.name ?? "")) === target);
+
+  const existing = match
+    ? await models.workspaces
+        .findById(match._id, FINANCE_PROJECTION)
+        .populate({ path: "adminId", select: "name email photoUrl" })
+        .lean()
+    : null;
 
   if (existing) {
     return { workspace: mapWorkspace(existing as unknown as LeanWorkspace), created: false };
