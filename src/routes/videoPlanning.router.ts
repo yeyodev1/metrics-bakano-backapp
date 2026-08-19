@@ -20,6 +20,7 @@ import {
   getCalendarItems,
   getEditorCompletedItems,
   getEditorQueue,
+  getReviewQueue,
   linkReelMedia,
   syncVideoItemMetrics,
   getPublishedReelsForWorkspace,
@@ -75,6 +76,14 @@ videoPlanningRouter.get(
   authMiddleware,
   internalOrSuperadminMiddleware,
   getEditorQueue
+);
+
+// GET /api/video-planning/review-queue — videos editados esperando visto bueno
+videoPlanningRouter.get(
+  "/review-queue",
+  authMiddleware,
+  internalOrSuperadminMiddleware,
+  getReviewQueue
 );
 
 videoPlanningRouter.get(

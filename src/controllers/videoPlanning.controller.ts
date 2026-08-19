@@ -336,6 +336,21 @@ export async function uploadItemMedia(
 }
 
 // ── GET /video-planning/editor/:editorId/edited-items ─────────────────────
+// ── GET /video-planning/review-queue ───────────────────────────────────────
+export async function getReviewQueue(
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+) {
+  try {
+    const queue = await service.getReviewQueue();
+    res.status(HttpStatusCode.Ok).json(queue);
+  } catch (error: any) {
+    console.error("getReviewQueue error:", error);
+    next(error);
+  }
+}
+
 // ── GET /video-planning/editor-queue ───────────────────────────────────────
 export async function getEditorQueue(
   req: AuthRequest,

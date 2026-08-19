@@ -124,6 +124,15 @@ export interface IVideoItem {
   /** Archivo maestro en la unidad compartida de Drive (entrega al cliente). */
   driveFileId?: string;
   driveLink?: string;
+  /**
+   * Revision interna del video editado. Al marcar EDITADO queda en false y
+   * se avisa por correo al PM/CM; el revisor la aprueba desde la vista de
+   * revision o rechaza la edicion (que vuelve a la cola del editor).
+   */
+  edicionRevisada?: boolean;
+  edicionRevisadaPorId?: Types.ObjectId;
+  edicionRevisadaNombre?: string;
+  edicionRevisadaEn?: Date;
   fechaPublicacion?: Date;
   copyPublicacion?: string;
   order: number;
@@ -236,6 +245,10 @@ const VideoItemSchema = new Schema<IVideoItem>(
     linkVideo: { type: String, trim: true },
     driveFileId: { type: String, trim: true },
     driveLink: { type: String, trim: true },
+    edicionRevisada: { type: Boolean },
+    edicionRevisadaPorId: { type: Schema.Types.ObjectId, ref: "User" },
+    edicionRevisadaNombre: { type: String, trim: true },
+    edicionRevisadaEn: { type: Date },
     fechaPublicacion: { type: Date },
     copyPublicacion: { type: String, trim: true },
     order: { type: Number, default: 0 },
