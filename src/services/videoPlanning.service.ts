@@ -934,12 +934,13 @@ export class VideoPlanningService {
       motivoRechazo?: string;
       estadoProduccion: string;
       driveLink?: string;
+      driveMonthFolderLink?: string;
     }
 
     const reEditar: ColaItem[] = [];
     const porEditar: ColaItem[] = [];
     const porSubirMaster: ColaItem[] = [];
-    let listosCount = 0;
+    const listos: ColaItem[] = [];
 
     const inicioMes = new Date();
     inicioMes.setDate(1);
@@ -960,6 +961,7 @@ export class VideoPlanningService {
           motivoRechazo: item.motivoRechazo,
           estadoProduccion: item.estadoProduccion,
           driveLink: item.driveLink,
+          driveMonthFolderLink: vp.driveMonthFolderLink,
         };
 
         if (item.edicion === "RECHAZADO") {
@@ -969,7 +971,7 @@ export class VideoPlanningService {
           if (item.estadoProduccion === "GRABADO") porEditar.push(base);
         } else if (item.edicion === "EDITADO") {
           if (!item.driveFileId) porSubirMaster.push(base);
-          listosCount += 1;
+          listos.push(base);
         }
       }
     }
@@ -983,6 +985,8 @@ export class VideoPlanningService {
     reEditar.sort(porFecha);
     porEditar.sort(porFecha);
     porSubirMaster.sort(porFecha);
+    // Listos: los mas recientes primero, con su link de Drive a la mano.
+    listos.sort((a, b) => porFecha(b, a));
 
     // Sus numeros del mes salen del sistema de banderas (mismos criterios
     // que ve el PM), sin pasar por el gate del router de flags.
@@ -1004,6 +1008,13 @@ export class VideoPlanningService {
       // Sin eventos todavia: la cola sigue siendo util sin los numeros.
     }
 
-    return { reEditar, porEditar, porSubirMaster, listosCount, stats };
+    return {
+      reEditar,
+      porEditar,
+      porSubirMaster,
+      listos: listos.slice(0, 30),
+      listosCount: listos.length,
+      stats,
+    };
   }
 }
