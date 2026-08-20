@@ -47,6 +47,23 @@ export async function createFinanceCheckout(req: AuthRequest, res: Response): Pr
   }
 }
 
+/** POST /api/workspaces/:workspaceId/finance-billing/card-update-session */
+export async function createFinanceCardUpdate(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const workspaceId = String(req.params.workspaceId);
+
+    // Igual que el checkout: el returnUrl se arma server-side para que nadie
+    // redirija la sesion del portal a dominios ajenos.
+    const appUrl = (process.env.APP_URL || "http://localhost:5173").replace(/\/+$/, "");
+    const returnUrl = `${appUrl}/workspaces/${workspaceId}/facturacion?tarjeta=lista`;
+
+    const data = await billingPortalService.createCardUpdateSession(workspaceId, returnUrl);
+    res.status(201).json(data);
+  } catch (error) {
+    handleError(res, error, "No se pudo abrir el cambio de tarjeta.");
+  }
+}
+
 /** POST /api/workspaces/:workspaceId/finance-billing/submissions — multipart: receipt + montos */
 export async function submitFinanceReceipt(req: AuthRequest, res: Response): Promise<void> {
   try {

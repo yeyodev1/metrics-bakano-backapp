@@ -3,6 +3,7 @@ import { authMiddleware } from "../middlewares/auth.middleware";
 import { workspaceAccessMiddleware } from "../middlewares/workspaceAccess.middleware";
 import { uploadDocument } from "../middlewares/upload.middleware";
 import {
+  createFinanceCardUpdate,
   createFinanceCheckout,
   getFinanceBilling,
   submitFinanceReceipt,
@@ -22,6 +23,11 @@ billingPortalRouter.post(
   "/:workspaceId/finance-billing/checkout",
   workspaceAccessMiddleware,
   createFinanceCheckout
+);
+billingPortalRouter.post(
+  "/:workspaceId/finance-billing/card-update-session",
+  workspaceAccessMiddleware,
+  createFinanceCardUpdate
 );
 billingPortalRouter.post(
   "/:workspaceId/finance-billing/submissions",
