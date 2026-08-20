@@ -193,7 +193,10 @@ async function recordMetricSnapshot(
 }
 
 // Fields an editor (internalRole=editor) is allowed to modify
-const EDITOR_ALLOWED_FIELDS = new Set(["estadoProduccion", "edicion"]);
+// linkVideo: el editor entrega el video terminado (Drive, WeTransfer...) para
+// que el cliente lo revise; sin esto solo podia "marcar editado" y el cliente
+// llegaba a una revision sin enlace.
+const EDITOR_ALLOWED_FIELDS = new Set(["estadoProduccion", "edicion", "linkVideo"]);
 
 export class VideoPlanningService {
   // ── GET ────────────────────────────────────────────────────────────────────
@@ -985,6 +988,9 @@ export class VideoPlanningService {
 
     const videoPlannings = await models.videoPlanning
       .find({ planningEntryId: { $in: planningIds } })
+      // Sin guiones ni metricas: la cola solo necesita estados y titulos, y
+      // los guiones IA pesaban la mayor parte de la respuesta.
+      .select("-items.guion -items.guionIA -items.scriptMeta -items.copyPublicacion -items.metrics -items.descripcion -items.recursos")
       .populate("workspaceId", "name")
       .lean();
 

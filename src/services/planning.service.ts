@@ -39,6 +39,32 @@ export class PlanningService {
       .sort({ date: 1 });
   }
 
+  /**
+   * Entradas de varios entornos en UNA consulta, con el nombre del entorno
+   * ya resuelto. `workspaceIds` null = sin filtro de entorno.
+   */
+  async listEntriesAcross(workspaceIds: string[] | null, startDate: Date, endDate: Date) {
+    const query: any = { date: { $gte: startDate, $lte: endDate } };
+    if (workspaceIds) {
+      query.workspaceId = { $in: workspaceIds.filter((id) => Types.ObjectId.isValid(id)).map((id) => new Types.ObjectId(id)) };
+    }
+    const entries = await models.planning
+      .find(query)
+      .select("workspaceId title date assignedTo")
+      .populate("workspaceId", "name photo")
+      .sort({ date: 1 })
+      .lean();
+    return entries.map((e: any) => {
+      const ws = e.workspaceId && typeof e.workspaceId === "object" ? e.workspaceId : null;
+      return {
+        ...e,
+        workspaceId: ws ? ws._id : e.workspaceId,
+        workspaceName: ws?.name ?? "Workspace",
+        workspacePhoto: ws?.photo ?? null,
+      };
+    });
+  }
+
   async updateEntry(
     entryId: string,
     data: {

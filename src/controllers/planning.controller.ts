@@ -189,3 +189,45 @@ export async function listMyWeek(req: AuthRequest, res: Response, next: NextFunc
     next(error);
   }
 }
+
+/**
+ * GET /planning/mine?startDate&endDate — las planificaciones del mes de TODOS
+ * los entornos del usuario, en una sola consulta.
+ *
+ * El calendario del editor pedia /planning/:workspaceId una vez por cliente
+ * (100+ peticiones por mes) y se quedaba en "Cargando planificaciones..."
+ * durante decenas de segundos. Un editor ve sus workspaces; si no tiene
+ * ninguno asignado y es interno, ve todos.
+ */
+export async function listMine(req: AuthRequest, res: Response, next: NextFunction) {
+  try {
+    const { startDate, endDate } = req.query;
+    if (!startDate || !endDate) {
+      res.status(HttpStatusCode.BadRequest).send({ message: "startDate and endDate are required." });
+      return;
+    }
+
+    const user = (await models.users.findById(req.user?._id).select("workspaces isInternal role").lean()) as any;
+    if (!user) {
+      res.status(HttpStatusCode.NotFound).send({ message: "User not found." });
+      return;
+    }
+
+    const ownIds: string[] = (user.workspaces || [])
+      .map((ws: any) => ws.workspaceId?._id?.toString() ?? ws.workspaceId?.toString())
+      .filter(Boolean);
+    const verTodo =
+      ownIds.length === 0 && (req.user?.role === "superadmin" || user.role === "superadmin" || user.isInternal);
+
+    const entries = await planningService.listEntriesAcross(
+      verTodo ? null : ownIds,
+      new Date(startDate as string),
+      new Date(endDate as string)
+    );
+
+    res.status(HttpStatusCode.Ok).send({ message: "Planning entries retrieved successfully.", entries });
+  } catch (error) {
+    console.error("listMine error:", error);
+    next(error);
+  }
+}

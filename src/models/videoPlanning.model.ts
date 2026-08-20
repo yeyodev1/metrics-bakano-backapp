@@ -449,6 +449,8 @@ const VideoPlanningSchema = new Schema<IVideoPlanning>(
 );
 
 VideoPlanningSchema.index({ workspaceId: 1 });
+// La cola del editor busca por lote de planificaciones; sin esto era COLLSCAN.
+VideoPlanningSchema.index({ planningEntryId: 1 });
 // El cron de recordatorios barre solo los ciclos abiertos.
 VideoPlanningSchema.index({ revisionVideosAbierta: 1 });
 VideoPlanningSchema.index({ workspaceId: 1, "items.fechaPublicacion": 1 });
