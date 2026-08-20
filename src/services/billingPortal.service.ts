@@ -65,6 +65,22 @@ export async function createCheckout(
   }
 }
 
+/** Sesion del Billing Portal de Stripe para cambiar la tarjeta de la suscripcion. */
+export async function createCardUpdateSession(
+  workspaceId: string,
+  returnUrl: string
+): Promise<unknown> {
+  try {
+    const { data } = await getClient().post(
+      `/portal/workspaces/${workspaceId}/card-update-session`,
+      { returnUrl }
+    );
+    return data;
+  } catch (error) {
+    rethrow(error);
+  }
+}
+
 export interface SubmitReceiptInput {
   buffer: Buffer;
   filename: string;
