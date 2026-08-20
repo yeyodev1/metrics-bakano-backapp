@@ -8,6 +8,7 @@ import {
   updateEntry,
   deleteEntry,
   listMyWeek,
+  listMine,
 } from "../controllers/planning.controller";
 
 const planningRouter = Router();
@@ -19,6 +20,8 @@ planningRouter.use(authMiddleware);
 // Pattern: /workspaces/:workspaceId/planning
 // Global week view — MUST be before /:workspaceId to avoid param capture
 planningRouter.get("/my-week", listMyWeek);
+// Mes completo de todos los entornos del usuario, en una consulta (calendario del editor)
+planningRouter.get("/mine", listMine);
 
 planningRouter.get("/:workspaceId", workspaceAccessMiddleware, listEntries);
 planningRouter.post("/:workspaceId", workspaceAdminMiddleware, createEntry);
