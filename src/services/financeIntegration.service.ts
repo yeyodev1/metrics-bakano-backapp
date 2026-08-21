@@ -228,14 +228,25 @@ export async function setWorkspaceActiveForFinance(
     throw new CustomError("Identificador de workspace inválido.", 400);
   }
 
+  // Desactivar exige motivo. Finanzas lo manda como `reason`; si por lo que sea
+  // no llega, se registra uno genérico antes que dejar el corte sin hacer: el
+  // cliente moroso tiene que quedar cerrado igual, y el motivo se ve en el log.
+  const motivo = (reason ?? "").trim() || "Desactivado desde Finanzas (sin motivo indicado)";
+
   try {
-    await workspaceService.toggleWorkspaceActive(workspaceId, isActive);
+    await workspaceService.toggleWorkspaceActive(workspaceId, isActive, {
+      motivo,
+      porNombre: "Finanzas",
+    });
   } catch (error: any) {
     if (error?.message === "NOT_FOUND") {
       throw new CustomError("Workspace no encontrado.", 404);
     }
     if (error?.message === "INVALID_ID") {
       throw new CustomError("Identificador de workspace inválido.", 400);
+    }
+    if (error?.message === "MOTIVO_REQUERIDO") {
+      throw new CustomError("Indica por qué se desactiva el entorno (reason).", 400);
     }
     throw error;
   }
