@@ -108,4 +108,28 @@ cronRouter.get("/video-review-reminders", async (req: Request, res: Response) =>
   }
 });
 
+// GET /api/cron/monthly-target-reminders
+// Vercel Cron 13:00 UTC (= 8AM Ecuador) cada dia
+// laborable: avisa al equipo asignado de cada cliente si falta la meta del mes,
+// si el ritmo va atrasado o si nadie registra facturacion.
+cronRouter.get("/monthly-target-reminders", async (req: Request, res: Response) => {
+  const secret = process.env.CRON_SECRET;
+  if (!secret || req.headers["authorization"] !== `Bearer ${secret}`) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+
+  try {
+    const { internalPulseService } = await import("../services/internalPulse.service");
+    const result = await internalPulseService.runTargetReminders({ sendEmail: true });
+    console.log(
+      `[Cron] Recordatorios de meta mensual: ${result.alerted.length}/${result.reviewed} clientes avisados`
+    );
+    res.json({ ok: true, ...result });
+  } catch (err: any) {
+    console.error("[Cron] Recordatorios de meta mensual fallaron:", err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 export default cronRouter;
