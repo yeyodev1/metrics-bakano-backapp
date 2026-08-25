@@ -646,6 +646,180 @@ export class ResendService {
   }
 
   /**
+   * Resumen interno para una persona del equipo con todos sus clientes cuya
+   * meta mensual esta en rojo. Es un solo correo por persona a proposito: el
+   * equipo interno esta asignado a casi todos los entornos, y un correo por
+   * cliente convertia el recordatorio en spam propio. El cliente nunca lo ve.
+   */
+  async sendMonthlyTargetDigest(params: {
+    to: string;
+    recipientName: string;
+    year: number;
+    month: number;
+    expectedPct: number;
+    clients: Array<{
+      workspaceId: string;
+      name: string;
+      hasTarget: boolean;
+      targetAmount: number;
+      billed: number;
+      progressPct: number;
+      missingCount: number;
+      motivos: string[];
+    }>;
+  }): Promise<void> {
+    const { to, recipientName, year, month, expectedPct, clients } = params;
+    if (!clients.length) return;
+
+    const appUrl = "https://metrics.bakano.ec";
+    const overviewUrl = `${appUrl}/app/pulso`;
+    const firstName = recipientName.split(" ")[0];
+    const money = (v: number) =>
+      `$${v.toLocaleString("es-EC", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+
+    const MESES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
+    const periodo = `${MESES[month - 1]} ${year}`;
+
+    const sinMeta = clients.filter((c) => !c.hasTarget).length;
+    const fueraDeRitmo = clients.length - sinMeta;
+
+    // El correo no lista 90 clientes: los 10 peores y un conteo del resto. Una
+    // lista infinita no se lee, y el tablero ya tiene la lista completa.
+    const MAX_FILAS = 10;
+    const visibles = clients.slice(0, MAX_FILAS);
+    const resto = clients.length - visibles.length;
+
+    const filas = visibles
+      .map((c) => {
+        const acento = !c.hasTarget ? "#e6285c" : c.progressPct >= expectedPct ? "#16a34a" : "#f59e0b";
+        const avance = c.hasTarget
+          ? `${c.progressPct.toFixed(0)}% de ${money(c.targetAmount)}`
+          : "sin meta definida";
+        return `
+                <tr>
+                  <td style="padding:14px 18px;border-top:1px solid #e2e8f0;">
+                    <table width="100%" cellpadding="0" cellspacing="0">
+                      <tr>
+                        <td>
+                          <a href="${appUrl}/app/workspaces/${c.workspaceId}/pulso" style="color:#0f172a;font-size:14px;font-weight:700;text-decoration:none;">${c.name}</a>
+                          <p style="margin:3px 0 0;color:#64748b;font-size:12px;line-height:1.5;">${c.motivos.join(" · ")}</p>
+                        </td>
+                        <td align="right" style="white-space:nowrap;padding-left:12px;">
+                          <p style="margin:0;color:${acento};font-size:13px;font-weight:800;">${avance}</p>
+                          <p style="margin:3px 0 0;color:#94a3b8;font-size:11px;">${money(c.billed)} facturado</p>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>`;
+      })
+      .join("");
+
+    const html = `
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Pulso de metas · ${periodo}</title>
+</head>
+<body style="margin:0;padding:0;background-color:#f0f2f5;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f0f2f5;padding:40px 16px;">
+    <tr>
+      <td align="center">
+        <table width="620" cellpadding="0" cellspacing="0" style="max-width:620px;width:100%;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.10);">
+
+          <tr>
+            <td style="background:linear-gradient(135deg,#191423 0%,#5c3070 100%);padding:34px 40px 30px;text-align:center;">
+              <p style="margin:0 0 12px;color:#ffffff;font-size:21px;font-weight:800;letter-spacing:-0.5px;">Bakano Ads · Pulso interno</p>
+              <h1 style="margin:0;color:#ffffff;font-size:23px;font-weight:700;line-height:1.3;">${clients.length === 1 ? "Un cliente necesita atencion" : `${clients.length} clientes necesitan atencion`}</h1>
+              <p style="margin:10px 0 0;color:rgba(255,255,255,0.7);font-size:14px;">Hola ${firstName}, esto es lo de ${periodo}. El mes ya corrio el ${expectedPct.toFixed(0)}%.</p>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="padding:26px 40px 0;">
+              <table width="100%" cellpadding="0" cellspacing="0">
+                <tr>
+                  <td width="50%" style="padding-right:6px;">
+                    <table width="100%" cellpadding="0" cellspacing="0" style="background:#fff1f4;border-radius:12px;">
+                      <tr><td style="padding:14px 16px;">
+                        <p style="margin:0;color:#e6285c;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:0.6px;">Sin meta</p>
+                        <p style="margin:4px 0 0;color:#0f172a;font-size:22px;font-weight:800;">${sinMeta}</p>
+                      </td></tr>
+                    </table>
+                  </td>
+                  <td width="50%" style="padding-left:6px;">
+                    <table width="100%" cellpadding="0" cellspacing="0" style="background:#fffaf0;border-radius:12px;">
+                      <tr><td style="padding:14px 16px;">
+                        <p style="margin:0;color:#b45309;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:0.6px;">Fuera de ritmo</p>
+                        <p style="margin:4px 0 0;color:#0f172a;font-size:22px;font-weight:800;">${fueraDeRitmo}</p>
+                      </td></tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="padding:24px 40px 0;">
+              <p style="margin:0 0 10px;color:#94a3b8;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.6px;">Tus clientes</p>
+              <table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e2e8f0;border-radius:12px;overflow:hidden;">
+                ${filas}
+              </table>
+              ${resto > 0 ? `<p style="margin:10px 0 0;color:#64748b;font-size:12px;">Y ${resto} clientes mas en el tablero.</p>` : ""}
+            </td>
+          </tr>
+
+          <tr>
+            <td style="padding:26px 40px 0;text-align:center;">
+              <a href="${overviewUrl}" style="display:inline-block;background:#e6285c;color:#ffffff;text-decoration:none;padding:14px 32px;border-radius:10px;font-size:15px;font-weight:700;">
+                Abrir el pulso de metas →
+              </a>
+            </td>
+          </tr>
+
+          <tr><td style="height:30px;"></td></tr>
+
+          <tr>
+            <td style="background:#f8fafc;padding:20px 40px;border-top:1px solid #e2e8f0;text-align:center;">
+              <p style="margin:0;color:#94a3b8;font-size:12px;line-height:1.6;">
+                Correo interno del equipo Bakano. El cliente no recibe esta informacion.
+              </p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+
+    const text =
+      `Hola ${firstName}: ${clients.length} cliente(s) con la meta de ${periodo} en rojo ` +
+      `(${sinMeta} sin meta, ${fueraDeRitmo} fuera de ritmo). ` +
+      visibles.map((c) => `${c.name}: ${c.motivos.join(", ")}`).join(" | ") +
+      ` Revisa el tablero en ${overviewUrl}`;
+
+    await this.client.emails.send({
+      from: this.from,
+      to,
+      replyTo: process.env.RESEND_REPLY_TO || "hola@bakano.ec",
+      subject:
+        clients.length === 1
+          ? `${clients[0].name}: meta de ${periodo} | Bakano Ads`
+          : `${clients.length} clientes con la meta de ${periodo} en rojo | Bakano Ads`,
+      html,
+      text,
+      headers: {
+        "X-Entity-Ref-ID": `monthly-target-digest-${year}-${month}`,
+      },
+    });
+  }
+
+  /**
    * Sends a "What's New" changelog email to a single user.
    */
   async sendChangelogEmail(params: {

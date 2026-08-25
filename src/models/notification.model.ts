@@ -5,7 +5,9 @@ export type NotificationType =
   | "video_status_changed"
   | "video_planning_resent"
   | "brand_profile_missing"
-  | "billing_reminder";
+  | "billing_reminder"
+  | "monthly_target_missing"
+  | "monthly_target_pace";
 
 export interface INotification extends Document {
   userId: Types.ObjectId;
@@ -34,6 +36,8 @@ const NotificationSchema = new Schema<INotification>(
         "video_planning_resent",
         "brand_profile_missing",
         "billing_reminder",
+        "monthly_target_missing",
+        "monthly_target_pace",
       ],
       required: true,
     },

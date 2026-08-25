@@ -18,6 +18,7 @@ import { VideoMetricSnapshotModel } from "./videoMetricSnapshot.model";
 import { EngramModel } from "./engram.model";
 import { ScriptFeedbackModel } from "./scriptFeedback.model";
 import { ReviewEventModel } from "./reviewEvent.model";
+import { MonthlyTargetModel } from "./monthlyTarget.model";
 
 const models = {
   users: UserModel,
@@ -40,6 +41,7 @@ const models = {
   engrams: EngramModel,
   scriptFeedback: ScriptFeedbackModel,
   reviewEvents: ReviewEventModel,
+  monthlyTargets: MonthlyTargetModel,
 };
 
 export default models;

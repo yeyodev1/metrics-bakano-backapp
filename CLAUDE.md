@@ -63,6 +63,30 @@ Feature para registrar facturación diaria por workspace y calcular ROAS vs gast
 - Instalar `node-cron` para el cron job
 - Agregar `sendBillingNotification` y `sendDailyReminder` en `resend.service.ts`
 
+### Pulso Interno + Meta Mensual (2026-08-25)
+Segmento **interno** dentro de cada entorno: meta mensual del cliente contra su
+facturación real, ritmo del mes, equipo asignado y recordatorios.
+
+- Modelo: `src/models/monthlyTarget.model.ts` (única por `workspaceId + year + month`)
+- Servicio: `src/services/internalPulse.service.ts`
+- Rutas: `/api/internal-pulse` (`authMiddleware` + `internalOrSuperadminMiddleware`)
+  - `GET /overview` · `GET /missing-count` · `GET /:workspaceId`
+  - `GET /:workspaceId/history` · `GET /:workspaceId/status` (etiqueta del menú)
+  - `PUT /:workspaceId/target` · `POST /:workspaceId/remind`
+- Quién define la meta: cualquiera con `isInternal` o `superadmin`. Se guarda
+  `setBy` (quién y cuándo). El cliente no puede verla ni editarla.
+- Cron: `/api/cron/monthly-target-reminders` (13:00 UTC, lun-vie)
+- Email: `resendService.sendMonthlyTargetDigest` — **un correo por persona**, no
+  por cliente: el equipo interno está asignado a casi todos los entornos y la
+  versión por cliente mandaba ~900 correos diarios.
+- El día en curso no cuenta como hueco ni corta la racha: la facturación se
+  registra al cierre del día.
+- Frontend: `views/workspaces/InternalPulseView/` (menú "Meta del Mes", ruta
+  `WorkspacePulse`) y `views/pulse/PulseOverviewView.vue` (menú "Metas de
+  Clientes", ruta `PulseOverview`), ambas `requiresInternal: true`.
+- El menú marca `SIN META` en el cliente abierto y cuántos clientes siguen sin
+  meta en el link global.
+
 ## Notas importantes
 - No hay cron jobs instalados aún — usar `node-cron`
 - Los emails tienen plantillas HTML inline (ver patrón en `resend.service.ts`)
