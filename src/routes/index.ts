@@ -29,6 +29,7 @@ import financeIntegrationRouter from "./financeIntegration.router";
 import billingPortalRouter from "./billingPortal.router";
 import flagsRouter from "./flags.router";
 import driveRouter from "./drive.router";
+import internalPulseRouter from "./internalPulse.router";
 
 function routerApi(app: Application) {
   const router = express.Router();
@@ -65,6 +66,7 @@ function routerApi(app: Application) {
   router.use("/workspaces", billingPortalRouter);
   router.use("/flags", flagsRouter);
   router.use("/drive", driveRouter);
+  router.use("/internal-pulse", internalPulseRouter);
 
   // Webhooks are top-level on v1
   app.use("/v1/webhooks", webhookRouter);
