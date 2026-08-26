@@ -15,6 +15,7 @@ import {
 } from "../controllers/videoReviewNotification.controller";
 import { authMiddleware } from "../middlewares/auth.middleware";
 import { internalOrSuperadminMiddleware } from "../middlewares/internalOrSuperadmin.middleware";
+import { uploadScriptRef, deleteScriptRef } from "../controllers/scriptRefs.controller";
 import {
   getByEntry,
   createPlanning,
@@ -35,7 +36,7 @@ import {
   getWorkspaceAds,
 } from "../controllers/videoPlanning.controller";
 import { generateScript, generateScriptQuick, getLLMStatus } from "../controllers/scriptGeneration.controller";
-import { uploadMedia } from "../middlewares/upload.middleware";
+import { uploadMedia, uploadDocument } from "../middlewares/upload.middleware";
 
 // ── Router A: mounted at /api/planning-entries ────────────────────────────
 // GET  /api/planning-entries/:entryId/video-planning
@@ -163,6 +164,20 @@ videoPlanningRouter.post(
   internalOrSuperadminMiddleware,
   uploadMedia.single("file"),
   uploadItemMedia
+);
+// Referencias del guión (imágenes / PDF) — antes de las rutas con param
+videoPlanningRouter.post(
+  "/items/:itemId/script-refs",
+  authMiddleware,
+  internalOrSuperadminMiddleware,
+  uploadDocument.single("file"),
+  uploadScriptRef
+);
+videoPlanningRouter.delete(
+  "/items/:itemId/script-refs/:refId",
+  authMiddleware,
+  internalOrSuperadminMiddleware,
+  deleteScriptRef
 );
 // Must be registered before /:videoItemId/generate-script to avoid route collision
 videoPlanningRouter.post(

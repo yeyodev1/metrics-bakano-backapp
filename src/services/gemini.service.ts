@@ -312,6 +312,11 @@ export interface GenerateScriptParams {
   };
   contextoMes?: ScriptContext;
   fileUris?: GeminiFileResult[];
+  /**
+   * Nombres de las referencias adjuntas a este video. Van al prompt para que el
+   * modelo sepa que esos archivos describen ESTE video y no la marca en general.
+   */
+  refsAdjuntas?: string[];
   /** Rendered engram (this brand's learned patterns), if one is active. */
   engramBlock?: string;
   /** Where this script will run. Defaults to `feed`. */
@@ -330,34 +335,31 @@ export interface GuionIAResult {
   /** Solo cuando se pidió doble hook: el giro que reengancha, aparte. */
   hook2?: string;
   cuerpo: string;
-  /** Cierre por defecto; espeja al final que corresponde al `objetivo` pedido. */
+  /** Único cierre del guión, escrito para el `objetivo` con el que se pidió. */
   cta: string;
-  ctaFeed: string;
-  ctaAds: string;
+  /** @deprecated Guiones generados antes de que hubiera un solo final. */
+  ctaFeed?: string;
+  /** @deprecated Guiones generados antes de que hubiera un solo final. */
+  ctaAds?: string;
   broll: string;
 }
 
 /**
- * Deja los dos finales siempre presentes.
+ * Deja un único `cta`, el que corresponde al objetivo pedido.
  *
- * El modelo a veces devuelve solo `cta` (guiones viejos, o cuando ignora el
- * campo nuevo). En vez de dejar la tarjeta vacía en la interfaz, se rellena
- * con lo que haya, y `cta` queda espejando el final del objetivo pedido para
- * no romper lo que ya leía ese campo.
+ * El modelo a veces devuelve los campos viejos `ctaFeed`/`ctaAds` en vez de
+ * `cta` — la forma anterior del prompt sigue en su entrenamiento. En ese caso
+ * se toma el que corresponde al objetivo en vez de dejar el cierre vacío.
  */
-function normalizeFinales(
+function normalizeFinal(
   parsed: GuionIAResult,
   objetivo?: ObjetivoGuion
 ): GuionIAResult {
-  const feed = (parsed.ctaFeed || parsed.cta || "").trim();
-  const ads = (parsed.ctaAds || parsed.cta || "").trim();
+  const heredado = objetivo === "anuncio" ? parsed.ctaAds : parsed.ctaFeed;
+  const cta = (parsed.cta || heredado || "").trim();
 
-  return {
-    ...parsed,
-    ctaFeed: feed,
-    ctaAds: ads,
-    cta: objetivo === "anuncio" ? ads : feed,
-  };
+  const { ctaFeed: _feed, ctaAds: _ads, ...resto } = parsed;
+  return { ...resto, cta };
 }
 
 export class GeminiService {
@@ -436,6 +438,14 @@ VIDEO A GENERAR:
       }
     }
 
+    if (params.refsAdjuntas?.length) {
+      userPrompt += `\n\nREFERENCIAS ADJUNTAS A ESTE VIDEO: ${params.refsAdjuntas.join(", ")}.
+Están entre los archivos de esta conversación y describen ESTE video en concreto,
+no la marca en general. Míralas antes de escribir: el concepto visual, el B-roll y
+los productos que nombres tienen que corresponder con lo que muestran. Si una
+referencia contradice al perfil de marca, manda la referencia.`;
+    }
+
     userPrompt += `\n\nINSTRUCCIONES DE GENERACIÓN:
 - El guión DEBE usar terminología, datos y contexto específico del perfil de marca de arriba.
 - El gancho DEBE ser una afirmación directa y cruda que haga que el espectador se sienta identificado de inmediato. NUNCA uses preguntas (sin '¿'), NUNCA menciones ofertas, precios o descuentos en el gancho. El formato es: [Dolor/Situación real del público] + ["este video es para ti" o frase de conexión similar]. Ejemplo: "Cansada de no lucir joven, este video es para ti."
@@ -466,15 +476,17 @@ Genera el guión completo en JSON con exactamente estos campos:
         ? "Desarrollo que arranca DESPUÉS del Hook 2, sin repetirlo"
         : "Empieza con el HOOK 2 (el giro que reengancha) y luego desarrolla"
     }, hasta completar 45 segundos como máximo. Con datos concretos del nicho",
-  "ctaFeed": "Cierre para FEED (orgánico). Bajo compromiso: comentar una palabra clave en MAYÚSCULAS, guardar el video o seguir la cuenta. Incluye el nombre del presentador. Nada de links ni urgencia de venta",
-  "ctaAds": "Cierre para ANUNCIO (pauta pagada). Una sola acción comercial directa e inmediata: tocar el enlace, escribir por WhatsApp o comprar. Nombra el producto explícitamente. Sin pedir comentarios ni seguidores, porque en pauta eso no convierte",
+  "cta": "${
+      params.objetivo === "anuncio"
+        ? "Cierre para ANUNCIO (pauta pagada). Una sola acción comercial directa e inmediata: tocar el enlace, escribir por WhatsApp o comprar. Nombra el producto explícitamente. Sin pedir comentarios ni seguidores, porque en pauta eso no convierte"
+        : "Cierre para FEED (orgánico). Bajo compromiso: comentar una palabra clave en MAYÚSCULAS, guardar el video o seguir la cuenta. Incluye el nombre del presentador. Nada de links ni urgencia de venta"
+    }",
   "broll": "Lista de tomas de apoyo y recursos visuales específicos al nicho/servicio"
 }
 
-REGLA DE LOS DOS FINALES: el mismo guión se publica en el feed y también se pauta.
-Por eso "ctaFeed" y "ctaAds" NO son la misma frase reescrita: cambian la acción que
-piden. El cuerpo y el gancho son idénticos para los dos; solo cambia el cierre.
-Cada final va en una o dos frases, listo para leer en cámara.`;
+REGLA DEL CIERRE: hay UN solo final, el del objetivo indicado arriba. No devuelvas
+variantes ni campos "ctaFeed"/"ctaAds". Va en una o dos frases, listo para leer en
+cámara.`;
 
     // base rules → high-ticket framework for this vertical → feed vs ad →
     // what this brand's own metrics already proved.
@@ -520,7 +532,7 @@ Cada final va en una o dos frases, listo para leer en cámara.`;
       .trim();
 
     const parsed: GuionIAResult = JSON.parse(jsonText);
-    return normalizeFinales(parsed, params.objetivo);
+    return normalizeFinal(parsed, params.objetivo);
   }
 
   /**

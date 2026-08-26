@@ -154,6 +154,14 @@ export async function generateScript(
       }
     }
 
+    // Referencias adjuntas a este video: la foto del plato, el flyer, la carta.
+    // Van después de las de marca para que pesen como contexto del pedido.
+    for (const ref of (videoItem as any).scriptRefs ?? []) {
+      if (ref.geminiFileUri && ref.geminiFileMimeType) {
+        fileUris.push({ uri: ref.geminiFileUri, mimeType: ref.geminiFileMimeType });
+      }
+    }
+
     // What this brand's own results have already taught us. Never blocking:
     // a missing engram must not stop script generation.
     const engramBlock = await engramService
@@ -171,6 +179,9 @@ export async function generateScript(
       },
       contextoMes,
       fileUris: fileUris.length > 0 ? fileUris : undefined,
+      refsAdjuntas: ((videoItem as any).scriptRefs ?? [])
+        .filter((r: any) => r.geminiFileUri)
+        .map((r: any) => r.nombre),
       engramBlock: engramBlock || undefined,
       // Explicit override wins; otherwise reuse what was already classified.
       objetivo: objetivo ?? videoItem.scriptMeta?.objetivo,

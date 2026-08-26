@@ -21,9 +21,9 @@ export interface IGuionIA {
    * antes de que existieran los dos finales.
    */
   cta: string;
-  /** Cierre suave para el feed: comentar, guardar, seguir. */
+  /** @deprecated Guiones generados cuando había dos finales. Solo lectura. */
   ctaFeed?: string;
-  /** Cierre duro para pauta: una sola acción comercial. */
+  /** @deprecated Guiones generados cuando había dos finales. Solo lectura. */
   ctaAds?: string;
   broll: string;
   generadoEn?: Date;
@@ -88,6 +88,23 @@ export interface IVideoItemMetrics {
 }
 
 // ── VideoItem subdocument ──────────────────────────────────────────────────
+/**
+ * Referencia visual o documental que se adjunta al pedir el guión: la foto del
+ * plato, el flyer de la promo, el PDF de la carta. Se guarda en Cloudinary para
+ * poder verla en la app, y también se sube a la Files API de Gemini para que el
+ * modelo la lea al escribir.
+ */
+export interface IScriptRef {
+  _id?: Types.ObjectId;
+  nombre: string;
+  url: string;
+  publicId: string;
+  tipo: "image" | "pdf";
+  geminiFileUri?: string;
+  geminiFileMimeType?: string;
+  subidoEn?: Date;
+}
+
 export interface IVideoItem {
   _id: Types.ObjectId;
   numero: number;
@@ -101,6 +118,7 @@ export interface IVideoItem {
   tipoGuion?: TipoGuion;
   scriptMeta?: IScriptMeta;
   guionIA?: IGuionIA;
+  scriptRefs?: IScriptRef[];
   casoUsoRef?: number;
   estadoIdea: EstadoIdea;
   estadoProduccion: EstadoProduccion;
@@ -181,6 +199,19 @@ const GuionIASchema = new Schema(
   { _id: false }
 );
 
+const ScriptRefSchema = new Schema<IScriptRef>(
+  {
+    nombre: { type: String, trim: true, required: true },
+    url: { type: String, trim: true, required: true },
+    publicId: { type: String, trim: true, required: true },
+    tipo: { type: String, enum: ["image", "pdf"], required: true },
+    geminiFileUri: { type: String, trim: true },
+    geminiFileMimeType: { type: String, trim: true },
+    subidoEn: { type: Date, default: Date.now },
+  },
+  { _id: true }
+);
+
 const ScriptMetaSchema = new Schema(
   {
     objetivo: { type: String, enum: ["feed", "anuncio"] },
@@ -219,6 +250,7 @@ const VideoItemSchema = new Schema<IVideoItem>(
     },
     scriptMeta: { type: ScriptMetaSchema },
     guionIA: { type: GuionIASchema },
+    scriptRefs: { type: [ScriptRefSchema], default: [] },
     estadoIdea: {
       type: String,
       enum: ["APROBADO", "POR_REVISAR", "RECHAZADO"],
