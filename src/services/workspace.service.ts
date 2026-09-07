@@ -175,6 +175,7 @@ export class WorkspaceService {
       const [lista, total] = await Promise.all([
         models.workspaces
           .find(query, { name: 1, isActive: 1 })
+          .collation({ locale: "es", strength: 1 })
           .sort({ name: 1 })
           .skip(skip)
           .limit(limit)
