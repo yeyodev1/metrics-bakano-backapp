@@ -630,9 +630,10 @@ export class VideoPlanningService {
   }
 
   /**
-   * Quien recibe el aviso de guiones rechazados: quien escribio cada guion,
-   * los correos de `GUION_RECHAZO_NOTIFY_EMAILS` (Ari) y los internos con rol
-   * content_manager o copywriter. In-app + correo, con la urgencia del plazo.
+   * Quien recibe el aviso de guiones rechazados: quien escribio cada guion y
+   * TODO el equipo interno del entorno (mas superadmins, Ariana y quien este
+   * en `GUION_RECHAZO_NOTIFY_EMAILS`). In-app + correo, con la urgencia del
+   * plazo. La direccion pidio que no sea solo para contenido: todos se enteran.
    */
   private async notificarGuionesRechazados(
     planning: IVideoPlanning,
@@ -656,6 +657,9 @@ export class VideoPlanningService {
             { _id: { $in: autoresIds } },
             ...(correosEnv.length ? [{ email: { $in: correosEnv } }] : []),
             { isInternal: true, internalRole: { $in: ["content_manager", "copywriter"] } },
+            { isInternal: true, workspaceId: planning.workspaceId },
+            { isInternal: true, "workspaces.workspaceId": planning.workspaceId },
+            { role: "superadmin" },
           ],
         })
         .select("_id email")
