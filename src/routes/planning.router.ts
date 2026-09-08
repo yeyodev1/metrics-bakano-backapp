@@ -10,6 +10,7 @@ import {
   listMyWeek,
   listMine,
   monthlyStatus,
+  syncCrmRange,
 } from "../controllers/planning.controller";
 
 const planningRouter = Router();
@@ -25,6 +26,8 @@ planningRouter.get("/my-week", listMyWeek);
 planningRouter.get("/mine", listMine);
 // Produccion del mes cumplida o pendiente, por entorno
 planningRouter.get("/monthly-status", monthlyStatus);
+// Trae en vivo las citas de produccion del CRM del rango visible
+planningRouter.post("/crm-sync", syncCrmRange);
 
 planningRouter.get("/:workspaceId", workspaceAccessMiddleware, listEntries);
 planningRouter.post("/:workspaceId", workspaceAdminMiddleware, createEntry);

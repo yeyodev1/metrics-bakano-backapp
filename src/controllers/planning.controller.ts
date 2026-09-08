@@ -267,3 +267,38 @@ export async function monthlyStatus(req: AuthRequest, res: Response, next: NextF
     next(error);
   }
 }
+
+/**
+ * POST /planning/crm-sync?startDate&endDate — trae al Planificador, en el
+ * momento, las citas de produccion del CRM del rango que se esta viendo.
+ * Solo equipo interno. Devuelve cuantas se crearon/movieron/cancelaron para
+ * que la pantalla recargue si hubo cambios.
+ */
+export async function syncCrmRange(req: AuthRequest, res: Response, next: NextFunction) {
+  try {
+    const user = (await models.users.findById(req.user?._id).select("isInternal role").lean()) as any;
+    const esInterno = req.user?.role === "superadmin" || user?.role === "superadmin" || user?.isInternal === true;
+    if (!esInterno) {
+      res.status(HttpStatusCode.Forbidden).send({ message: "Solo el equipo interno puede sincronizar con el CRM." });
+      return;
+    }
+    const desde = new Date(String(req.query.startDate || req.body?.startDate || ""));
+    const hasta = new Date(String(req.query.endDate || req.body?.endDate || ""));
+    if (Number.isNaN(desde.getTime()) || Number.isNaN(hasta.getTime()) || hasta <= desde) {
+      res.status(HttpStatusCode.BadRequest).send({ message: "startDate y endDate son requeridos." });
+      return;
+    }
+    // Tope de 3 meses: la pantalla pide una semana o un mes.
+    if (hasta.getTime() - desde.getTime() > 93 * 86_400_000) {
+      res.status(HttpStatusCode.BadRequest).send({ message: "El rango máximo es de 3 meses." });
+      return;
+    }
+    const { sincronizarRangoEnVivo } = await import("../services/crmProductionSync.service");
+    const resultado = await sincronizarRangoEnVivo(desde, hasta);
+    const cambios = (resultado.creadas || 0) + (resultado.reprogramadas || 0) + (resultado.canceladas || 0);
+    res.status(HttpStatusCode.Ok).send({ message: "Sincronización con el CRM ejecutada.", cambios, ...resultado });
+  } catch (error: any) {
+    console.error("syncCrmRange error:", error);
+    res.status(HttpStatusCode.Ok).send({ message: "No se pudo sincronizar con el CRM.", cambios: 0, error: error.message });
+  }
+}
