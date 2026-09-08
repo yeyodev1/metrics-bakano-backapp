@@ -7,7 +7,13 @@ export type NotificationType =
   | "brand_profile_missing"
   | "billing_reminder"
   | "monthly_target_missing"
-  | "monthly_target_pace";
+  | "monthly_target_pace"
+  | "guion_rechazado"
+  | "produccion_cumplida"
+  | "produccion_agendada"
+  | "produccion_reprogramada"
+  | "produccion_cancelada"
+  | "produccion_sin_entorno";
 
 export interface INotification extends Document {
   userId: Types.ObjectId;
@@ -38,6 +44,12 @@ const NotificationSchema = new Schema<INotification>(
         "billing_reminder",
         "monthly_target_missing",
         "monthly_target_pace",
+        "guion_rechazado",
+        "produccion_cumplida",
+        "produccion_agendada",
+        "produccion_reprogramada",
+        "produccion_cancelada",
+        "produccion_sin_entorno",
       ],
       required: true,
     },

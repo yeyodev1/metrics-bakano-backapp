@@ -132,4 +132,34 @@ cronRouter.get("/monthly-target-reminders", async (req: Request, res: Response) 
   }
 });
 
+// GET /api/cron/ghl-production-sync
+// Vercel Cron cada 30 min: reconcilia el Planificador con los calendarios de
+// produccion del CRM. El webhook es el camino rapido; esto cubre los que no
+// llegaron (citas movidas o borradas sin disparar el workflow).
+cronRouter.get("/ghl-production-sync", async (req: Request, res: Response) => {
+  const secret = process.env.CRON_SECRET;
+  if (!secret || req.headers["authorization"] !== `Bearer ${secret}`) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+
+  try {
+    const { crmProductionSyncService } = await import("../services/crmProductionSync.service");
+    const result = await crmProductionSyncService.sincronizarDesdeCrm();
+    if (result.omitido) {
+      console.log(`[Cron] Sync producciones CRM omitido: ${result.omitido}`);
+    } else {
+      console.log(
+        `[Cron] Sync producciones CRM: ${result.revisadas} revisadas, ${result.creadas} creadas, ` +
+          `${result.reprogramadas} reprogramadas, ${result.canceladas} canceladas, ${result.sinEntorno} sin entorno` +
+          (result.errores.length ? ` — errores: ${result.errores.join(" | ")}` : "")
+      );
+    }
+    res.json({ ok: true, ...result });
+  } catch (err: any) {
+    console.error("[Cron] Sync producciones CRM falló:", err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 export default cronRouter;

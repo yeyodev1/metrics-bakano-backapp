@@ -50,7 +50,7 @@ export class PlanningService {
     }
     const entries = await models.planning
       .find(query)
-      .select("workspaceId title date assignedTo")
+      .select("workspaceId title date endsAt assignedTo source crm cumplida cumplidaEn cumplidaPorNombre")
       .populate("workspaceId", "name photo")
       .sort({ date: 1 })
       .lean();
@@ -97,5 +97,72 @@ export class PlanningService {
 
     const result = await models.planning.findByIdAndDelete(entryId);
     if (!result) throw new Error("NOT_FOUND");
+  }
+
+  /**
+   * Da por cumplida la produccion. Idempotente: si ya estaba cumplida devuelve
+   * `null` para que quien llama no vuelva a avisar. Se dispara cuando el
+   * productor marca el primer guion como GRABADO.
+   */
+  async marcarCumplida(
+    entryId: Types.ObjectId | string,
+    actor?: { id?: string; nombre?: string }
+  ): Promise<IPlanning | null> {
+    if (!Types.ObjectId.isValid(entryId.toString())) return null;
+    const set: Record<string, unknown> = { cumplida: true, cumplidaEn: new Date() };
+    if (actor?.id && Types.ObjectId.isValid(actor.id)) set.cumplidaPorId = new Types.ObjectId(actor.id);
+    if (actor?.nombre) set.cumplidaPorNombre = actor.nombre;
+    return await models.planning.findOneAndUpdate(
+      { _id: new Types.ObjectId(entryId.toString()), cumplida: { $ne: true } },
+      { $set: set },
+      { new: true }
+    );
+  }
+
+  /**
+   * Estado de la produccion del mes por entorno: cumplida si al menos una
+   * produccion de ese mes (hora Ecuador) ya se grabo. Devuelve tambien la
+   * proxima fecha para pintar "pendiente para el 12 de sep".
+   */
+  async monthlyStatus(year: number, month: number, workspaceIds?: string[] | null) {
+    // Mes en hora Ecuador (UTC-5, sin horario de verano).
+    const start = new Date(Date.UTC(year, month - 1, 1, 5, 0, 0));
+    const end = new Date(Date.UTC(year, month, 1, 5, 0, 0));
+    const query: any = { date: { $gte: start, $lt: end } };
+    if (workspaceIds) {
+      query.workspaceId = {
+        $in: workspaceIds.filter((id) => Types.ObjectId.isValid(id)).map((id) => new Types.ObjectId(id)),
+      };
+    }
+    const entries = await models.planning
+      .find(query)
+      .select("workspaceId date cumplida cumplidaEn source")
+      .sort({ date: 1 })
+      .lean();
+
+    const byWorkspace: Record<
+      string,
+      { cumplida: boolean; cumplidaEn: Date | null; producciones: number; proximaFecha: Date | null; fechaCumplida: Date | null }
+    > = {};
+    for (const e of entries as any[]) {
+      const key = e.workspaceId.toString();
+      const cur = byWorkspace[key] || {
+        cumplida: false,
+        cumplidaEn: null,
+        producciones: 0,
+        proximaFecha: null,
+        fechaCumplida: null,
+      };
+      cur.producciones += 1;
+      if (e.cumplida) {
+        cur.cumplida = true;
+        if (!cur.cumplidaEn || (e.cumplidaEn && e.cumplidaEn < cur.cumplidaEn)) cur.cumplidaEn = e.cumplidaEn || null;
+        if (!cur.fechaCumplida) cur.fechaCumplida = e.date;
+      } else if (!cur.proximaFecha) {
+        cur.proximaFecha = e.date;
+      }
+      byWorkspace[key] = cur;
+    }
+    return byWorkspace;
   }
 }

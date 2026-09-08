@@ -9,6 +9,7 @@ import {
   deleteEntry,
   listMyWeek,
   listMine,
+  monthlyStatus,
 } from "../controllers/planning.controller";
 
 const planningRouter = Router();
@@ -22,6 +23,8 @@ planningRouter.use(authMiddleware);
 planningRouter.get("/my-week", listMyWeek);
 // Mes completo de todos los entornos del usuario, en una consulta (calendario del editor)
 planningRouter.get("/mine", listMine);
+// Produccion del mes cumplida o pendiente, por entorno
+planningRouter.get("/monthly-status", monthlyStatus);
 
 planningRouter.get("/:workspaceId", workspaceAccessMiddleware, listEntries);
 planningRouter.post("/:workspaceId", workspaceAdminMiddleware, createEntry);

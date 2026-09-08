@@ -231,3 +231,39 @@ export async function listMine(req: AuthRequest, res: Response, next: NextFuncti
     next(error);
   }
 }
+
+/**
+ * GET /planning/monthly-status?year&month — produccion del mes por entorno:
+ * cumplida (ya se grabo), cuantas producciones hay y la proxima fecha.
+ * Un cliente solo ve sus entornos; el equipo interno ve todos.
+ */
+export async function monthlyStatus(req: AuthRequest, res: Response, next: NextFunction) {
+  try {
+    const now = new Date();
+    const year = Number(req.query.year) || now.getUTCFullYear();
+    const month = Number(req.query.month) || now.getUTCMonth() + 1;
+    if (month < 1 || month > 12 || year < 2020 || year > 2100) {
+      res.status(HttpStatusCode.BadRequest).send({ message: "year/month inválidos." });
+      return;
+    }
+
+    const user = (await models.users.findById(req.user?._id).select("workspaces workspaceId isInternal role").lean()) as any;
+    if (!user) {
+      res.status(HttpStatusCode.NotFound).send({ message: "User not found." });
+      return;
+    }
+    const esInterno = req.user?.role === "superadmin" || user.role === "superadmin" || user.isInternal === true;
+    const ownIds: string[] = [
+      ...(user.workspaceId ? [user.workspaceId.toString()] : []),
+      ...(user.workspaces || [])
+        .map((ws: any) => ws.workspaceId?._id?.toString() ?? ws.workspaceId?.toString())
+        .filter(Boolean),
+    ];
+
+    const status = await planningService.monthlyStatus(year, month, esInterno ? null : ownIds);
+    res.status(HttpStatusCode.Ok).send({ message: "Monthly production status retrieved.", year, month, status });
+  } catch (error) {
+    console.error("monthlyStatus error:", error);
+    next(error);
+  }
+}
