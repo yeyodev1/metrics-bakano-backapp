@@ -192,10 +192,21 @@ class CrmProductionSyncService {
     return lista;
   }
 
+  /**
+   * Sin configuracion, se detectan solos: cualquier calendario del CRM cuyo
+   * nombre hable de produccion o grabacion. Asi funciona desde el primer
+   * deploy sin tocar Vercel.
+   */
+  private static PATRON_PRODUCCION = /producc|grabaci|filmaci|rodaje|sesi[oó]n de video/i;
+
   async calendariosDeProduccion(): Promise<CalendarioProduccion[]> {
     const config = this.configuracionCalendarios();
-    if (!config.length) return [];
     const delCrm = await this.calendariosDelCrm().catch(() => []);
+    if (!config.length) {
+      return delCrm
+        .filter((c) => CrmProductionSyncService.PATRON_PRODUCCION.test(normalizar(c.name)))
+        .map((c) => ({ id: c.id, nombre: c.name }));
+    }
     return config.map((entrada) => {
       const match = delCrm.find((c) => c.id === entrada || normalizar(c.name) === normalizar(entrada));
       return match ? { id: match.id, nombre: match.name } : { id: /\s/.test(entrada) ? undefined : entrada, nombre: entrada };
@@ -204,7 +215,11 @@ class CrmProductionSyncService {
 
   /** La cita pertenece a uno de los calendarios de produccion configurados. */
   private esDeProduccion(cita: CitaCrm, calendarios: CalendarioProduccion[]): boolean {
-    if (!calendarios.length) return true;
+    // Sin lista (ni configurada ni detectada): por el webhook se acepta lo que
+    // el workflow del CRM decida mandar, salvo que el nombre delate otra cosa.
+    if (!calendarios.length) {
+      return !cita.calendarName || CrmProductionSyncService.PATRON_PRODUCCION.test(normalizar(cita.calendarName));
+    }
     return calendarios.some(
       (c) =>
         (c.id && cita.calendarId && c.id === cita.calendarId) ||
@@ -389,19 +404,31 @@ class CrmProductionSyncService {
     return { accion: "cancelada", entry: null, workspaceId };
   }
 
-  /** Correos del equipo interno del entorno; si no hay nadie asignado, los superadmins. */
-  private async correosEquipo(workspaceId: Types.ObjectId): Promise<string[]> {
-    const internos = await models.users
+  /**
+   * Equipo interno del entorno + superadmins (la direccion quiere enterarse
+   * de cada produccion que un cliente agenda). Sin duplicados.
+   */
+  private async equipoYSuperadmins(workspaceId: Types.ObjectId): Promise<{ _id: Types.ObjectId; email: string }[]> {
+    const usuarios = await models.users
       .find({
         isActive: true,
-        isInternal: true,
-        $or: [{ workspaceId }, { "workspaces.workspaceId": workspaceId }],
+        $or: [
+          { isInternal: true, workspaceId },
+          { isInternal: true, "workspaces.workspaceId": workspaceId },
+          { role: "superadmin" },
+        ],
       })
-      .select("email")
+      .select("_id email")
       .lean();
-    if (internos.length) return internos.map((u) => u.email).filter(Boolean);
-    const superadmins = await models.users.find({ role: "superadmin", isActive: true }).select("email").lean();
-    return superadmins.map((u) => u.email).filter(Boolean);
+    const vistos = new Set<string>();
+    return usuarios
+      .filter((u) => {
+        const id = u._id.toString();
+        if (vistos.has(id)) return false;
+        vistos.add(id);
+        return true;
+      })
+      .map((u) => ({ _id: u._id as Types.ObjectId, email: u.email }));
   }
 
   private async avisar(
@@ -441,7 +468,28 @@ class CrmProductionSyncService {
         referenceId: entry._id as Types.ObjectId,
       });
 
-      const to = await this.correosEquipo(entry.workspaceId);
+      // Superadmins que no pertenecen al entorno: aviso in-app aparte.
+      const equipo = await this.equipoYSuperadmins(entry.workspaceId);
+      const delEntorno = new Set(
+        (
+          await models.users
+            .find({ $or: [{ workspaceId: entry.workspaceId }, { "workspaces.workspaceId": entry.workspaceId }] })
+            .select("_id")
+            .lean()
+        ).map((u) => u._id.toString())
+      );
+      await Promise.all(
+        equipo
+          .filter((u) => !delEntorno.has(u._id.toString()))
+          .map((u) =>
+            notificationService.create(u._id, textos.type, textos.titulo, textos.cuerpo, {
+              workspaceId: entry.workspaceId,
+              referenceId: entry._id as Types.ObjectId,
+            })
+          )
+      );
+
+      const to = [...new Set(equipo.map((u) => u.email).filter(Boolean))];
       await resendService.sendProduccionCrmEmail({
         to,
         tipo,
@@ -490,6 +538,30 @@ class CrmProductionSyncService {
   }
 
   /**
+   * No hay calendario de produccion (ni configurado ni detectado por nombre):
+   * se avisa a los superadmins con la lista de calendarios del CRM para que
+   * lo resuelvan desde Metrics, una vez al dia como maximo.
+   */
+  private async avisarSinCalendario() {
+    try {
+      const hace24h = new Date(Date.now() - 24 * 3_600_000);
+      const reciente = await models.notifications.exists({ type: "produccion_sin_entorno", title: "Falta el calendario de producción del CRM", createdAt: { $gte: hace24h } });
+      if (reciente) return;
+      const nombres = (await this.calendariosDelCrm().catch(() => [])).map((c) => c.name);
+      const cuerpo =
+        `No encontré ningún calendario del CRM con "producción" o "grabación" en el nombre, así que las citas de los clientes no se están trayendo al Planificador. ` +
+        (nombres.length ? `Calendarios que veo en el CRM: ${nombres.join(" · ")}. ` : "Tampoco pude leer la lista de calendarios del CRM. ") +
+        `Renombra el calendario de producción o configura GHL_PRODUCTION_CALENDAR_IDS con su nombre exacto.`;
+      const superadmins = await models.users.find({ role: "superadmin", isActive: true }).select("_id").lean();
+      await Promise.all(
+        superadmins.map((sa) => notificationService.create(sa._id as Types.ObjectId, "produccion_sin_entorno", "Falta el calendario de producción del CRM", cuerpo))
+      );
+    } catch (err: any) {
+      console.warn("[CRM Producción] aviso sin calendario falló:", err.message);
+    }
+  }
+
+  /**
    * Reconciliacion por API: lee las citas de los calendarios de produccion
    * y las aplica. Las producciones del CRM que ya no aparecen en el rango se
    * dan por canceladas (las borraron en el CRM).
@@ -504,14 +576,16 @@ class CrmProductionSyncService {
     errores: string[];
   }> {
     const resumen = { revisadas: 0, creadas: 0, reprogramadas: 0, canceladas: 0, sinEntorno: 0, errores: [] as string[] };
-    if (!this.configuracionCalendarios().length) return { ...resumen, omitido: "GHL_PRODUCTION_CALENDAR_IDS vacío" };
     if (!ghlService.isConfigured()) return { ...resumen, omitido: "GHL_PIT_TOKEN / GHL_LOCATION_ID sin configurar" };
 
     const configurados = await this.calendariosDeProduccion();
     const sinResolver = configurados.filter((c) => !c.id).map((c) => c.nombre);
     if (sinResolver.length) resumen.errores.push(`calendarios no encontrados en el CRM: ${sinResolver.join(", ")}`);
     const calendarios = configurados.map((c) => c.id).filter((id): id is string => Boolean(id));
-    if (!calendarios.length) return { ...resumen, omitido: "ningún calendario configurado existe en el CRM" };
+    if (!calendarios.length) {
+      await this.avisarSinCalendario();
+      return { ...resumen, omitido: "ningún calendario de producción encontrado en el CRM" };
+    }
     const nombrePorId = new Map(configurados.filter((c) => c.id).map((c) => [c.id as string, c.nombre]));
 
     const desde = new Date(Date.now() - 2 * 86_400_000);
