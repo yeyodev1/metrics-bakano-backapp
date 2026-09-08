@@ -25,7 +25,7 @@ export class GhlService {
   /**
    * Fetches all calendars for the location.
    */
-  private async getCalendars() {
+  async getCalendars(): Promise<{ id: string; name: string }[]> {
     try {
       const response = await axios.get(`${GHL_API_BASE}/calendars/`, {
         headers: this.getHeaders(),

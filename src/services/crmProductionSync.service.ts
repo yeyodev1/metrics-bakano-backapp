@@ -162,12 +162,54 @@ export function normalizarCita(body: any, extra: { contact?: any; calendarName?:
   };
 }
 
+interface CalendarioProduccion {
+  id?: string;
+  nombre: string;
+}
+
 class CrmProductionSyncService {
-  calendariosDeProduccion(): string[] {
+  private cacheCalendarios: { en: number; lista: { id: string; name: string }[] } | null = null;
+
+  /**
+   * Calendarios de produccion configurados en `GHL_PRODUCTION_CALENDAR_IDS`,
+   * separados por coma. Cada entrada puede ser el ID del calendario o su
+   * nombre tal como aparece en el CRM ("Producción Bakano"): nadie tiene que
+   * ir a buscar IDs. Los nombres se resuelven a ID contra la API cuando hay
+   * token; si no, se comparan por nombre.
+   */
+  configuracionCalendarios(): string[] {
     return (process.env.GHL_PRODUCTION_CALENDAR_IDS || "")
       .split(",")
       .map((s) => s.trim())
       .filter(Boolean);
+  }
+
+  private async calendariosDelCrm(): Promise<{ id: string; name: string }[]> {
+    if (!ghlService.isConfigured()) return [];
+    if (this.cacheCalendarios && Date.now() - this.cacheCalendarios.en < 10 * 60_000) return this.cacheCalendarios.lista;
+    const lista = await ghlService.getCalendars();
+    this.cacheCalendarios = { en: Date.now(), lista };
+    return lista;
+  }
+
+  async calendariosDeProduccion(): Promise<CalendarioProduccion[]> {
+    const config = this.configuracionCalendarios();
+    if (!config.length) return [];
+    const delCrm = await this.calendariosDelCrm().catch(() => []);
+    return config.map((entrada) => {
+      const match = delCrm.find((c) => c.id === entrada || normalizar(c.name) === normalizar(entrada));
+      return match ? { id: match.id, nombre: match.name } : { id: /\s/.test(entrada) ? undefined : entrada, nombre: entrada };
+    });
+  }
+
+  /** La cita pertenece a uno de los calendarios de produccion configurados. */
+  private esDeProduccion(cita: CitaCrm, calendarios: CalendarioProduccion[]): boolean {
+    if (!calendarios.length) return true;
+    return calendarios.some(
+      (c) =>
+        (c.id && cita.calendarId && c.id === cita.calendarId) ||
+        (cita.calendarName && normalizar(c.nombre) === normalizar(cita.calendarName))
+    );
   }
 
   /**
@@ -247,9 +289,13 @@ class CrmProductionSyncService {
    * duplicar nada.
    */
   async aplicarCita(cita: CitaCrm, origen: "webhook" | "cron"): Promise<ResultadoCita> {
-    const permitidos = this.calendariosDeProduccion();
-    if (permitidos.length && cita.calendarId && !permitidos.includes(cita.calendarId)) {
-      return { accion: "ignorada", motivo: "calendario no es de producción" };
+    const calendarios = await this.calendariosDeProduccion();
+    if (!this.esDeProduccion(cita, calendarios)) {
+      return { accion: "ignorada", motivo: `el calendario "${cita.calendarName || cita.calendarId}" no es de producción` };
+    }
+    // Nombre del calendario para el titulo, aunque el webhook solo traiga el ID.
+    if (!cita.calendarName && cita.calendarId) {
+      cita.calendarName = calendarios.find((c) => c.id === cita.calendarId)?.nombre;
     }
 
     const existente = await models.planning.findOne({ "crm.appointmentId": cita.appointmentId });
@@ -458,9 +504,15 @@ class CrmProductionSyncService {
     errores: string[];
   }> {
     const resumen = { revisadas: 0, creadas: 0, reprogramadas: 0, canceladas: 0, sinEntorno: 0, errores: [] as string[] };
-    const calendarios = this.calendariosDeProduccion();
-    if (!calendarios.length) return { ...resumen, omitido: "GHL_PRODUCTION_CALENDAR_IDS vacío" };
+    if (!this.configuracionCalendarios().length) return { ...resumen, omitido: "GHL_PRODUCTION_CALENDAR_IDS vacío" };
     if (!ghlService.isConfigured()) return { ...resumen, omitido: "GHL_PIT_TOKEN / GHL_LOCATION_ID sin configurar" };
+
+    const configurados = await this.calendariosDeProduccion();
+    const sinResolver = configurados.filter((c) => !c.id).map((c) => c.nombre);
+    if (sinResolver.length) resumen.errores.push(`calendarios no encontrados en el CRM: ${sinResolver.join(", ")}`);
+    const calendarios = configurados.map((c) => c.id).filter((id): id is string => Boolean(id));
+    if (!calendarios.length) return { ...resumen, omitido: "ningún calendario configurado existe en el CRM" };
+    const nombrePorId = new Map(configurados.filter((c) => c.id).map((c) => [c.id as string, c.nombre]));
 
     const desde = new Date(Date.now() - 2 * 86_400_000);
     const hasta = new Date(Date.now() + 90 * 86_400_000);
@@ -477,7 +529,7 @@ class CrmProductionSyncService {
           if (!contactos.has(contactId)) contactos.set(contactId, await ghlService.getContact(contactId));
           contact = contactos.get(contactId);
         }
-        const cita = normalizarCita(ev, { contact });
+        const cita = normalizarCita(ev, { contact, calendarName: nombrePorId.get(texto(ev.calendarId)) });
         if (!cita) continue;
         vistas.add(cita.appointmentId);
         const r = await this.aplicarCita(cita, "cron");

@@ -6,6 +6,7 @@ import {
   listInternalUsers, createInternalUser, deleteInternalUser,
   getApiKey, generateApiKey, revokeApiKey,
 } from "../controllers/admin.controller";
+import { listCrmCalendars, runCrmProductionSync } from "../controllers/crmProduction.controller";
 
 const adminRouter = Router();
 
@@ -19,6 +20,10 @@ adminRouter.delete("/superadmins/:userId", deleteSuperadmin);
 adminRouter.get("/internal-users", listInternalUsers);
 adminRouter.post("/internal-users", createInternalUser);
 adminRouter.delete("/internal-users/:userId", deleteInternalUser);
+
+// Produccion desde el CRM: ver calendarios amarrados y forzar la sincronizacion
+adminRouter.get("/crm/calendars", listCrmCalendars);
+adminRouter.post("/crm/production-sync", runCrmProductionSync);
 
 adminRouter.get("/apikey", getApiKey);
 adminRouter.post("/apikey", generateApiKey);
