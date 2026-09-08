@@ -584,7 +584,11 @@ class CrmProductionSyncService {
     const calendarios = configurados.map((c) => c.id).filter((id): id is string => Boolean(id));
     if (!calendarios.length) {
       await this.avisarSinCalendario();
-      return { ...resumen, omitido: "ningún calendario de producción encontrado en el CRM" };
+      const nombres = (await this.calendariosDelCrm().catch(() => [])).map((c) => `"${c.name}"`);
+      return {
+        ...resumen,
+        omitido: `ningún calendario de producción encontrado en el CRM. Calendarios: ${nombres.join(", ") || "(no se pudieron leer)"}`,
+      };
     }
     const nombrePorId = new Map(configurados.filter((c) => c.id).map((c) => [c.id as string, c.nombre]));
 
