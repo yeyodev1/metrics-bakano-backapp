@@ -354,6 +354,11 @@ class CrmProductionSyncService {
 
     const entorno = await this.resolverEntorno(cita);
     if (!entorno) {
+      console.warn(
+        `[CRM Producción] sin entorno (${origen}): ${cita.appointmentId} · ${fechaEcuador(cita.startsAt)} · ` +
+          `título="${cita.title || ""}" empresa="${cita.contact.company || ""}" contacto="${cita.contact.name || ""}" ` +
+          `email="${cita.contact.email || ""}" calendario="${cita.calendarName || cita.calendarId || ""}"`
+      );
       await this.avisarSinEntorno(cita, origen);
       return { accion: "sin_entorno", motivo: "no se pudo asociar la cita a un entorno" };
     }
