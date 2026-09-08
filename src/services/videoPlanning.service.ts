@@ -202,6 +202,17 @@ const EDITOR_ALLOWED_FIELDS = new Set(["estadoProduccion", "edicion", "linkVideo
 
 const planningService = new PlanningService();
 
+/**
+ * Personas de contenido que SIEMPRE reciben el aviso de guiones rechazados,
+ * por nombre (sin acentos ni mayusculas). Ariana Vera es quien corrige los
+ * guiones; no dependemos de que tenga un rol concreto ni de una variable.
+ */
+const NOMBRES_CONTENIDO = ["ariana vera"];
+
+function sinAcentos(s: string): string {
+  return (s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
+}
+
 /** Horas antes de la produccion hasta las que el cliente puede pedir cambios al guion. */
 function horasDeCorreccion(): number {
   const n = Number(process.env.GUION_CORRECCION_HORAS);
@@ -635,7 +646,7 @@ export class VideoPlanningService {
       .map((e) => e.trim().toLowerCase())
       .filter(Boolean);
 
-    const [workspace, cliente, destinatarios] = await Promise.all([
+    const [workspace, cliente, porRolOEnv, porNombre] = await Promise.all([
       models.workspaces.findById(planning.workspaceId).select("name").lean(),
       Types.ObjectId.isValid(clienteUserId) ? models.users.findById(clienteUserId).select("name email").lean() : null,
       models.users
@@ -649,7 +660,21 @@ export class VideoPlanningService {
         })
         .select("_id email")
         .lean(),
+      models.users.find({ isActive: true, isInternal: true }).select("_id email name lastName").lean(),
     ]);
+
+    // Ariana (y quien este en NOMBRES_CONTENIDO) entra por nombre.
+    const porNombreMatch = porNombre.filter((u) => {
+      const completo = sinAcentos(`${u.name || ""} ${u.lastName || ""}`);
+      return NOMBRES_CONTENIDO.some((n) => n.split(" ").every((parte) => completo.includes(parte)));
+    });
+    const vistos = new Set<string>();
+    const destinatarios = [...porRolOEnv, ...porNombreMatch].filter((u) => {
+      const id = u._id.toString();
+      if (vistos.has(id)) return false;
+      vistos.add(id);
+      return true;
+    });
 
     const nombre = workspace?.name || "Cliente";
     const horasRestantes = produccion ? (produccion.correccionesHasta.getTime() - Date.now()) / 3_600_000 : null;
