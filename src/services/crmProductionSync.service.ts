@@ -566,7 +566,7 @@ class CrmProductionSyncService {
    * y las aplica. Las producciones del CRM que ya no aparecen en el rango se
    * dan por canceladas (las borraron en el CRM).
    */
-  async sincronizarDesdeCrm(): Promise<{
+  async sincronizarDesdeCrm(rango: { desde?: Date; hasta?: Date } = {}): Promise<{
     omitido?: string;
     revisadas: number;
     creadas: number;
@@ -588,8 +588,8 @@ class CrmProductionSyncService {
     }
     const nombrePorId = new Map(configurados.filter((c) => c.id).map((c) => [c.id as string, c.nombre]));
 
-    const desde = new Date(Date.now() - 2 * 86_400_000);
-    const hasta = new Date(Date.now() + 90 * 86_400_000);
+    const desde = rango.desde ?? new Date(Date.now() - 2 * 86_400_000);
+    const hasta = rango.hasta ?? new Date(Date.now() + 90 * 86_400_000);
     const eventos = await ghlService.getCalendarEvents(calendarios, desde, hasta);
 
     const contactos = new Map<string, any>();
@@ -642,3 +642,29 @@ class CrmProductionSyncService {
 }
 
 export const crmProductionSyncService = new CrmProductionSyncService();
+
+/**
+ * Sincronizacion "en vivo" desde el calendario: la pantalla la pide al abrir
+ * la semana o el mes y pinta lo que haya en el CRM en ese momento. Se
+ * agrupa por rango y no se repite si ya corrio hace menos de 45 s, para que
+ * varias pestañas o recargas no golpeen la API del CRM.
+ */
+const ultimaSync = new Map<string, { en: number; resultado: Awaited<ReturnType<CrmProductionSyncService["sincronizarDesdeCrm"]>> }>();
+const enCurso = new Map<string, Promise<Awaited<ReturnType<CrmProductionSyncService["sincronizarDesdeCrm"]>>>>();
+
+export async function sincronizarRangoEnVivo(desde: Date, hasta: Date) {
+  const clave = `${desde.toISOString().slice(0, 10)}_${hasta.toISOString().slice(0, 10)}`;
+  const previa = ultimaSync.get(clave);
+  if (previa && Date.now() - previa.en < 45_000) return { ...previa.resultado, cache: true };
+  const pendiente = enCurso.get(clave);
+  if (pendiente) return pendiente;
+  const promesa = crmProductionSyncService
+    .sincronizarDesdeCrm({ desde, hasta })
+    .then((resultado) => {
+      ultimaSync.set(clave, { en: Date.now(), resultado });
+      return resultado;
+    })
+    .finally(() => enCurso.delete(clave));
+  enCurso.set(clave, promesa);
+  return promesa;
+}
