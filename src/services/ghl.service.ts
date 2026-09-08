@@ -78,7 +78,11 @@ export class GhlService {
   async getContact(contactId: string): Promise<any | null> {
     if (!contactId) return null;
     try {
-      const response = await axios.get(`${GHL_API_BASE}/contacts/${contactId}`, { headers: this.getHeaders() });
+      // La API de contactos de GHL exige su propia version; con la de
+      // calendarios responde error y la cita llegaba sin correo ni empresa.
+      const response = await axios.get(`${GHL_API_BASE}/contacts/${contactId}`, {
+        headers: { ...this.getHeaders(), Version: "2021-07-28" },
+      });
       return response.data?.contact || null;
     } catch (error: any) {
       console.error("[GHL] contacto:", error.response?.data || error.message);
