@@ -269,7 +269,32 @@ class CrmProductionSyncService {
       }
     }
 
-    return this.porNombre(cita, candidatos);
+    const porNombre = this.porNombre(cita, candidatos);
+    if (porNombre) return porNombre;
+    return this.porUsuarioCliente(cita, candidatos);
+  }
+
+  /**
+   * Ultimo recurso: el titulo o el contacto traen el nombre de una persona
+   * ("Javier Aguilar") que es usuario cliente de un entorno.
+   */
+  private async porUsuarioCliente(cita: CitaCrm, entornos: { _id: Types.ObjectId; name: string }[]) {
+    const base = normalizar([cita.title, cita.contact.name].filter(Boolean).join(" · "));
+    if (!base) return null;
+    const clientes = (await models.users
+      .find({ isActive: true, isInternal: { $ne: true } })
+      .select("name lastName workspaceId workspaces")
+      .lean()) as any[];
+    const idsEntornos = new Set(entornos.map((w) => w._id.toString()));
+    for (const u of clientes) {
+      const completo = normalizar(`${u.name || ""} ${u.lastName || ""}`);
+      if (!completo.includes(" ") || completo.length < 7) continue;
+      if (!contieneComoFrase(base, completo)) continue;
+      const ids = [u.workspaceId?.toString(), ...(u.workspaces || []).map((w: any) => w.workspaceId?._id?.toString() ?? w.workspaceId?.toString())].filter(Boolean);
+      const ws = ids.map((id) => entornos.find((w) => w._id.toString() === id && idsEntornos.has(id))).find(Boolean);
+      if (ws) return ws;
+    }
+    return null;
   }
 
   private porNombre(cita: CitaCrm, entornos: { _id: Types.ObjectId; name: string }[]) {
@@ -285,6 +310,36 @@ class CrmProductionSyncService {
       const nombre = normalizar(w.name);
       if (nombre.length < 4) continue;
       if (contieneComoFrase(base, nombre) && (!mejor || nombre.length > normalizar(mejor.name).length)) mejor = w;
+    }
+    if (mejor) return mejor;
+
+    // El titulo del CRM suele traer solo parte del nombre del cliente
+    // ("LUISA PITA" para "Luisa Pita Fotografia", "Proyectos Y Construcciones
+    // Remodelaq Sas / Javier Aguilar - produccion standard"). Se prueba cada
+    // segmento del titulo: si todas sus palabras (de 3+ letras) estan en el
+    // nombre del entorno, o el segmento es el inicio del nombre, es ese.
+    const segmentos = [cita.title, cita.contact.company]
+      .filter(Boolean)
+      .flatMap((t) => normalizar(t!).split(/\s*(?:\/|-|–|\||·|:)\s*/))
+      .map((seg) => seg.replace(/\b(produccion|grabacion|standard|premium|estandar|sesion|cita)\b/g, "").trim())
+      .filter((seg) => seg.length >= 4);
+    const stop = new Set(["de", "del", "la", "el", "los", "las", "y", "sas", "cia", "ltda", "sa", "srl"]);
+    let mejorPuntaje = 0;
+    for (const seg of segmentos) {
+      const palabras = seg.split(" ").filter((p) => p.length >= 3 && !stop.has(p));
+      if (!palabras.length) continue;
+      for (const w of entornos) {
+        const nombre = normalizar(w.name);
+        const palabrasEntorno = new Set(nombre.split(" "));
+        const todas = palabras.every((p) => palabrasEntorno.has(p));
+        const esInicio = nombre.startsWith(seg) || seg.startsWith(nombre);
+        if (!todas && !esInicio) continue;
+        const puntaje = palabras.length * 10 + (esInicio ? 5 : 0);
+        if (puntaje > mejorPuntaje) {
+          mejorPuntaje = puntaje;
+          mejor = w;
+        }
+      }
     }
     return mejor;
   }
