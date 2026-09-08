@@ -197,7 +197,13 @@ class CrmProductionSyncService {
    * nombre hable de produccion o grabacion. Asi funciona desde el primer
    * deploy sin tocar Vercel.
    */
-  private static PATRON_PRODUCCION = /producc|grabaci|filmaci|rodaje|sesi[oó]n de video/i;
+  /**
+   * En el CRM de Bakano los clientes agendan su grabacion en el calendario
+   * de su equipo de produccion (Alfa Lobo o Dinamita, plan standard o
+   * premium). Se reconocen por "equipo" en el nombre, ademas de cualquier
+   * calendario que hable de produccion o grabacion.
+   */
+  private static PATRON_PRODUCCION = /^equipo\b|producc|grabaci|filmaci|rodaje|sesi[oó]n de video/i;
 
   async calendariosDeProduccion(): Promise<CalendarioProduccion[]> {
     const config = this.configuracionCalendarios();
