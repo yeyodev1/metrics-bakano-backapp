@@ -332,7 +332,9 @@ class CrmProductionSyncService {
         const nombre = normalizar(w.name);
         const palabrasEntorno = new Set(nombre.split(" "));
         const todas = palabras.every((p) => palabrasEntorno.has(p));
-        const esInicio = nombre.startsWith(seg) || seg.startsWith(nombre);
+        // Inicio con limite de palabra: "luisa pita" ≈ "luisa pita fotografia",
+        // pero "robertitu" NO es "robert".
+        const esInicio = nombre === seg || nombre.startsWith(`${seg} `) || seg.startsWith(`${nombre} `);
         if (!todas && !esInicio) continue;
         const puntaje = palabras.length * 10 + (esInicio ? 5 : 0);
         if (puntaje > mejorPuntaje) {
@@ -447,6 +449,15 @@ class CrmProductionSyncService {
     }
     await this.avisar(entry, "creada", {});
     return { accion: "creada", entry, workspaceId: entorno._id.toString() };
+  }
+
+  private nombres = new Map<string, string>();
+  private async nombreEntorno(workspaceId: string): Promise<string> {
+    if (!this.nombres.has(workspaceId)) {
+      const ws = await models.workspaces.findById(workspaceId).select("name").lean();
+      this.nombres.set(workspaceId, ws?.name || workspaceId);
+    }
+    return this.nombres.get(workspaceId)!;
   }
 
   private async cancelar(entry: IPlanning, cita: CitaCrm): Promise<ResultadoCita> {
@@ -664,6 +675,7 @@ class CrmProductionSyncService {
 
     const contactos = new Map<string, any>();
     const vistas = new Set<string>();
+    const mapa: string[] = [];
     for (const ev of eventos) {
       resumen.revisadas += 1;
       try {
@@ -677,6 +689,7 @@ class CrmProductionSyncService {
         if (!cita) continue;
         vistas.add(cita.appointmentId);
         const r = await this.aplicarCita(cita, "cron");
+        mapa.push(`"${cita.title || cita.appointmentId}"→${r.workspaceId ? await this.nombreEntorno(r.workspaceId) : `(${r.accion})`}`);
         if (r.accion === "creada") resumen.creadas += 1;
         else if (r.accion === "reprogramada") resumen.reprogramadas += 1;
         else if (r.accion === "cancelada") resumen.canceladas += 1;
@@ -685,6 +698,8 @@ class CrmProductionSyncService {
         resumen.errores.push(`${ev.id || "?"}: ${err.message}`);
       }
     }
+
+    if (mapa.length) console.log(`[CRM Producción] mapa: ${mapa.join(" | ")}`);
 
     // Las que estaban en Metrics y ya no estan en el CRM.
     const huerfanas = await models.planning.find({
