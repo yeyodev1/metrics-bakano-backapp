@@ -87,6 +87,31 @@ facturación real, ritmo del mes, equipo asignado y recordatorios.
 - El menú marca `SIN META` en el cliente abierto y cuántos clientes siguen sin
   meta en el link global.
 
+### Producción desde el CRM + reglas de guiones (2026-09-08)
+- **Planning** ganó `source: manual|crm`, `crm{appointmentId,...}`, `endsAt` y
+  `cumplida/cumplidaEn/cumplidaPorId/cumplidaPorNombre`. `createdBy` es opcional.
+- **Webhook** `POST /v1/webhooks/ghl/production-appointment` (cabecera
+  `x-ghl-webhook-secret` = `GHL_PRODUCTION_WEBHOOK_SECRET`, cae a
+  `GHL_BOOKING_WEBHOOK_SECRET`). Parser tolerante en
+  `crmProductionSync.service.ts#normalizarCita` (workflow de GHL, payload plano
+  o evento de `/calendars/events`). Upsert por `crm.appointmentId`: crea,
+  reprograma o cancela. Cancelada con guiones cargados → no se borra, se
+  prefija `CANCELADA · ` en el título.
+- Entorno se resuelve por: `customData.workspaceId` → correo del contacto
+  (usuario cliente) → `company_name` = nombre del entorno → nombre del entorno
+  dentro del título. Si no hay match: notificación + correo a superadmins.
+- **Cron** `/api/cron/ghl-production-sync` cada 30 min reconcilia con
+  `GHL_PRODUCTION_CALENDAR_IDS` (necesita `GHL_PIT_TOKEN` + `GHL_LOCATION_ID`).
+- **Guiones**: el cliente puede rechazar hasta `GUION_CORRECCION_HORAS` (48)
+  antes de `Planning.date`; el backend lo hace cumplir en `submitClientApproval`
+  (422 `CORRECTION_WINDOW_CLOSED`). `getByEntry` devuelve `produccion` con el
+  límite para pintarlo. Rechazo → in-app + correo URGENTE a: autor del guion
+  (`guionPorId`), `GUION_RECHAZO_NOTIFY_EMAILS` (Ari) y roles
+  `content_manager`/`copywriter`.
+- `estadoProduccion → GRABADO` marca `Planning.cumplida` (idempotente) y avisa
+  `produccion_cumplida` a todo el entorno. `GET /api/planning/monthly-status`
+  resume por entorno (lo usan la vista de Clientes y el calendario del entorno).
+
 ## Notas importantes
 - No hay cron jobs instalados aún — usar `node-cron`
 - Los emails tienen plantillas HTML inline (ver patrón en `resend.service.ts`)
