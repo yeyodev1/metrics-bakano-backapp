@@ -38,6 +38,54 @@ export class GhlService {
     }
   }
 
+  /** Hay token y location configurados: sin esto no se puede leer el CRM. */
+  isConfigured(): boolean {
+    return Boolean(process.env.GHL_PIT_TOKEN && process.env.GHL_LOCATION_ID);
+  }
+
+  /**
+   * Citas de calendarios concretos (los de produccion) en un rango. Es la
+   * base del cron que reconcilia el Planificador con el CRM: si el cliente
+   * mueve o cancela la cita y el webhook no llego, aqui se detecta.
+   */
+  async getCalendarEvents(calendarIds: string[], startTime: Date, endTime: Date): Promise<any[]> {
+    const results = await Promise.allSettled(
+      calendarIds.map((calendarId) =>
+        axios.get(`${GHL_API_BASE}/calendars/events`, {
+          headers: this.getHeaders(),
+          params: {
+            locationId: this.getLocationId(),
+            calendarId,
+            startTime: startTime.getTime(),
+            endTime: endTime.getTime(),
+          },
+        })
+      )
+    );
+    const events: any[] = [];
+    results.forEach((r, i) => {
+      if (r.status === "fulfilled") {
+        events.push(...(r.value.data?.events || []).map((e: any) => ({ ...e, calendarId: e.calendarId || calendarIds[i] })));
+      } else {
+        console.error(`[GHL] eventos del calendario ${calendarIds[i]}:`, r.reason?.response?.data || r.reason?.message);
+        throw new Error(`No se pudieron leer las citas del calendario ${calendarIds[i]}`);
+      }
+    });
+    return events;
+  }
+
+  /** Datos del contacto (correo, empresa, telefono) para asociarlo a un entorno. */
+  async getContact(contactId: string): Promise<any | null> {
+    if (!contactId) return null;
+    try {
+      const response = await axios.get(`${GHL_API_BASE}/contacts/${contactId}`, { headers: this.getHeaders() });
+      return response.data?.contact || null;
+    } catch (error: any) {
+      console.error("[GHL] contacto:", error.response?.data || error.message);
+      return null;
+    }
+  }
+
   /**
    * Fetches all appointments for the location across all calendars within a given timeframe.
    */

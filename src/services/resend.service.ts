@@ -1275,6 +1275,214 @@ export class ResendService {
       html,
     });
   }
+
+  /**
+   * Aviso al equipo interno del entorno: una produccion entro, se movio o se
+   * cancelo desde el link de agendamiento del CRM. `sin_entorno` va a los
+   * superadmins porque nadie mas puede resolverlo.
+   */
+  async sendProduccionCrmEmail(params: {
+    to: string[];
+    tipo: "creada" | "reprogramada" | "cancelada" | "sin_entorno";
+    workspaceName: string;
+    workspaceId?: string;
+    fecha: string;
+    fechaAnterior?: string;
+    titulo: string;
+    contacto?: string;
+    calendario?: string;
+    conservada?: boolean;
+  }): Promise<void> {
+    const { to, tipo, workspaceName, workspaceId, fecha, fechaAnterior, titulo, contacto, calendario, conservada } = params;
+    if (!to.length) return;
+
+    const copy = {
+      creada: {
+        asunto: `Producción agendada · ${workspaceName} · ${fecha}`,
+        titulo: "Nueva producción agendada",
+        bajada: `${workspaceName} reservó su día de grabación desde el CRM. Ya está en el Planificador.`,
+        color: "#1ea362",
+      },
+      reprogramada: {
+        asunto: `Producción reprogramada · ${workspaceName} · ${fecha}`,
+        titulo: "Producción reprogramada",
+        bajada: `${workspaceName} movió su producción en el CRM${fechaAnterior ? ` (antes: ${fechaAnterior})` : ""}. El Planificador ya tiene la fecha nueva.`,
+        color: "#f59e0b",
+      },
+      cancelada: {
+        asunto: `Producción cancelada · ${workspaceName} · ${fecha}`,
+        titulo: "Producción cancelada",
+        bajada: conservada
+          ? `${workspaceName} canceló su producción en el CRM. Como ya tenía guiones cargados, quedó marcada como CANCELADA en el Planificador para que decidan qué hacer.`
+          : `${workspaceName} canceló su producción en el CRM. Se quitó del Planificador.`,
+        color: "#e6285c",
+      },
+      sin_entorno: {
+        asunto: `Producción del CRM sin entorno · ${fecha}`,
+        titulo: "Producción sin entorno asignado",
+        bajada: "Llegó una cita de producción desde el CRM y no coincide con ningún entorno de Metrics. Hay que agendarla a mano o corregir el nombre de empresa del contacto en el CRM.",
+        color: "#e6285c",
+      },
+    }[tipo];
+
+    const url = workspaceId
+      ? `https://metrics.bakano.ec/app/workspaces/${workspaceId}/planning`
+      : "https://metrics.bakano.ec/app/planning";
+
+    const fila = (label: string, valor?: string) =>
+      valor
+        ? `<tr><td style="padding:6px 0;font-size:12px;color:#6b7280;width:120px;">${label}</td><td style="padding:6px 0;font-size:13.5px;color:#191423;font-weight:600;">${valor}</td></tr>`
+        : "";
+
+    const html = `
+<!DOCTYPE html>
+<html lang="es">
+<head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><title>${copy.titulo}</title></head>
+<body style="margin:0;padding:0;background-color:#f0f2f5;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f0f2f5;padding:40px 16px;">
+    <tr><td align="center">
+      <table width="580" cellpadding="0" cellspacing="0" style="max-width:580px;width:100%;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.10);">
+        <tr>
+          <td style="background:linear-gradient(135deg,#191423 0%,#2b2438 100%);padding:32px 40px;text-align:center;">
+            <p style="margin:0 0 14px;color:#ffffff;font-size:20px;font-weight:800;letter-spacing:-0.5px;">Bakano Ads</p>
+            <span style="display:inline-block;background:${copy.color};color:#fff;font-size:11px;font-weight:800;letter-spacing:0.08em;text-transform:uppercase;padding:4px 10px;border-radius:999px;margin-bottom:10px;">Planificador · CRM</span>
+            <h1 style="margin:0;color:#ffffff;font-size:22px;font-weight:700;line-height:1.3;">${copy.titulo}</h1>
+            <p style="margin:8px 0 0;color:rgba(255,255,255,0.65);font-size:14px;line-height:1.5;">${copy.bajada}</p>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:28px 40px 8px;">
+            <table width="100%" cellpadding="0" cellspacing="0" style="background:#faf9fc;border:1px solid #eceaf1;border-radius:12px;">
+              <tr><td style="padding:16px 20px;">
+                <p style="margin:0 0 10px;font-size:11px;font-weight:800;letter-spacing:0.08em;color:#6b7280;text-transform:uppercase;">${workspaceName}</p>
+                <table cellpadding="0" cellspacing="0" width="100%">
+                  ${fila("Producción", titulo)}
+                  ${fila("Fecha (Ecuador)", fecha)}
+                  ${fila("Antes", fechaAnterior)}
+                  ${fila("Calendario", calendario)}
+                  ${fila("Contacto", contacto)}
+                </table>
+              </td></tr>
+            </table>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:20px 40px 8px;text-align:center;">
+            <a href="${url}" style="display:inline-block;background:#e6285c;color:#ffffff;font-size:14px;font-weight:700;text-decoration:none;padding:13px 28px;border-radius:12px;">Abrir el Planificador</a>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:16px 40px 30px;text-align:center;">
+            <p style="margin:0;font-size:12px;color:#9ca3af;line-height:1.5;">La fecha y hora se sincronizan desde el CRM: si hay que moverla, muévela allá.</p>
+          </td>
+        </tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+
+    await this.client.emails.send({ from: this.from, to, subject: copy.asunto, html });
+  }
+
+  /**
+   * URGENTE para contenido: el cliente rechazo guiones y hay que corregirlos
+   * antes de la fecha limite (48 h antes de la produccion).
+   */
+  async sendGuionesRechazadosEmail(params: {
+    to: string[];
+    workspaceName: string;
+    workspaceId: string;
+    entryId: string;
+    clienteNombre?: string;
+    fechaProduccion?: string;
+    limiteCorrecciones?: string;
+    horasRestantes?: number | null;
+    rechazados: { numero: number; tema: string; motivo?: string }[];
+    totalGuiones: number;
+  }): Promise<void> {
+    const { to, workspaceName, workspaceId, entryId, clienteNombre, fechaProduccion, limiteCorrecciones, horasRestantes, rechazados, totalGuiones } = params;
+    if (!to.length || !rechazados.length) return;
+
+    const url = `https://metrics.bakano.ec/app/workspaces/${workspaceId}/planning/${entryId}/video-planning`;
+    const urgencia =
+      horasRestantes === null || horasRestantes === undefined
+        ? "Corrígelos cuanto antes."
+        : horasRestantes <= 0
+          ? "El plazo de correcciones ya venció: coordina con el productor antes de grabar."
+          : horasRestantes <= 24
+            ? `Quedan menos de ${Math.max(1, Math.ceil(horasRestantes))} horas para el límite de correcciones.`
+            : `Quedan ${Math.floor(horasRestantes / 24)} día(s) y ${Math.floor(horasRestantes % 24)} h para el límite de correcciones.`;
+
+    const filas = rechazados
+      .map(
+        (r) => `
+          <tr>
+            <td style="padding:10px 12px;border-bottom:1px solid #f1eef4;font-size:13px;font-weight:800;color:#e6285c;white-space:nowrap;vertical-align:top;">#${String(r.numero).padStart(2, "0")}</td>
+            <td style="padding:10px 12px;border-bottom:1px solid #f1eef4;font-size:13.5px;color:#191423;vertical-align:top;">
+              <strong>${r.tema}</strong>
+              ${r.motivo ? `<div style="margin-top:4px;font-size:12.5px;color:#6b7280;font-style:italic;">“${r.motivo}”</div>` : `<div style="margin-top:4px;font-size:12px;color:#9ca3af;">Sin motivo indicado</div>`}
+            </td>
+          </tr>`
+      )
+      .join("");
+
+    const html = `
+<!DOCTYPE html>
+<html lang="es">
+<head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><title>Guiones rechazados</title></head>
+<body style="margin:0;padding:0;background-color:#f0f2f5;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f0f2f5;padding:40px 16px;">
+    <tr><td align="center">
+      <table width="580" cellpadding="0" cellspacing="0" style="max-width:580px;width:100%;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.10);">
+        <tr>
+          <td style="background:linear-gradient(135deg,#7f1d1d 0%,#e6285c 100%);padding:32px 40px;text-align:center;">
+            <p style="margin:0 0 14px;color:#ffffff;font-size:20px;font-weight:800;letter-spacing:-0.5px;">Bakano Ads</p>
+            <span style="display:inline-block;background:#ffffff;color:#e6285c;font-size:11px;font-weight:900;letter-spacing:0.1em;text-transform:uppercase;padding:4px 12px;border-radius:999px;margin-bottom:10px;">Urgente</span>
+            <h1 style="margin:0;color:#ffffff;font-size:22px;font-weight:700;line-height:1.3;">${workspaceName} rechazó ${rechazados.length} de ${totalGuiones} guiones</h1>
+            <p style="margin:8px 0 0;color:rgba(255,255,255,0.85);font-size:14px;line-height:1.5;">${clienteNombre ? `${clienteNombre} revisó la planificación. ` : ""}${urgencia}</p>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:24px 40px 8px;">
+            <table width="100%" cellpadding="0" cellspacing="0" style="background:#fff5f5;border:1px solid #fecaca;border-radius:12px;">
+              <tr><td style="padding:14px 20px;">
+                ${fechaProduccion ? `<p style="margin:0 0 4px;font-size:13px;color:#7f1d1d;"><strong>Producción:</strong> ${fechaProduccion} (hora Ecuador)</p>` : ""}
+                ${limiteCorrecciones ? `<p style="margin:0;font-size:13px;color:#7f1d1d;"><strong>Límite para correcciones:</strong> ${limiteCorrecciones}</p>` : ""}
+              </td></tr>
+            </table>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:16px 40px 8px;">
+            <table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #eceaf1;border-radius:12px;overflow:hidden;">
+              ${filas}
+            </table>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:20px 40px 8px;text-align:center;">
+            <a href="${url}" style="display:inline-block;background:#e6285c;color:#ffffff;font-size:14px;font-weight:700;text-decoration:none;padding:13px 28px;border-radius:12px;">Corregir los guiones</a>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:16px 40px 30px;text-align:center;">
+            <p style="margin:0;font-size:12px;color:#9ca3af;line-height:1.5;">Cuando estén corregidos, reabre la planificación y vuelve a notificar al cliente para que apruebe.</p>
+          </td>
+        </tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+
+    await this.client.emails.send({
+      from: this.from,
+      to,
+      subject: `🚨 URGENTE · ${workspaceName} rechazó ${rechazados.length} guion${rechazados.length === 1 ? "" : "es"}${horasRestantes !== null && horasRestantes !== undefined && horasRestantes > 0 ? ` · ${Math.ceil(horasRestantes)} h para corregir` : ""}`,
+      html,
+    });
+  }
   /**
    * Circuito de REVISION DE VIDEOS terminados. Mismo aviso que sale por
    * WhatsApp, en su version correo: el tipo decide el texto porque no es lo

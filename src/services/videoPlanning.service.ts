@@ -9,6 +9,8 @@ import { resendService } from "./resend.service";
 import { scriptClassifierService } from "./scriptClassifier.service";
 import { metaService } from "./meta.service";
 import { getTodayEcuador } from "./tumesero.service";
+import { PlanningService } from "./planning.service";
+import { fechaEcuador } from "./crmProductionSync.service";
 import { extractLeadActions } from "../utils/metaActions";
 import cloudinary from "../config/cloudinary";
 
@@ -198,13 +200,57 @@ async function recordMetricSnapshot(
 // llegaba a una revision sin enlace.
 const EDITOR_ALLOWED_FIELDS = new Set(["estadoProduccion", "edicion", "linkVideo"]);
 
+const planningService = new PlanningService();
+
+/** Horas antes de la produccion hasta las que el cliente puede pedir cambios al guion. */
+function horasDeCorreccion(): number {
+  const n = Number(process.env.GUION_CORRECCION_HORAS);
+  return Number.isFinite(n) && n > 0 ? n : 48;
+}
+
+export interface InfoProduccion {
+  entryId: string;
+  fecha: Date;
+  titulo: string;
+  cumplida: boolean;
+  /** Hasta cuando el cliente puede rechazar/corregir guiones. */
+  correccionesHasta: Date;
+  horasCorreccion: number;
+  ventanaCerrada: boolean;
+}
+
+/**
+ * La fecha de produccion vive en el Planning, no en la planificacion de
+ * videos. Aqui se calcula el limite de correcciones (48 h antes por defecto)
+ * que el cliente ve en pantalla y que el backend hace cumplir.
+ */
+async function infoProduccion(planningEntryId: Types.ObjectId | string): Promise<InfoProduccion | null> {
+  const entry = await models.planning.findById(planningEntryId).select("date title cumplida").lean();
+  if (!entry) return null;
+  const horas = horasDeCorreccion();
+  const correccionesHasta = new Date(entry.date.getTime() - horas * 3_600_000);
+  return {
+    entryId: entry._id.toString(),
+    fecha: entry.date,
+    titulo: entry.title,
+    cumplida: entry.cumplida === true,
+    correccionesHasta,
+    horasCorreccion: horas,
+    ventanaCerrada: Date.now() > correccionesHasta.getTime(),
+  };
+}
+
 export class VideoPlanningService {
   // ── GET ────────────────────────────────────────────────────────────────────
   async getByEntry(entryId: string): Promise<IVideoPlanning | null> {
     if (!Types.ObjectId.isValid(entryId)) throw new Error("INVALID_ID");
-    return await models.videoPlanning
+    const planning = await models.videoPlanning
       .findOne({ planningEntryId: new Types.ObjectId(entryId) })
       .lean<IVideoPlanning>();
+    if (!planning) return null;
+    // El cliente necesita ver hasta cuando puede pedir cambios.
+    const produccion = await infoProduccion(entryId).catch(() => null);
+    return { ...planning, produccion } as unknown as IVideoPlanning;
   }
 
   // ── UPSERT (POST = create / PUT = replace items) ───────────────────────────
@@ -327,6 +373,7 @@ export class VideoPlanningService {
     const wasPublicado = item.estadoPublicacion === "PUBLICADO";
     const prevEstadoIdea = item.estadoIdea;
     const prevEdicion = item.edicion;
+    const prevEstadoProduccion = item.estadoProduccion;
 
     for (const [key, value] of Object.entries(fields)) {
       if (!MUTABLE_FIELDS.has(key)) continue;
@@ -398,6 +445,16 @@ export class VideoPlanningService {
         });
       })().catch((err: any) =>
         console.warn("[VideoPlanningService] review email failed:", err.message)
+      );
+    }
+
+    // El productor marco el guion como GRABADO: la produccion de ese mes
+    // queda cumplida. Solo la primera vez avisa; las siguientes ya la
+    // encuentran cumplida y no hacen nada.
+    const seGrabo = prevEstadoProduccion !== "GRABADO" && item.estadoProduccion === "GRABADO";
+    if (seGrabo) {
+      this.marcarProduccionCumplida(planning as unknown as IVideoPlanning, item as unknown as IVideoItem, actor).catch(
+        (err: any) => console.warn("[VideoPlanningService] producción cumplida falló:", err.message)
       );
     }
 
@@ -502,6 +559,16 @@ export class VideoPlanningService {
     if (!planning) throw new Error("NOT_FOUND");
     if (planning.clienteAprobado) throw new Error("LOCKED");
 
+    // Regla del negocio: el cliente solo puede pedir correcciones hasta 48 h
+    // antes de la produccion. Pasado el plazo puede aprobar, no rechazar.
+    const produccion = await infoProduccion(planning.planningEntryId).catch(() => null);
+    const pideCorrecciones = approvals.some((a) => a.clienteAprobacion === "RECHAZADO");
+    if (pideCorrecciones && produccion?.ventanaCerrada) {
+      const err: any = new Error("CORRECTION_WINDOW_CLOSED");
+      err.produccion = produccion;
+      throw err;
+    }
+
     // Apply per-item approvals
     for (const approval of approvals) {
       if (!Types.ObjectId.isValid(approval.itemId)) continue;
@@ -539,7 +606,117 @@ export class VideoPlanningService {
     planning.notificacionAbierta = false;
 
     await planning.save();
+
+    // Rechazo guiones: aviso URGENTE a contenido (Ari) para corregir a tiempo.
+    const rechazados = planning.items.filter((i) => i.clienteAprobacion === "RECHAZADO");
+    if (rechazados.length) {
+      this.notificarGuionesRechazados(planning as unknown as IVideoPlanning, rechazados as unknown as IVideoItem[], userId, produccion).catch(
+        (err: any) => console.warn("[VideoPlanningService] aviso de guiones rechazados falló:", err.message)
+      );
+    }
+
     return planning.toObject() as IVideoPlanning;
+  }
+
+  /**
+   * Quien recibe el aviso de guiones rechazados: quien escribio cada guion,
+   * los correos de `GUION_RECHAZO_NOTIFY_EMAILS` (Ari) y los internos con rol
+   * content_manager o copywriter. In-app + correo, con la urgencia del plazo.
+   */
+  private async notificarGuionesRechazados(
+    planning: IVideoPlanning,
+    rechazados: IVideoItem[],
+    clienteUserId: string,
+    produccion: InfoProduccion | null
+  ): Promise<void> {
+    const autoresIds = rechazados.map((i) => i.guionPorId).filter(Boolean) as Types.ObjectId[];
+    const correosEnv = (process.env.GUION_RECHAZO_NOTIFY_EMAILS || "")
+      .split(",")
+      .map((e) => e.trim().toLowerCase())
+      .filter(Boolean);
+
+    const [workspace, cliente, destinatarios] = await Promise.all([
+      models.workspaces.findById(planning.workspaceId).select("name").lean(),
+      Types.ObjectId.isValid(clienteUserId) ? models.users.findById(clienteUserId).select("name email").lean() : null,
+      models.users
+        .find({
+          isActive: true,
+          $or: [
+            { _id: { $in: autoresIds } },
+            ...(correosEnv.length ? [{ email: { $in: correosEnv } }] : []),
+            { isInternal: true, internalRole: { $in: ["content_manager", "copywriter"] } },
+          ],
+        })
+        .select("_id email")
+        .lean(),
+    ]);
+
+    const nombre = workspace?.name || "Cliente";
+    const horasRestantes = produccion ? (produccion.correccionesHasta.getTime() - Date.now()) / 3_600_000 : null;
+    const lista = rechazados
+      .map((r) => `#${String(r.numero).padStart(2, "0")} ${r.tema}${r.motivoRechazo ? ` (“${r.motivoRechazo}”)` : ""}`)
+      .join(" · ");
+    const plazo =
+      horasRestantes === null
+        ? "Corrígelos cuanto antes."
+        : horasRestantes <= 0
+          ? "El plazo de correcciones ya venció."
+          : `Quedan ${Math.ceil(horasRestantes)} h para el límite de correcciones (${fechaEcuador(produccion!.correccionesHasta)}).`;
+
+    await Promise.all(
+      destinatarios.map((u) =>
+        notificationService.create(
+          u._id as Types.ObjectId,
+          "guion_rechazado",
+          `URGENTE · ${nombre} rechazó ${rechazados.length} guion${rechazados.length === 1 ? "" : "es"}`,
+          `${lista}. ${plazo}`,
+          { workspaceId: planning.workspaceId, referenceId: planning.planningEntryId }
+        )
+      )
+    );
+
+    const to = [...new Set([...destinatarios.map((u) => u.email), ...correosEnv].filter(Boolean))];
+    await resendService.sendGuionesRechazadosEmail({
+      to,
+      workspaceName: nombre,
+      workspaceId: planning.workspaceId.toString(),
+      entryId: planning.planningEntryId.toString(),
+      clienteNombre: cliente?.name || cliente?.email,
+      fechaProduccion: produccion ? fechaEcuador(produccion.fecha) : undefined,
+      limiteCorrecciones: produccion ? fechaEcuador(produccion.correccionesHasta) : undefined,
+      horasRestantes,
+      rechazados: rechazados.map((r) => ({ numero: r.numero, tema: r.tema, motivo: r.motivoRechazo })),
+      totalGuiones: planning.items.length,
+    });
+  }
+
+  /**
+   * Produccion cumplida: el productor grabo. Se marca el Planning del mes y
+   * se avisa al cliente y al equipo del entorno. Idempotente.
+   */
+  private async marcarProduccionCumplida(
+    planning: IVideoPlanning,
+    item: IVideoItem,
+    actor?: { id?: string; nombre?: string }
+  ): Promise<void> {
+    let nombreActor = actor?.nombre;
+    if (!nombreActor && actor?.id && Types.ObjectId.isValid(actor.id)) {
+      const u = await models.users.findById(actor.id).select("name email").lean();
+      nombreActor = u?.name || u?.email || undefined;
+    }
+    const entry = await planningService.marcarCumplida(planning.planningEntryId, { id: actor?.id, nombre: nombreActor });
+    if (!entry) return;
+
+    const workspace = await models.workspaces.findById(planning.workspaceId).select("name").lean();
+    const mes = new Intl.DateTimeFormat("es-EC", { timeZone: "America/Guayaquil", month: "long", year: "numeric" }).format(entry.date);
+    await notificationService.createForWorkspaceUsers(
+      planning.workspaceId,
+      false,
+      "produccion_cumplida",
+      `Producción de ${mes} cumplida · ${workspace?.name || "Cliente"}`,
+      `${nombreActor ? `${nombreActor} marcó` : "Se marcó"} como grabado el guion "${item.tema}". La producción del ${fechaEcuador(entry.date)} queda cumplida.`,
+      { referenceId: entry._id as Types.ObjectId }
+    );
   }
 
   // ── REOPEN (POST) ───────────────────────────────────────────────────────────

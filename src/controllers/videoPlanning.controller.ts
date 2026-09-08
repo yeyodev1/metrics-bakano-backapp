@@ -176,6 +176,15 @@ export async function submitClientApproval(
       res.status(HttpStatusCode.Conflict).json({ message: "Esta planificación ya fue aprobada anteriormente. La decisión es irreversible." });
       return;
     }
+    if (error.message === "CORRECTION_WINDOW_CLOSED") {
+      const p = error.produccion;
+      res.status(HttpStatusCode.UnprocessableEntity).json({
+        message: `El plazo para pedir correcciones venció: los cambios a los guiones se reciben hasta ${p?.horasCorreccion ?? 48} horas antes de la producción. Puedes aprobar los guiones o coordinar cualquier ajuste directamente con tu equipo de Bakano.`,
+        code: "CORRECTION_WINDOW_CLOSED",
+        produccion: p ?? null,
+      });
+      return;
+    }
     console.error("submitClientApproval error:", error);
     next(error);
   }
