@@ -1210,6 +1210,76 @@ export class ResendService {
     });
   }
 
+  /** Un cliente escribio por Telegram: le llega directo a quien atiende el tema. */
+  async sendSolicitudClienteEmail(params: {
+    to: string[];
+    tema: string;
+    workspaceName: string;
+    clienteNombre: string;
+    clienteEmail?: string;
+    telegramUsername?: string;
+    mensaje: string;
+    proximaProduccion?: string;
+  }): Promise<void> {
+    const { to, tema, workspaceName, clienteNombre, clienteEmail, telegramUsername, mensaje, proximaProduccion } = params;
+    if (!to.length) return;
+    const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const fila = (etiqueta: string, valor: string) =>
+      `<tr><td style="padding:6px 0;font-size:13px;color:#94a3b8;width:140px;vertical-align:top;">${etiqueta}</td><td style="padding:6px 0;font-size:14px;color:#1e293b;">${valor}</td></tr>`;
+
+    const html = `<!DOCTYPE html>
+<html lang="es">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+<body style="margin:0;padding:0;background:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="padding:40px 20px;">
+    <tr><td align="center">
+      <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
+
+        <tr>
+          <td style="background:linear-gradient(135deg,#e6285c 0%,#85529c 100%);padding:32px 40px;text-align:center;">
+            <p style="margin:0;font-size:13px;font-weight:700;color:rgba(255,255,255,0.75);letter-spacing:2px;text-transform:uppercase;">Telegram · ${esc(tema)}</p>
+            <h1 style="margin:12px 0 0;font-size:24px;font-weight:800;color:#ffffff;">${esc(workspaceName)} te escribió</h1>
+          </td>
+        </tr>
+
+        <tr>
+          <td style="padding:32px 40px 24px;">
+            <div style="background:#f8fafc;border-left:4px solid #e6285c;border-radius:8px;padding:16px 20px;margin-bottom:24px;">
+              <p style="margin:0;font-size:15px;color:#1e293b;line-height:1.7;white-space:pre-wrap;">${esc(mensaje)}</p>
+            </div>
+            <table width="100%" cellpadding="0" cellspacing="0">
+              ${fila("Cliente", esc(clienteNombre))}
+              ${clienteEmail ? fila("Correo", esc(clienteEmail)) : ""}
+              ${telegramUsername ? fila("Telegram", `@${esc(telegramUsername)}`) : ""}
+              ${proximaProduccion ? fila("Próxima producción", esc(proximaProduccion)) : ""}
+            </table>
+            <p style="margin:24px 0 0;font-size:14px;color:#475569;line-height:1.6;">
+              El cliente ya sabe que tú lo atiendes. Contáctalo lo antes posible.
+            </p>
+          </td>
+        </tr>
+
+        <tr>
+          <td style="background:#f8fafc;padding:16px 40px;border-top:1px solid #e2e8f0;text-align:center;">
+            <p style="margin:0;color:#94a3b8;font-size:12px;">Enviado automáticamente por <strong>@BakanoAgencyBot</strong>.</p>
+          </td>
+        </tr>
+
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+
+    await this.client.emails.send({
+      from: this.from,
+      to,
+      replyTo: clienteEmail,
+      subject: `${workspaceName} escribió por Telegram (${tema})`,
+      html,
+    });
+  }
+
   /**
    * Aviso de que hay una planificacion lista para aprobar.
    *

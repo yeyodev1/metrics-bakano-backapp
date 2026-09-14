@@ -3,7 +3,20 @@ import { Types } from "mongoose";
 import models from "../models";
 import type { ITelegramChat } from "../models/telegramChat.model";
 import { resendService } from "./resend.service";
+import { notificationService } from "./notification.service";
+import { EQUIPO_ATENCION, equipoAtencionService, type TemaAtencion } from "./equipoAtencion.service";
 import { escaparHtml, telegramService, type InlineButton, type TelegramUpdate } from "./telegram.service";
+
+function fechaEcuador(fecha: Date): string {
+  return new Intl.DateTimeFormat("es-EC", {
+    timeZone: "America/Guayaquil",
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(fecha);
+}
 
 const CORREO_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const CODIGO_MINUTOS = 10;
@@ -102,8 +115,11 @@ export class TelegramBotService {
       case "eligiendo_entorno":
         return this.pedirEntorno(chat);
       case "listo":
-        // Paso 3: aqui entra el agente que conversa sobre el entorno elegido.
-        await telegramService.sendMessage(chat.chatId, "Te leo. Elige un tema para seguir:");
+        if (chat.tema && chat.workspaceId) return this.enviarSolicitud(chat, chat.tema, texto);
+        await telegramService.sendMessage(
+          chat.chatId,
+          "Te leo. Elige primero el tema para pasarle tu mensaje a la persona correcta:"
+        );
         return this.mostrarMenu(chat);
     }
   }
@@ -206,19 +222,96 @@ export class TelegramBotService {
     if (data === "menu:entorno") return this.pedirEntorno(chat);
     if (!chat.workspaceId) return this.pedirEntorno(chat);
 
-    const temas: Record<string, string> = {
-      "menu:produccion": "tus producciones",
-      "menu:guiones": "la revisión de tus guiones",
-      "menu:atencion": "atención al cliente",
-    };
-    const tema = temas[data];
-    if (!tema) return this.mostrarMenu(chat);
+    const tema = data.slice("menu:".length) as TemaAtencion;
+    if (!data.startsWith("menu:") || !(tema in EQUIPO_ATENCION)) return this.mostrarMenu(chat);
 
-    // Paso 3: el agente toma la conversacion desde aqui.
+    chat.tema = tema;
+    await chat.save();
+
+    const { etiqueta, personas } = EQUIPO_ATENCION[tema];
+    let contexto = "";
+    if (tema === "produccion") {
+      const proxima = await this.proximaProduccion(chat.workspaceId);
+      contexto = proxima
+        ? `Tu próxima producción es el <b>${fechaEcuador(proxima)}</b>.\n\n`
+        : "Todavía no tienes una producción agendada.\n\n";
+    }
     await telegramService.sendMessage(
       chat.chatId,
-      `Perfecto, hablemos de <b>${tema}</b>. Cuéntame qué necesitas.`
+      `${contexto}Para ${etiqueta} te atiende${personas.length > 1 ? "n" : ""} <b>${escaparHtml(equipoAtencionService.nombres(tema))}</b>.\n\n` +
+        "Escríbeme aquí qué necesitas y se lo paso ahora mismo."
     );
+  }
+
+  // ── Solicitudes al equipo ──────────────────────────────────────────────────
+  private async proximaProduccion(workspaceId: Types.ObjectId): Promise<Date | null> {
+    const proxima = await models.planning
+      .findOne({ workspaceId, date: { $gte: new Date() }, title: { $not: /^CANCELADA/ } })
+      .sort({ date: 1 })
+      .select("date")
+      .lean();
+    return proxima?.date ?? null;
+  }
+
+  /** El mensaje del cliente llega por correo y en la plataforma a quien atiende el tema. */
+  private async enviarSolicitud(chat: ITelegramChat, tema: TemaAtencion, texto: string): Promise<void> {
+    const mensaje = texto.slice(0, 3000);
+    const [workspace, cliente, internos, proxima] = await Promise.all([
+      models.workspaces.findById(chat.workspaceId).select("name").lean(),
+      models.users.findById(chat.userId).select("name lastName email").lean(),
+      equipoAtencionService.usuarios(tema),
+      tema === "produccion" ? this.proximaProduccion(chat.workspaceId!) : null,
+    ]);
+    const nombreEntorno = workspace?.name || "Cliente";
+    const nombreCliente = [cliente?.name, cliente?.lastName].filter(Boolean).join(" ") || cliente?.email || "Cliente";
+    const { etiqueta, personas } = EQUIPO_ATENCION[tema];
+
+    const avisosInApp = await Promise.allSettled(
+      internos.map((u) =>
+        notificationService.create(
+          u._id,
+          "solicitud_cliente",
+          `${nombreEntorno} escribió por Telegram · ${etiqueta}`,
+          `${nombreCliente}: “${mensaje.slice(0, 280)}”`,
+          { workspaceId: chat.workspaceId! }
+        )
+      )
+    );
+
+    let correoEnviado = false;
+    try {
+      await resendService.sendSolicitudClienteEmail({
+        to: equipoAtencionService.correos(tema),
+        tema: etiqueta,
+        workspaceName: nombreEntorno,
+        clienteNombre: nombreCliente,
+        clienteEmail: cliente?.email,
+        telegramUsername: chat.telegramUsername,
+        mensaje,
+        proximaProduccion: proxima ? fechaEcuador(proxima) : undefined,
+      });
+      correoEnviado = true;
+    } catch (error) {
+      console.error("[Telegram] no se pudo enviar el correo de la solicitud:", error);
+    }
+
+    // Solo se confirma al cliente si el mensaje llego por algun lado.
+    if (!correoEnviado && !avisosInApp.some((r) => r.status === "fulfilled")) {
+      await telegramService.sendMessage(
+        chat.chatId,
+        "No pude pasar tu mensaje ahora. Inténtalo de nuevo en unos minutos o escríbenos a soporte@bakano.ec."
+      );
+      return;
+    }
+
+    chat.tema = undefined;
+    await chat.save();
+    await telegramService.sendMessage(
+      chat.chatId,
+      `Listo. Le pasé tu mensaje a <b>${escaparHtml(equipoAtencionService.nombres(tema))}</b>. ` +
+        `${personas.length > 1 ? "Te van" : "Te va"} a contactar lo antes posible.`
+    );
+    return this.mostrarMenu(chat);
   }
 
   // ── Entornos ───────────────────────────────────────────────────────────────
@@ -274,6 +367,7 @@ export class TelegramBotService {
 
   private async fijarEntorno(chat: ITelegramChat, entorno: { _id: Types.ObjectId; name: string }): Promise<void> {
     chat.workspaceId = entorno._id;
+    chat.tema = undefined;
     chat.estado = "listo";
     await chat.save();
     return this.mostrarMenu(chat, entorno.name);
@@ -298,6 +392,7 @@ export class TelegramBotService {
     chat.estado = "esperando_correo";
     chat.userId = undefined;
     chat.workspaceId = undefined;
+    chat.tema = undefined;
     chat.correoPendiente = undefined;
     chat.codigoHash = undefined;
     chat.codigoExpira = undefined;

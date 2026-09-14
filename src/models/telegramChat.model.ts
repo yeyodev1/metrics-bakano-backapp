@@ -1,4 +1,5 @@
 import { Schema, model, Document, Types } from "mongoose";
+import type { TemaAtencion } from "../services/equipoAtencion.service";
 
 /**
  * Un chat privado de Telegram con @BakanoAgencyBot.
@@ -32,6 +33,8 @@ export interface ITelegramChat extends Document {
 
   userId?: Types.ObjectId;
   workspaceId?: Types.ObjectId;
+  /** Tema elegido en el menu: el siguiente mensaje se le pasa a quien lo atiende. */
+  tema?: TemaAtencion;
   vinculadoEn?: Date;
 
   createdAt: Date;
@@ -59,6 +62,7 @@ const TelegramChatSchema = new Schema<ITelegramChat>(
 
     userId: { type: Schema.Types.ObjectId, ref: "User", default: null },
     workspaceId: { type: Schema.Types.ObjectId, ref: "Workspace", default: null },
+    tema: { type: String, enum: ["produccion", "guiones", "atencion"] },
     vinculadoEn: { type: Date },
   },
   {

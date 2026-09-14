@@ -4,6 +4,7 @@ import type { IPlanning } from "../models/planning.model";
 import { ghlService } from "./ghl.service";
 import { notificationService } from "./notification.service";
 import { resendService } from "./resend.service";
+import { equipoAtencionService } from "./equipoAtencion.service";
 
 /**
  * Produccion agendada desde el CRM (GoHighLevel).
@@ -555,18 +556,27 @@ class CrmProductionSyncService {
             .lean()
         ).map((u) => u._id.toString())
       );
+      // Producción la atienden siempre las mismas personas, esten o no en el entorno.
+      const produccion = await equipoAtencionService.usuarios("produccion");
+      const avisados = new Set(delEntorno);
+      const pendientes = [...equipo, ...produccion].filter((u) => {
+        const id = u._id.toString();
+        if (avisados.has(id)) return false;
+        avisados.add(id);
+        return true;
+      });
       await Promise.all(
-        equipo
-          .filter((u) => !delEntorno.has(u._id.toString()))
-          .map((u) =>
-            notificationService.create(u._id, textos.type, textos.titulo, textos.cuerpo, {
-              workspaceId: entry.workspaceId,
-              referenceId: entry._id as Types.ObjectId,
-            })
-          )
+        pendientes.map((u) =>
+          notificationService.create(u._id, textos.type, textos.titulo, textos.cuerpo, {
+            workspaceId: entry.workspaceId,
+            referenceId: entry._id as Types.ObjectId,
+          })
+        )
       );
 
-      const to = [...new Set(equipo.map((u) => u.email).filter(Boolean))];
+      const to = [
+        ...new Set([...equipo.map((u) => u.email), ...equipoAtencionService.correos("produccion")].filter(Boolean)),
+      ];
       await resendService.sendProduccionCrmEmail({
         to,
         tipo,
