@@ -19,6 +19,7 @@ import { EngramModel } from "./engram.model";
 import { ScriptFeedbackModel } from "./scriptFeedback.model";
 import { ReviewEventModel } from "./reviewEvent.model";
 import { MonthlyTargetModel } from "./monthlyTarget.model";
+import { TelegramChatModel } from "./telegramChat.model";
 
 const models = {
   users: UserModel,
@@ -42,6 +43,7 @@ const models = {
   scriptFeedback: ScriptFeedbackModel,
   reviewEvents: ReviewEventModel,
   monthlyTargets: MonthlyTargetModel,
+  telegramChats: TelegramChatModel,
 };
 
 export default models;
