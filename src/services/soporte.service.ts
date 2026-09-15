@@ -4,6 +4,7 @@ import { z } from "zod";
 import { Types } from "mongoose";
 import models from "../models";
 import { equipoAtencionService } from "./equipoAtencion.service";
+import { slackService } from "./slack.service";
 
 /**
  * Tickets de soporte@bakano.ec → Slack.
@@ -84,8 +85,6 @@ function slackEscape(texto: string): string {
 }
 
 class SoporteService {
-  private slackIds = new Map<string, string | null>();
-
   /** Firma Svix: HMAC-SHA256 de `id.timestamp.cuerpo` con el secreto `whsec_…` en base64. */
   verificarFirma(cuerpo: string, headers: Record<string, string | string[] | undefined>, secreto: string): boolean {
     const id = String(headers["svix-id"] || "");
@@ -210,22 +209,8 @@ animo en_peligro: quiere cancelar o pausar, no ve resultados, amenaza con irse.`
     return r.success ? r.data : null;
   }
 
-  private async slackIdPorCorreo(email: string): Promise<string | null> {
-    if (this.slackIds.has(email)) return this.slackIds.get(email)!;
-    try {
-      const { data } = await axios.get("https://slack.com/api/users.lookupByEmail", {
-        params: { email },
-        headers: { Authorization: `Bearer ${process.env.SLACK_BOT_TOKEN}` },
-        timeout: 10_000,
-      });
-      const id = data?.ok ? (data.user.id as string) : null;
-      if (!data?.ok) console.warn(`[Soporte] ${email} no está en Slack: ${data?.error}`);
-      this.slackIds.set(email, id);
-      return id;
-    } catch (error: any) {
-      console.error("[Soporte] lookupByEmail:", error.message);
-      return null;
-    }
+  private slackIdPorCorreo(email: string): Promise<string | null> {
+    return slackService.idPorCorreo(email);
   }
 
   private async publicarEnSlack(t: {

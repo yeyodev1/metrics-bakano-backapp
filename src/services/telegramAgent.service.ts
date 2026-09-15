@@ -112,7 +112,11 @@ class TelegramAgentService {
       .map(
         (t) =>
           `- ${EQUIPO_ATENCION[t].etiqueta}: ${equipoAtencionService.nombres(t)}` +
-          (EQUIPO_ATENCION[t].calendarioId ? " (se puede agendar reunión en su calendario)" : " (sin calendario: las reuniones se coordinan por correo)")
+          (t === "produccion"
+            ? " (la producción se agenda en su calendario con agendarProduccion)"
+            : EQUIPO_ATENCION[t].calendarioId
+              ? " (se puede agendar reunión en su calendario)"
+              : "")
       )
       .join("\n");
 
@@ -133,9 +137,17 @@ Cómo hablas:
 Quién atiende a este cliente:
 ${equipo}
 
+Producciones (grabaciones):
+- Son sesiones en un ambiente controlado para grabar las tomas del avatar del cliente y de los productos que vamos a promocionar.
+- Cada cliente puede agendar una producción cada 2 meses, contados desde la última. Si ya tiene una agendada, no puede agendar otra.
+- Para agendar: usa verHorariosProduccion, ofrece 3 o 4 horarios y, cuando el cliente elija uno concreto, usa agendarProduccion con el valor "inicio" exacto. Confirma fecha, hora y que lo atienden ${equipoAtencionService.nombres("produccion")}.
+- Si todavía no puede agendar, explica la regla con naturalidad y dile desde qué fecha puede.
+- Mover o cancelar una producción, o cualquier otro tema de producción, no lo resuelves tú: pásale el mensaje a ${equipoAtencionService.nombres("produccion")} con pasarMensajeAlEquipo.
+- Si agendarProduccion falla, discúlpate y ofrece pasarle el mensaje al equipo con el horario que quería.
+
 Reglas:
 - Nunca inventes datos. Para producciones, guiones u horarios usa siempre las herramientas. Si no hay dato, dilo tal cual y ofrece pasarle el mensaje al equipo.
-- Si el cliente quiere hablar con alguien o tiene algo que no puedes resolver, ofrécele dos caminos: agendar una reunión (solo guiones y atención tienen calendario) o pasarle su mensaje por correo a la persona.
+- Si el cliente quiere hablar con alguien o tiene algo que no puedes resolver, ofrécele dos caminos: agendar una reunión (guiones y atención tienen calendario de reuniones; producción se agenda con agendarProduccion) o pasarle su mensaje a la persona.
 - Para agendar: consulta horarios libres, ofrece 3 o 4 opciones y agenda solo cuando el cliente elija un horario concreto. Usa exactamente el valor "inicio" que devuelve la herramienta.
 - Antes de pasar un mensaje al equipo asegúrate de entender qué necesita. Después confírmale a quién se lo enviaste.
 - Si el cliente está molesto, reconoce cómo se siente, discúlpate sin excusas y ofrece una solución concreta.
@@ -214,7 +226,10 @@ Reglas:
           if (horarios === null) {
             return {
               agendable: false,
-              nota: `Con ${equipoAtencionService.nombres(tema)} la reunión se coordina por correo: pregunta qué día y hora prefiere y usa pasarMensajeAlEquipo.`,
+              nota:
+                tema === "produccion"
+                  ? "Para agendar la producción usa verHorariosProduccion y agendarProduccion."
+                  : `Con ${equipoAtencionService.nombres(tema)} la reunión se coordina por mensaje: pregunta qué día y hora prefiere y usa pasarMensajeAlEquipo.`,
             };
           }
           return {
@@ -222,6 +237,40 @@ Reglas:
             con: equipoAtencionService.nombres(tema),
             horarios: horarios.slice(0, 12).map((h) => ({ inicio: h.toISOString(), texto: fechaEcuador(h) })),
           };
+        },
+      },
+
+      verHorariosProduccion: {
+        description:
+          "Dice si el cliente puede agendar su producción (una cada 2 meses desde la última; con una ya agendada no puede otra) y los horarios libres de Karen Muñoz y Jean Ortega desde la fecha permitida.",
+        inputSchema: z.object({}),
+        execute: async () => {
+          const { estado, horarios } = await atencionClienteService.horariosProduccion(chat.workspaceId!);
+          return {
+            puedeAgendar: estado.puedeAgendar,
+            yaTieneAgendada: estado.proxima ? fechaEcuador(estado.proxima) : null,
+            ultimaProduccion: estado.ultima ? fechaEcuador(estado.ultima) : null,
+            disponibleDesde: estado.habilitadaDesde ? fechaEcuador(estado.habilitadaDesde) : null,
+            esperaPorReglaDe2Meses: estado.esperar ?? false,
+            horarios:
+              horarios === null
+                ? "El calendario no está disponible: ofrece pasarle el mensaje al equipo."
+                : horarios.slice(0, 12).map((h) => ({ inicio: h.toISOString(), texto: fechaEcuador(h) })),
+          };
+        },
+      },
+
+      agendarProduccion: {
+        description:
+          "Agenda la producción en el calendario de Karen Muñoz y Jean Ortega y les avisa. Úsala solo con un horario que el cliente eligió de verHorariosProduccion. El sistema vuelve a validar la regla de 2 meses.",
+        inputSchema: z.object({
+          inicio: z.string().describe("Valor 'inicio' exacto devuelto por verHorariosProduccion"),
+        }),
+        execute: async ({ inicio }: { inicio: string }) => {
+          const fecha = new Date(inicio);
+          if (Number.isNaN(fecha.getTime())) return { ok: false, motivo: "horario inválido" };
+          const r = await atencionClienteService.reservarProduccion(chat, fecha);
+          return r.ok ? { ok: true, cuando: r.cuando, con: equipoAtencionService.nombres("produccion") } : { ok: false, motivo: r.motivo };
         },
       },
 

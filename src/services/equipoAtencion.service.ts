@@ -48,6 +48,16 @@ export const EQUIPO_ATENCION: Record<TemaAtencion, EquipoTema> = {
   },
 };
 
+/**
+ * Calendarios de produccion de Karen y Jean en el CRM ("Equipo Dinamita").
+ * Aqui SI se agenda la produccion: el sync del CRM la convierte en la
+ * grabacion del Planificador y avisa al equipo. Las reuniones no van aqui.
+ */
+export const CALENDARIOS_PRODUCCION = {
+  standard: "hm9U34tabJCK5oeZm0Kg", // "Equipo dinamita - standard"
+  premium: "gL4SsPMtjhuDFyUM3vQW", // "Equipo Dinamita - premium"
+} as const;
+
 export class EquipoAtencionService {
   /** "Karen Muñoz y Jean Ortega" */
   nombres(tema: TemaAtencion): string {
