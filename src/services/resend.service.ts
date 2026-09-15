@@ -1,5 +1,18 @@
 import { Resend } from "resend";
 
+const MARCA = "Bakano Metrics";
+// Logo blanco con punto rosado: vive en public/ del front para tener URL fija.
+const LOGO_CLARO = "https://metrics.bakano.ec/email/bakano-logo-light.png";
+
+/**
+ * Barra de marca arriba de todos los correos. Fondo oscuro para que el logo
+ * blanco (y su punto rosado) contraste siempre, sea cual sea el color del
+ * encabezado de cada correo (rojo urgente, morado novedades, etc.).
+ */
+function barraMarca(): string {
+  return `<tr><td style="background:#0f0d14;padding:22px 40px 18px;text-align:center;border-bottom:3px solid #e6285c;"><a href="https://metrics.bakano.ec" style="text-decoration:none;"><img src="${LOGO_CLARO}" width="150" height="26" alt="${MARCA}" style="display:inline-block;border:0;outline:none;width:150px;height:26px;"/></a><p style="margin:8px 0 0;font-size:11px;font-weight:700;letter-spacing:4px;text-transform:uppercase;color:#f9a8d4;">📊 metrics</p></td></tr>`;
+}
+
 
 interface WelcomeEmailParams {
   to: string;
@@ -17,7 +30,9 @@ export class ResendService {
   }
 
   private get from(): string {
-    return process.env.RESEND_FROM_EMAIL || "Bakano Ads <noreply@bakano.ec>";
+    const configurado = process.env.RESEND_FROM_EMAIL || "noreply@bakano.ec";
+    const direccion = configurado.match(/<([^>]+)>/)?.[1] ?? configurado.trim();
+    return `${process.env.RESEND_FROM_NAME || `${MARCA} 📊`} <${direccion}>`;
   }
 
   async sendWelcomeEmail(params: WelcomeEmailParams): Promise<void> {
@@ -43,7 +58,7 @@ export class ResendService {
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Bienvenido/a a Bakano Ads</title>
+  <title>Bienvenido/a a Bakano Metrics</title>
 </head>
 <body style="margin:0;padding:0;background-color:#f0f2f5;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;">
   <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f0f2f5;padding:40px 16px;">
@@ -52,9 +67,9 @@ export class ResendService {
         <table width="580" cellpadding="0" cellspacing="0" style="max-width:580px;width:100%;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.10);">
 
           <!-- Header -->
+          ${barraMarca()}
           <tr>
             <td style="background:linear-gradient(135deg,#0f1117 0%,#1e293b 100%);padding:36px 40px 32px;text-align:center;">
-              <p style="margin:0 0 20px;color:#ffffff;font-size:22px;font-weight:800;letter-spacing:-0.5px;">Bakano Ads</p>
               <div style="display:inline-block;width:64px;height:64px;background:rgba(255,255,255,0.08);border-radius:50%;text-align:center;line-height:64px;font-size:30px;margin-bottom:16px;">🎉</div>
               <h1 style="margin:0;color:#ffffff;font-size:26px;font-weight:700;line-height:1.3;">¡Bienvenido/a, ${firstName}!</h1>
               <p style="margin:10px 0 0;color:rgba(255,255,255,0.65);font-size:15px;">Tu cuenta ha sido creada exitosamente.</p>
@@ -110,7 +125,7 @@ export class ResendService {
                   <td align="center" style="padding-bottom:24px;">
                     <a href="${appUrl}/login"
                        style="display:inline-block;background:linear-gradient(135deg,#0f1117 0%,#1e293b 100%);color:#ffffff;text-decoration:none;font-size:15px;font-weight:700;padding:14px 40px;border-radius:10px;letter-spacing:0.2px;box-shadow:0 4px 14px rgba(15,17,23,0.25);">
-                      Ingresar a Bakano Ads →
+                      Ingresar a Bakano Metrics →
                     </a>
                   </td>
                 </tr>
@@ -129,7 +144,7 @@ export class ResendService {
           <tr>
             <td style="background:#f8fafc;padding:20px 40px;border-top:1px solid #e2e8f0;text-align:center;">
               <p style="margin:0;color:#94a3b8;font-size:12px;line-height:1.6;">
-                Este correo fue generado automáticamente por <strong>Bakano Ads</strong>.<br/>
+                Este correo fue generado automáticamente por <strong>Bakano Metrics</strong>.<br/>
                 Si no esperabas este correo, por favor contáctanos.
               </p>
             </td>
@@ -145,7 +160,7 @@ export class ResendService {
     await this.client.emails.send({
       from: this.from,
       to,
-      subject: `¡Bienvenido/a a Bakano Ads! Tus credenciales de acceso`,
+      subject: `¡Bienvenido/a a Bakano Metrics! Tus credenciales de acceso`,
       html,
     });
   }
@@ -193,9 +208,9 @@ export class ResendService {
         <table width="580" cellpadding="0" cellspacing="0" style="max-width:580px;width:100%;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.10);">
 
           <!-- Header -->
+          ${barraMarca()}
           <tr>
             <td style="background:linear-gradient(135deg,#0f1117 0%,#1e293b 100%);padding:36px 40px 32px;text-align:center;">
-              <p style="margin:0 0 16px;color:#ffffff;font-size:22px;font-weight:800;letter-spacing:-0.5px;">Bakano Ads</p>
               <div style="display:inline-block;width:64px;height:64px;background:rgba(255,255,255,0.08);border-radius:50%;text-align:center;line-height:64px;font-size:30px;margin-bottom:16px;">💰</div>
               <h1 style="margin:0;color:#ffffff;font-size:24px;font-weight:700;line-height:1.3;">Nueva facturación registrada</h1>
               <p style="margin:8px 0 0;color:rgba(255,255,255,0.65);font-size:14px;text-transform:capitalize;">${dateLabel}</p>
@@ -264,7 +279,7 @@ export class ResendService {
           <tr>
             <td style="background:#f8fafc;padding:20px 40px;border-top:1px solid #e2e8f0;text-align:center;">
               <p style="margin:0;color:#94a3b8;font-size:12px;line-height:1.6;">
-                Este correo fue generado automáticamente por <strong>Bakano Ads</strong>.<br/>
+                Este correo fue generado automáticamente por <strong>Bakano Metrics</strong>.<br/>
                 Notificación interna — no requiere acción.
               </p>
             </td>
@@ -334,9 +349,9 @@ export class ResendService {
         <table width="580" cellpadding="0" cellspacing="0" style="max-width:580px;width:100%;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.10);">
 
           <!-- Header -->
+          ${barraMarca()}
           <tr>
             <td style="background:linear-gradient(135deg,#0f1117 0%,#1e293b 100%);padding:36px 40px 32px;text-align:center;">
-              <p style="margin:0 0 16px;color:#ffffff;font-size:22px;font-weight:800;letter-spacing:-0.5px;">Bakano Ads</p>
               <div style="display:inline-block;width:64px;height:64px;background:rgba(255,255,255,0.08);border-radius:50%;text-align:center;line-height:64px;font-size:30px;margin-bottom:16px;">${actionEmoji}</div>
               <h1 style="margin:0;color:#ffffff;font-size:24px;font-weight:700;line-height:1.3;">${actionLabel}</h1>
               <p style="margin:8px 0 0;color:rgba(255,255,255,0.65);font-size:14px;text-transform:capitalize;">${dateLabel}</p>
@@ -416,7 +431,7 @@ export class ResendService {
           <tr>
             <td style="background:#f8fafc;padding:20px 40px;border-top:1px solid #e2e8f0;text-align:center;">
               <p style="margin:0;color:#94a3b8;font-size:12px;line-height:1.6;">
-                Este correo fue generado automáticamente por <strong>Bakano Ads</strong>.<br/>
+                Este correo fue generado automáticamente por <strong>Bakano Metrics</strong>.<br/>
                 Estás recibiendo esto porque tienes acceso a <strong>${workspaceName}</strong>.
               </p>
             </td>
@@ -482,9 +497,9 @@ export class ResendService {
         <table width="580" cellpadding="0" cellspacing="0" style="max-width:580px;width:100%;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.10);">
 
           <!-- Header -->
+          ${barraMarca()}
           <tr>
             <td style="background:linear-gradient(135deg,#0f1117 0%,#1e293b 100%);padding:36px 40px 32px;text-align:center;">
-              <p style="margin:0 0 16px;color:#ffffff;font-size:22px;font-weight:800;letter-spacing:-0.5px;">Bakano Ads</p>
               <div style="display:inline-block;width:64px;height:64px;background:rgba(255,255,255,0.08);border-radius:50%;text-align:center;line-height:64px;font-size:30px;margin-bottom:16px;">✅</div>
               <h1 style="margin:0;color:#ffffff;font-size:24px;font-weight:700;line-height:1.3;">¡Facturación confirmada!</h1>
               <p style="margin:8px 0 0;color:rgba(255,255,255,0.65);font-size:14px;">Hola ${firstName}, tu registro de hoy está listo.</p>
@@ -536,7 +551,7 @@ export class ResendService {
           <tr>
             <td style="background:#f8fafc;padding:20px 40px;border-top:1px solid #e2e8f0;text-align:center;">
               <p style="margin:0;color:#94a3b8;font-size:12px;line-height:1.6;">
-                Este correo fue generado automáticamente por <strong>Bakano Ads</strong>.<br/>
+                Este correo fue generado automáticamente por <strong>Bakano Metrics</strong>.<br/>
                 Si tienes dudas, contacta a tu gestor de cuenta.
               </p>
             </td>
@@ -562,9 +577,9 @@ export class ResendService {
         <table width="580" cellpadding="0" cellspacing="0" style="max-width:580px;width:100%;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.10);">
 
           <!-- Header -->
+          ${barraMarca()}
           <tr>
             <td style="background:linear-gradient(135deg,#0f1117 0%,#1e293b 100%);padding:36px 40px 32px;text-align:center;">
-              <p style="margin:0 0 16px;color:#ffffff;font-size:22px;font-weight:800;letter-spacing:-0.5px;">Bakano Ads</p>
               <div style="display:inline-block;width:64px;height:64px;background:rgba(255,255,255,0.08);border-radius:50%;text-align:center;line-height:64px;font-size:30px;margin-bottom:16px;">⏰</div>
               <h1 style="margin:0;color:#ffffff;font-size:24px;font-weight:700;line-height:1.3;">Recordatorio de facturación</h1>
               <p style="margin:8px 0 0;color:rgba(255,255,255,0.65);font-size:14px;">Hola ${firstName}, aún no has registrado tu facturación de hoy.</p>
@@ -609,7 +624,7 @@ export class ResendService {
           <tr>
             <td style="background:#f8fafc;padding:20px 40px;border-top:1px solid #e2e8f0;text-align:center;">
               <p style="margin:0;color:#94a3b8;font-size:12px;line-height:1.6;">
-                Este correo fue generado automáticamente por <strong>Bakano Ads</strong>.<br/>
+                Este correo fue generado automáticamente por <strong>Bakano Metrics</strong>.<br/>
                 Si tienes dudas, contacta a tu gestor de cuenta.
               </p>
             </td>
@@ -623,13 +638,13 @@ export class ResendService {
 </html>`;
 
     const subject = hasFilled
-      ? `Facturación confirmada - ${workspaceName} | Bakano Ads`
-      : `Registro de facturación pendiente - ${workspaceName} | Bakano Ads`;
+      ? `Facturación confirmada - ${workspaceName} | Bakano Metrics`
+      : `Registro de facturación pendiente - ${workspaceName} | Bakano Metrics`;
 
     // Plain-text fallback (improves deliverability)
     const text = hasFilled
-      ? `Hola ${recipientName.split(' ')[0]}, tu facturación de ${workspaceName} fue confirmada correctamente. Gracias por mantener tus datos al día en Bakano Ads.`
-      : `Hola ${recipientName.split(' ')[0]}, aún no has registrado la facturación de hoy para ${workspaceName}. Ingresa a https://metrics.bakano.ec/app/workspaces/${workspaceId}/billing para completarlo. Equipo Bakano Ads.`;
+      ? `Hola ${recipientName.split(' ')[0]}, tu facturación de ${workspaceName} fue confirmada correctamente. Gracias por mantener tus datos al día en Bakano Metrics.`
+      : `Hola ${recipientName.split(' ')[0]}, aún no has registrado la facturación de hoy para ${workspaceName}. Ingresa a https://metrics.bakano.ec/app/workspaces/${workspaceId}/billing para completarlo. Equipo Bakano Metrics.`;
 
     await this.client.emails.send({
       from: this.from,
@@ -729,9 +744,10 @@ export class ResendService {
       <td align="center">
         <table width="620" cellpadding="0" cellspacing="0" style="max-width:620px;width:100%;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.10);">
 
+          ${barraMarca()}
           <tr>
             <td style="background:linear-gradient(135deg,#191423 0%,#5c3070 100%);padding:34px 40px 30px;text-align:center;">
-              <p style="margin:0 0 12px;color:#ffffff;font-size:21px;font-weight:800;letter-spacing:-0.5px;">Bakano Ads · Pulso interno</p>
+              <p style="margin:0 0 12px;color:#ffffff;font-size:21px;font-weight:800;letter-spacing:-0.5px;">Pulso interno</p>
               <h1 style="margin:0;color:#ffffff;font-size:23px;font-weight:700;line-height:1.3;">${clients.length === 1 ? "Un cliente necesita atencion" : `${clients.length} clientes necesitan atencion`}</h1>
               <p style="margin:10px 0 0;color:rgba(255,255,255,0.7);font-size:14px;">Hola ${firstName}, esto es lo de ${periodo}. El mes ya corrio el ${expectedPct.toFixed(0)}%.</p>
             </td>
@@ -809,8 +825,8 @@ export class ResendService {
       replyTo: process.env.RESEND_REPLY_TO || "hola@bakano.ec",
       subject:
         clients.length === 1
-          ? `${clients[0].name}: meta de ${periodo} | Bakano Ads`
-          : `${clients.length} clientes con la meta de ${periodo} en rojo | Bakano Ads`,
+          ? `${clients[0].name}: meta de ${periodo} | Bakano Metrics`
+          : `${clients.length} clientes con la meta de ${periodo} en rojo | Bakano Metrics`,
       html,
       text,
       headers: {
@@ -861,7 +877,7 @@ export class ResendService {
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Novedades de Bakano Ads v${version.version}</title>
+  <title>Novedades de Bakano Metrics v${version.version}</title>
 </head>
 <body style="margin:0;padding:0;background-color:#f0f2f5;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;">
   <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f0f2f5;padding:40px 16px;">
@@ -870,12 +886,12 @@ export class ResendService {
         <table width="580" cellpadding="0" cellspacing="0" style="max-width:580px;width:100%;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.10);">
 
           <!-- Header -->
+          ${barraMarca()}
           <tr>
             <td style="background:linear-gradient(135deg,#0f1117 0%,#1e293b 100%);padding:32px 40px;">
               <table width="100%" cellpadding="0" cellspacing="0">
                 <tr>
                   <td>
-                    <p style="margin:0 0 8px;color:rgba(255,255,255,0.55);font-size:12px;font-weight:700;letter-spacing:1px;text-transform:uppercase;">Bakano Ads Platform</p>
                     <h1 style="margin:0 0 6px;color:#ffffff;font-size:22px;font-weight:800;letter-spacing:-0.3px;">¿Qué hay de nuevo? 🚀</h1>
                     <p style="margin:0;color:rgba(255,255,255,0.6);font-size:13px;">Versión ${version.version} · ${formattedDate}</p>
                   </td>
@@ -923,7 +939,7 @@ export class ResendService {
                   <td style="background:#f8fafc;border-radius:12px;padding:24px;text-align:center;">
                     <p style="margin:0 0 16px;font-size:14px;color:#6b7280;">Accede a la plataforma para ver todas las novedades en acción</p>
                     <a href="${appUrl}" style="display:inline-block;background:linear-gradient(135deg,#0f1117 0%,#1e293b 100%);color:#ffffff;text-decoration:none;padding:13px 32px;border-radius:10px;font-size:14px;font-weight:700;letter-spacing:0.2px;">
-                      Ir a Bakano Ads →
+                      Ir a Bakano Metrics →
                     </a>
                   </td>
                 </tr>
@@ -935,7 +951,7 @@ export class ResendService {
           <tr>
             <td style="background:#f8fafc;padding:20px 40px;border-top:1px solid #e2e8f0;text-align:center;">
               <p style="margin:0;color:#94a3b8;font-size:12px;line-height:1.6;">
-                Este correo fue enviado automáticamente por <strong>Bakano Ads</strong> al publicar una nueva versión.<br/>
+                Este correo fue enviado automáticamente por <strong>Bakano Metrics</strong> al publicar una nueva versión.<br/>
                 Si tienes dudas sobre estas funcionalidades, contacta a tu gestor de cuenta.
               </p>
             </td>
@@ -951,7 +967,7 @@ export class ResendService {
     await this.client.emails.send({
       from: this.from,
       to,
-      subject: `🚀 Novedades en Bakano Ads · v${version.version} — ${version.title}`,
+      subject: `🚀 Novedades en Bakano Metrics · v${version.version} — ${version.title}`,
       html,
     });
   }
@@ -976,9 +992,9 @@ export class ResendService {
       <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
 
         <!-- Header -->
+        ${barraMarca()}
         <tr>
           <td style="background:linear-gradient(135deg,#7c3aed 0%,#4f46e5 100%);padding:32px 40px;text-align:center;">
-            <p style="margin:0;font-size:13px;font-weight:700;color:rgba(255,255,255,0.7);letter-spacing:2px;text-transform:uppercase;">Bakano Ads</p>
             <h1 style="margin:12px 0 0;font-size:24px;font-weight:800;color:#ffffff;">
               ${isReminder ? '⏰ Recordatorio: completa tu perfil' : '🚀 Un paso para empezar a vender más'}
             </h1>
@@ -992,7 +1008,7 @@ export class ResendService {
             <p style="margin:0 0 20px;font-size:15px;color:#475569;line-height:1.7;">
               ${isReminder
         ? `Tu perfil de marca de <strong>${workspaceName}</strong> está al <strong>${completionScore}%</strong>. Mientras no esté completo, no podemos crear contenido que realmente venda para tu negocio.`
-        : `Tu acceso a <strong>${workspaceName}</strong> en Bakano Ads está listo. Antes de que empecemos a crear contenido para ti, necesitamos que completes tu <strong>Perfil de Marca</strong>.`
+        : `Tu acceso a <strong>${workspaceName}</strong> en Bakano Metrics está listo. Antes de que empecemos a crear contenido para ti, necesitamos que completes tu <strong>Perfil de Marca</strong>.`
       }
             </p>
 
@@ -1020,7 +1036,7 @@ export class ResendService {
         <!-- Footer -->
         <tr>
           <td style="background:#f8fafc;padding:16px 40px;border-top:1px solid #e2e8f0;text-align:center;">
-            <p style="margin:0;color:#94a3b8;font-size:12px;">Enviado automáticamente por <strong>Bakano Ads</strong>.<br/>Si tienes dudas, contáctanos en soporte@bakano.ec</p>
+            <p style="margin:0;color:#94a3b8;font-size:12px;">Enviado automáticamente por <strong>Bakano Metrics</strong>.<br/>Si tienes dudas, contáctanos en soporte@bakano.ec</p>
           </td>
         </tr>
 
@@ -1092,9 +1108,9 @@ export class ResendService {
     <tr><td align="center">
       <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
 
+        ${barraMarca()}
         <tr>
           <td style="background:linear-gradient(135deg,#e6285c 0%,#85529c 100%);padding:32px 40px;text-align:center;">
-            <p style="margin:0;font-size:13px;font-weight:700;color:rgba(255,255,255,0.75);letter-spacing:2px;text-transform:uppercase;">Bakano Ads</p>
             <h1 style="margin:12px 0 0;font-size:24px;font-weight:800;color:#ffffff;">Restablece tu contraseña</h1>
           </td>
         </tr>
@@ -1103,7 +1119,7 @@ export class ResendService {
           <td style="padding:32px 40px 24px;">
             <p style="margin:0 0 20px;font-size:16px;color:#1e293b;">${firstName},</p>
             <p style="margin:0 0 24px;font-size:15px;color:#475569;line-height:1.7;">
-              Pediste restablecer la contraseña de tu cuenta en Bakano Ads. Usa el botón de abajo para elegir una nueva.
+              Pediste restablecer la contraseña de tu cuenta en Bakano Metrics. Usa el botón de abajo para elegir una nueva.
             </p>
 
             <div style="text-align:center;margin-bottom:24px;">
@@ -1127,7 +1143,7 @@ export class ResendService {
 
         <tr>
           <td style="background:#f8fafc;padding:16px 40px;border-top:1px solid #e2e8f0;text-align:center;">
-            <p style="margin:0;color:#94a3b8;font-size:12px;">Enviado automáticamente por <strong>Bakano Ads</strong>.<br/>Si tienes dudas, escríbenos a soporte@bakano.ec</p>
+            <p style="margin:0;color:#94a3b8;font-size:12px;">Enviado automáticamente por <strong>Bakano Metrics</strong>.<br/>Si tienes dudas, escríbenos a soporte@bakano.ec</p>
           </td>
         </tr>
 
@@ -1140,7 +1156,7 @@ export class ResendService {
     await this.client.emails.send({
       from: this.from,
       to,
-      subject: "Restablece tu contraseña de Bakano Ads",
+      subject: "Restablece tu contraseña de Bakano Metrics",
       html,
     });
   }
@@ -1163,9 +1179,9 @@ export class ResendService {
     <tr><td align="center">
       <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
 
+        ${barraMarca()}
         <tr>
           <td style="background:linear-gradient(135deg,#e6285c 0%,#85529c 100%);padding:32px 40px;text-align:center;">
-            <p style="margin:0;font-size:13px;font-weight:700;color:rgba(255,255,255,0.75);letter-spacing:2px;text-transform:uppercase;">Bakano</p>
             <h1 style="margin:12px 0 0;font-size:24px;font-weight:800;color:#ffffff;">Tu código para Telegram</h1>
           </td>
         </tr>
@@ -1192,7 +1208,7 @@ export class ResendService {
 
         <tr>
           <td style="background:#f8fafc;padding:16px 40px;border-top:1px solid #e2e8f0;text-align:center;">
-            <p style="margin:0;color:#94a3b8;font-size:12px;">Enviado automáticamente por <strong>Bakano</strong>.<br/>Si tienes dudas, escríbenos a soporte@bakano.ec</p>
+            <p style="margin:0;color:#94a3b8;font-size:12px;">Enviado automáticamente por <strong>Bakano Metrics</strong>.<br/>Si tienes dudas, escríbenos a soporte@bakano.ec</p>
           </td>
         </tr>
 
@@ -1237,6 +1253,7 @@ export class ResendService {
     <tr><td align="center">
       <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
 
+        ${barraMarca()}
         <tr>
           <td style="background:linear-gradient(135deg,#e6285c 0%,#85529c 100%);padding:32px 40px;text-align:center;">
             <p style="margin:0;font-size:13px;font-weight:700;color:rgba(255,255,255,0.75);letter-spacing:2px;text-transform:uppercase;">Telegram · ${esc(tema)}</p>
@@ -1303,9 +1320,9 @@ export class ResendService {
   <table width="100%" cellpadding="0" cellspacing="0" style="padding:40px 20px;">
     <tr><td align="center">
       <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
+        ${barraMarca()}
         <tr>
           <td style="background:linear-gradient(135deg,#e6285c 0%,#85529c 100%);padding:32px 40px;text-align:center;">
-            <p style="margin:0;font-size:13px;font-weight:700;color:rgba(255,255,255,0.75);letter-spacing:2px;text-transform:uppercase;">Bakano</p>
             <h1 style="margin:12px 0 0;font-size:24px;font-weight:800;color:#ffffff;">Tu planificacion esta lista</h1>
           </td>
         </tr>
@@ -1327,7 +1344,7 @@ export class ResendService {
         </tr>
         <tr>
           <td style="background:#f8fafc;padding:16px 40px;border-top:1px solid #e2e8f0;text-align:center;">
-            <p style="margin:0;color:#94a3b8;font-size:12px;">Enviado por <strong>Bakano</strong>. Dudas: soporte@bakano.ec</p>
+            <p style="margin:0;color:#94a3b8;font-size:12px;">Enviado por <strong>Bakano Metrics</strong>. Dudas: soporte@bakano.ec</p>
           </td>
         </tr>
       </table>
@@ -1371,9 +1388,9 @@ export class ResendService {
   <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f0f2f5;padding:40px 16px;">
     <tr><td align="center">
       <table width="580" cellpadding="0" cellspacing="0" style="max-width:580px;width:100%;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.10);">
+        ${barraMarca()}
         <tr>
           <td style="background:linear-gradient(135deg,#191423 0%,#2b2438 100%);padding:32px 40px;text-align:center;">
-            <p style="margin:0 0 14px;color:#ffffff;font-size:20px;font-weight:800;letter-spacing:-0.5px;">Bakano Ads</p>
             <h1 style="margin:0;color:#ffffff;font-size:22px;font-weight:700;line-height:1.3;">Video listo para revisión</h1>
             <p style="margin:8px 0 0;color:rgba(255,255,255,0.65);font-size:14px;">${editorNombre ? `${editorNombre} terminó la edición` : "La edición está terminada"} y espera tu visto bueno.</p>
           </td>
@@ -1479,9 +1496,9 @@ export class ResendService {
   <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f0f2f5;padding:40px 16px;">
     <tr><td align="center">
       <table width="580" cellpadding="0" cellspacing="0" style="max-width:580px;width:100%;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.10);">
+        ${barraMarca()}
         <tr>
           <td style="background:linear-gradient(135deg,#191423 0%,#2b2438 100%);padding:32px 40px;text-align:center;">
-            <p style="margin:0 0 14px;color:#ffffff;font-size:20px;font-weight:800;letter-spacing:-0.5px;">Bakano Ads</p>
             <span style="display:inline-block;background:${copy.color};color:#fff;font-size:11px;font-weight:800;letter-spacing:0.08em;text-transform:uppercase;padding:4px 10px;border-radius:999px;margin-bottom:10px;">Planificador · CRM</span>
             <h1 style="margin:0;color:#ffffff;font-size:22px;font-weight:700;line-height:1.3;">${copy.titulo}</h1>
             <p style="margin:8px 0 0;color:rgba(255,255,255,0.65);font-size:14px;line-height:1.5;">${copy.bajada}</p>
@@ -1572,9 +1589,9 @@ export class ResendService {
   <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f0f2f5;padding:40px 16px;">
     <tr><td align="center">
       <table width="580" cellpadding="0" cellspacing="0" style="max-width:580px;width:100%;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.10);">
+        ${barraMarca()}
         <tr>
           <td style="background:linear-gradient(135deg,#7f1d1d 0%,#e6285c 100%);padding:32px 40px;text-align:center;">
-            <p style="margin:0 0 14px;color:#ffffff;font-size:20px;font-weight:800;letter-spacing:-0.5px;">Bakano Ads</p>
             <span style="display:inline-block;background:#ffffff;color:#e6285c;font-size:11px;font-weight:900;letter-spacing:0.1em;text-transform:uppercase;padding:4px 12px;border-radius:999px;margin-bottom:10px;">Urgente</span>
             <h1 style="margin:0;color:#ffffff;font-size:22px;font-weight:700;line-height:1.3;">${workspaceName} rechazó ${rechazados.length} de ${totalGuiones} guiones</h1>
             <p style="margin:8px 0 0;color:rgba(255,255,255,0.85);font-size:14px;line-height:1.5;">${clienteNombre ? `${clienteNombre} revisó la planificación. ` : ""}${urgencia}</p>
@@ -1662,9 +1679,9 @@ export class ResendService {
   <table width="100%" cellpadding="0" cellspacing="0" style="padding:40px 20px;">
     <tr><td align="center">
       <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
+        ${barraMarca()}
         <tr>
           <td style="background:linear-gradient(135deg,#e6285c 0%,#85529c 100%);padding:32px 40px;text-align:center;">
-            <p style="margin:0;font-size:13px;font-weight:700;color:rgba(255,255,255,0.75);letter-spacing:2px;text-transform:uppercase;">Bakano</p>
             <h1 style="margin:12px 0 0;font-size:24px;font-weight:800;color:#ffffff;">${textos.titulo}</h1>
           </td>
         </tr>
@@ -1684,7 +1701,7 @@ export class ResendService {
         </tr>
         <tr>
           <td style="background:#f8fafc;padding:16px 40px;border-top:1px solid #e2e8f0;text-align:center;">
-            <p style="margin:0;color:#94a3b8;font-size:12px;">Enviado por <strong>Bakano</strong>. Dudas: soporte@bakano.ec</p>
+            <p style="margin:0;color:#94a3b8;font-size:12px;">Enviado por <strong>Bakano Metrics</strong>. Dudas: soporte@bakano.ec</p>
           </td>
         </tr>
       </table>
