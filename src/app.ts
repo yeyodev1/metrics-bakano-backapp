@@ -36,7 +36,15 @@ export function createApp() {
   const app = express();
 
   app.use(cors(corsOptions));
-  app.use(express.json({ limit: "50mb" }));
+  app.use(
+    express.json({
+      limit: "50mb",
+      // Webhooks firmados (Resend/Svix) verifican sobre el cuerpo exacto, no el JSON ya parseado.
+      verify: (req, _res, buf) => {
+        (req as typeof req & { rawBody?: string }).rawBody = buf.toString("utf8");
+      },
+    })
+  );
 
   app.use(async (_req, res, next) => {
     try {
