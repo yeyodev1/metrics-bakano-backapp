@@ -90,6 +90,71 @@ export class GhlService {
     }
   }
 
+  /** Horarios libres de un calendario; el CRM ya descuenta citas y bloqueos. */
+  async getFreeSlots(calendarId: string, desde: Date, hasta: Date): Promise<Date[]> {
+    const response = await axios.get(`${GHL_API_BASE}/calendars/${calendarId}/free-slots`, {
+      headers: this.getHeaders(),
+      params: { startDate: desde.getTime(), endDate: hasta.getTime(), timezone: "America/Guayaquil" },
+    });
+    const data = response.data || {};
+    return Object.keys(data)
+      .filter((k) => /^\d{4}-\d{2}-\d{2}$/.test(k))
+      .sort()
+      .flatMap((k) => (data[k]?.slots || []) as string[])
+      .map((s) => new Date(s))
+      .filter((d) => !Number.isNaN(d.getTime()) && d.getTime() >= desde.getTime());
+  }
+
+  async getCalendar(calendarId: string): Promise<{ id: string; name: string; slotDuration?: number; slotDurationUnit?: string } | null> {
+    const response = await axios.get(`${GHL_API_BASE}/calendars/${calendarId}`, { headers: this.getHeaders() });
+    return response.data?.calendar || null;
+  }
+
+  /** Crea o actualiza el contacto por correo y devuelve su id. */
+  async upsertContact(datos: { email: string; firstName?: string; lastName?: string; companyName?: string }): Promise<string> {
+    const response = await axios.post(
+      `${GHL_API_BASE}/contacts/upsert`,
+      { locationId: this.getLocationId(), ...datos, source: "Telegram Bakano" },
+      { headers: { ...this.getHeaders(), Version: "2021-07-28" } }
+    );
+    const id = response.data?.contact?.id;
+    if (!id) throw new Error("El CRM no devolvió el id del contacto");
+    return id;
+  }
+
+  /**
+   * Agenda una cita. Se niega en calendarios de produccion: el sync del CRM
+   * la convertiria en una grabacion del Planificador.
+   */
+  async createAppointment(cita: { calendarId: string; contactId: string; startTime: Date; title: string }): Promise<string> {
+    const calendario = await this.getCalendar(cita.calendarId);
+    if (!calendario) throw new Error(`Calendario ${cita.calendarId} no encontrado`);
+    const nombre = calendario.name.normalize("NFD").replace(/[̀-ͯ]/g, "");
+    if (/^equipo\b|producc|grabaci|filmaci|rodaje/i.test(nombre)) {
+      throw new Error(`"${calendario.name}" es un calendario de producción; no se agendan reuniones ahí`);
+    }
+
+    const minutos =
+      calendario.slotDurationUnit === "hours" ? (calendario.slotDuration || 1) * 60 : calendario.slotDuration || 30;
+    const response = await axios.post(
+      `${GHL_API_BASE}/calendars/events/appointments`,
+      {
+        calendarId: cita.calendarId,
+        locationId: this.getLocationId(),
+        contactId: cita.contactId,
+        startTime: cita.startTime.toISOString(),
+        endTime: new Date(cita.startTime.getTime() + minutos * 60_000).toISOString(),
+        title: cita.title,
+        appointmentStatus: "confirmed",
+        toNotify: true,
+      },
+      { headers: this.getHeaders() }
+    );
+    const id = response.data?.id || response.data?.appointment?.id;
+    if (!id) throw new Error("El CRM no devolvió el id de la cita");
+    return id;
+  }
+
   /**
    * Fetches all appointments for the location across all calendars within a given timeframe.
    */

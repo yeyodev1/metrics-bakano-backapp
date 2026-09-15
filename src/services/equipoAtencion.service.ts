@@ -8,6 +8,18 @@ export interface PersonaAtencion {
   email: string;
 }
 
+export interface EquipoTema {
+  etiqueta: string;
+  personas: PersonaAtencion[];
+  /**
+   * Calendario del CRM donde el bot agenda reuniones de este tema. Nunca uno
+   * de produccion ("Equipo Alfa Lobo/Dinamita"): el sync del CRM convierte
+   * esas citas en grabaciones del Planificador. Sin calendario, la reunion se
+   * coordina por correo.
+   */
+  calendarioId?: string;
+}
+
 /**
  * Quien atiende a los clientes por tema. Es igual para todos los entornos: en
  * el CRM ningun contacto tiene dueño asignado, asi que la persona no se puede
@@ -16,7 +28,7 @@ export interface PersonaAtencion {
  * Los correos salen directo de aqui (no dependen de que la persona tenga
  * usuario en la plataforma); la notificacion in-app llega solo a quien lo tenga.
  */
-export const EQUIPO_ATENCION: Record<TemaAtencion, { etiqueta: string; personas: PersonaAtencion[] }> = {
+export const EQUIPO_ATENCION: Record<TemaAtencion, EquipoTema> = {
   produccion: {
     etiqueta: "producción",
     personas: [
@@ -26,11 +38,13 @@ export const EQUIPO_ATENCION: Record<TemaAtencion, { etiqueta: string; personas:
   },
   guiones: {
     etiqueta: "revisión de guiones",
-    personas: [{ nombre: "Ari Vera", email: "avera@bakano.ec" }],
+    personas: [{ nombre: "Ariana Vera", email: "avera@bakano.ec" }],
+    calendarioId: "JDzGl2qjoWwAk5TvBNUp", // "Arianna Reunion"
   },
   atencion: {
     etiqueta: "atención al cliente",
     personas: [{ nombre: "Genesis Benalcazar", email: "gbenalcazar@bakano.ec" }],
+    calendarioId: "FWL0e2jCKpbamtlj31io", // "Project Manager"
   },
 };
 
