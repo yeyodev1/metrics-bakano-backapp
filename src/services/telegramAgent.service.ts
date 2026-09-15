@@ -1,4 +1,3 @@
-import { generateText, isStepCount, tool } from "ai";
 import { z } from "zod";
 import models from "../models";
 import type { ITelegramChat } from "../models/telegramChat.model";
@@ -11,8 +10,12 @@ import { escaparHtml, telegramService } from "./telegram.service";
  * La IA que conversa con el cliente por Telegram.
  *
  * Corre con el AI SDK sobre Vercel AI Gateway: el modelo es un string
- * "proveedor/modelo" y en Vercel se autentica solo (OIDC), o con
- * AI_GATEWAY_API_KEY si existe. Cambiar de modelo es cambiar AI_MODEL.
+ * "proveedor/modelo" y se autentica con AI_GATEWAY_API_KEY (u OIDC en
+ * Vercel). Cambiar de modelo es cambiar AI_MODEL.
+ *
+ * `ai` es solo ESM y se carga al primer mensaje, no al importar: si no carga
+ * en el runtime, falla solo la IA (el bot vuelve al menu) y no la funcion
+ * entera de la API. Un import estatico tumbo todo el backend en produccion.
  *
  * Nunca inventa datos: producciones, guiones y horarios salen de las
  * herramientas. En paralelo clasifica el animo del cliente y avisa a la
@@ -28,6 +31,16 @@ const ALERTA_CADA_MS = 24 * 3_600_000;
 const TEMAS = ["produccion", "guiones", "atencion"] as const;
 
 type Mensaje = { role: "user" | "assistant"; content: string };
+type AiSdk = typeof import("ai");
+
+let aiSdk: Promise<AiSdk> | null = null;
+function cargarAi(): Promise<AiSdk> {
+  aiSdk ??= import("ai").catch((error) => {
+    aiSdk = null;
+    throw error;
+  });
+  return aiSdk;
+}
 
 const clasificacionSchema = z.object({
   estado: z.enum(["en_peligro", "molesto", "feliz", "neutral"]),
@@ -40,15 +53,16 @@ type Clasificacion = z.infer<typeof clasificacionSchema>;
 class TelegramAgentService {
   /** Responde con IA. false si la IA fallo: el bot vuelve al menu. */
   async responder(chat: ITelegramChat, texto: string): Promise<boolean> {
-    const cliente = await atencionClienteService.datosCliente(chat);
-    const historial: Mensaje[] = (chat.historial || []).slice(-MAX_HISTORIAL).map((m) => ({
-      role: m.rol === "cliente" ? "user" : "assistant",
-      content: m.texto,
-    }));
-    await telegramService.sendChatAction(chat.chatId, "typing").catch(() => undefined);
-
     let respuesta = "";
     try {
+      const { generateText, isStepCount } = await cargarAi();
+      const cliente = await atencionClienteService.datosCliente(chat);
+      const historial: Mensaje[] = (chat.historial || []).slice(-MAX_HISTORIAL).map((m) => ({
+        role: m.rol === "cliente" ? "user" : "assistant",
+        content: m.texto,
+      }));
+      await telegramService.sendChatAction(chat.chatId, "typing").catch(() => undefined);
+
       const [resultado, clasificacion] = await Promise.all([
         generateText({
           model: modelo(),
@@ -63,7 +77,8 @@ class TelegramAgentService {
           return null;
         }),
       ]);
-      respuesta = resultado.text.replace(/\*\*?|__|#+ /g, "").trim();
+      // Por si el modelo se salta la regla: sin markdown ni signos de apertura.
+      respuesta = resultado.text.replace(/\*\*?|__|#+ /g, "").replace(/[¡¿]/g, "").trim();
       if (clasificacion) await this.alertarSiHaceFalta(chat, cliente, clasificacion, texto);
     } catch (error: any) {
       console.error("[Telegram IA] respuesta:", error?.message || error);
@@ -104,29 +119,34 @@ class TelegramAgentService {
     return `Eres el asistente de Bakano, una agencia de marketing de Ecuador. Atiendes por Telegram a ${cliente.nombre}, del cliente "${cliente.entorno}".
 Hoy es ${fechaEcuador(new Date())} (hora Ecuador).
 
-Tu estilo:
-- Súper amigable, cálido y cercano. Tratas de tú. Usas emojis con naturalidad, entre 2 y 4 por mensaje.
-- Mensajes cortos, máximo 6 líneas. Nada de párrafos largos.
+Cómo hablas:
+- Como una persona normal escribiendo por WhatsApp: amigable, cercana y relajada, pero sin exagerar. Tratas de tú.
+- NUNCA uses signos de apertura: nada de "¡" ni de "¿". Escribe "hola!", "cómo estás?", "listo!", nunca "¡Hola!" ni "¿Cómo estás?".
+- Saludos naturales: "holaaa", "hola, qué tal", "hey". Expresiones como "dale", "listo", "súper", "genial", "tranqui". No abuses de ellas.
+- Nada de frases de call center ni formales: nunca "estimado", "es un placer atenderle", "quedo atento a sus comentarios", "no dude en contactarnos".
+- Emojis con moderación, de 0 a 2 por mensaje, solo cuando sumen.
+- Mensajes cortos, como un chat: máximo 4 o 5 líneas. Si tienes varias cosas que decir, ve al grano.
 - Texto plano: sin markdown, sin asteriscos, sin almohadillas.
+- No repitas el saludo en cada mensaje: saluda solo al empezar la conversación.
 - Siempre nombras a las personas del equipo con nombre y apellido.
 
 Quién atiende a este cliente:
 ${equipo}
 
 Reglas:
-- Nunca inventes datos. Para producciones, guiones u horarios usa siempre las herramientas. Si no hay dato, dilo con honestidad y ofrece pasarle el mensaje al equipo.
+- Nunca inventes datos. Para producciones, guiones u horarios usa siempre las herramientas. Si no hay dato, dilo tal cual y ofrece pasarle el mensaje al equipo.
 - Si el cliente quiere hablar con alguien o tiene algo que no puedes resolver, ofrécele dos caminos: agendar una reunión (solo guiones y atención tienen calendario) o pasarle su mensaje por correo a la persona.
 - Para agendar: consulta horarios libres, ofrece 3 o 4 opciones y agenda solo cuando el cliente elija un horario concreto. Usa exactamente el valor "inicio" que devuelve la herramienta.
 - Antes de pasar un mensaje al equipo asegúrate de entender qué necesita. Después confírmale a quién se lo enviaste.
-- Si el cliente está molesto, reconoce cómo se siente, pide disculpas sin excusas y ofrece una solución concreta.
+- Si el cliente está molesto, reconoce cómo se siente, discúlpate sin excusas y ofrece una solución concreta.
 - No prometas descuentos, reembolsos, cambios de contrato ni fechas que el equipo no confirmó.
-- Solo hablas de la cuenta de ${cliente.entorno}. Si pregunta algo ajeno a Bakano, redirígelo con amabilidad.
+- Solo hablas de la cuenta de ${cliente.entorno}. Si pregunta algo ajeno a Bakano, redirígelo con buena onda.
 - Si una herramienta falla, discúlpate y ofrece pasar el mensaje al equipo.`;
   }
 
   private herramientas(chat: ITelegramChat, textoCliente: string) {
     return {
-      verProducciones: tool({
+      verProducciones: {
         description: "Próximas producciones (grabaciones) del cliente y la última realizada.",
         inputSchema: z.object({}),
         execute: async () => {
@@ -141,9 +161,9 @@ Reglas:
             ultima: ultima ? { fecha: fechaEcuador(ultima.date), titulo: ultima.title, grabada: ultima.cumplida } : null,
           };
         },
-      }),
+      },
 
-      verGuiones: tool({
+      verGuiones: {
         description:
           "Guiones de las planificaciones recientes: aprobación del cliente, grabación, edición, publicación y hasta cuándo puede pedir correcciones.",
         inputSchema: z.object({}),
@@ -184,12 +204,12 @@ Reglas:
             }),
           };
         },
-      }),
+      },
 
-      verHorariosLibres: tool({
+      verHorariosLibres: {
         description: "Horarios libres de los próximos 7 días para reunirse con la persona de un tema.",
         inputSchema: z.object({ tema: z.enum(TEMAS) }),
-        execute: async ({ tema }) => {
+        execute: async ({ tema }: { tema: TemaAtencion }) => {
           const horarios = await atencionClienteService.horariosLibres(tema);
           if (horarios === null) {
             return {
@@ -203,30 +223,30 @@ Reglas:
             horarios: horarios.slice(0, 12).map((h) => ({ inicio: h.toISOString(), texto: fechaEcuador(h) })),
           };
         },
-      }),
+      },
 
-      agendarReunion: tool({
+      agendarReunion: {
         description:
           "Agenda la reunión en el calendario del CRM y avisa por correo a la persona. Úsala solo con un horario que el cliente eligió de verHorariosLibres.",
         inputSchema: z.object({
           tema: z.enum(["guiones", "atencion"]),
           inicio: z.string().describe("Valor 'inicio' exacto devuelto por verHorariosLibres"),
         }),
-        execute: async ({ tema, inicio }) => {
+        execute: async ({ tema, inicio }: { tema: "guiones" | "atencion"; inicio: string }) => {
           const fecha = new Date(inicio);
           if (Number.isNaN(fecha.getTime())) return { ok: false, motivo: "horario inválido" };
           const r = await atencionClienteService.reservarReunion(chat, tema, fecha);
           return r.ok ? { ok: true, cuando: r.cuando, con: equipoAtencionService.nombres(tema) } : { ok: false, motivo: r.motivo };
         },
-      }),
+      },
 
-      pasarMensajeAlEquipo: tool({
+      pasarMensajeAlEquipo: {
         description: "Envía por correo y notificación el pedido del cliente a la persona que atiende el tema.",
         inputSchema: z.object({
           tema: z.enum(TEMAS),
           resumen: z.string().describe("Qué necesita el cliente, con los detalles: días, horarios, número de guion"),
         }),
-        execute: async ({ tema, resumen }) => {
+        execute: async ({ tema, resumen }: { tema: TemaAtencion; resumen: string }) => {
           const ok = await atencionClienteService.enviarMensaje(
             chat,
             tema,
@@ -234,11 +254,12 @@ Reglas:
           );
           return ok ? { ok: true, enviadoA: equipoAtencionService.nombres(tema) } : { ok: false };
         },
-      }),
+      },
     };
   }
 
   private async clasificar(historial: Mensaje[], texto: string): Promise<Clasificacion | null> {
+    const { generateText } = await cargarAi();
     const contexto = historial
       .slice(-6)
       .map((m) => `${m.role === "user" ? "Cliente" : "Bot"}: ${m.content}`)
