@@ -19,7 +19,7 @@ const MAX_HORARIOS = 8;
 const EMOJI_TEMA: Record<TemaAtencion, string> = { produccion: "🎬", guiones: "📝", atencion: "🤝" };
 
 const PEDIR_CORREO =
-  "¡Hola! 👋 Qué gusto tenerte por aquí. Soy tu asistente de <b>Bakano</b> 💛\n\n" +
+  "Holaaa 👋 qué gusto tenerte por aquí. Soy tu asistente de <b>Bakano</b>\n\n" +
   "Conmigo puedes:\n" +
   "🎬 Ver y coordinar tus producciones\n" +
   "📝 Comentar la revisión de tus guiones\n" +
@@ -97,7 +97,7 @@ export class TelegramBotService {
     if (comando === "/start") {
       if (chat.estado === "listo" && chat.workspaceId) {
         const nombre = chat.firstName ? `, ${escaparHtml(chat.firstName)}` : "";
-        return this.mostrarMenu(chat, undefined, `¡Hola de nuevo${nombre}! 👋 Qué bueno verte.`);
+        return this.mostrarMenu(chat, undefined, `Hola de nuevo${nombre}! 👋 Qué bueno verte.`);
       }
       if (chat.userId) return this.pedirEntorno(chat);
       return this.reiniciar(chat, PEDIR_CORREO);
@@ -105,7 +105,7 @@ export class TelegramBotService {
     if (comando === "/salir") {
       return this.reiniciar(
         chat,
-        "Listo, desconecté tu cuenta de este chat 👋 Cuando quieras volver, escribe /start. ¡Aquí te espero! 💛"
+        "Listo, desconecté tu cuenta de este chat 👋 Cuando quieras volver, escribe /start. Aquí te espero! 💛"
       );
     }
     if (comando === "/entorno") {
@@ -129,7 +129,7 @@ export class TelegramBotService {
         return this.mostrarMenu(
           chat,
           undefined,
-          "¡Te leo! 😊 Para pasarle tu mensaje a la persona correcta, elige primero el tema:"
+          "Te leo! 😊 Para pasarle tu mensaje a la persona correcta, elige primero el tema:"
         );
     }
   }
@@ -139,7 +139,7 @@ export class TelegramBotService {
     if (!CORREO_RE.test(correo)) {
       await telegramService.sendMessage(
         chat.chatId,
-        "¡Con muchísimo gusto te ayudo con eso! 😊\n\n" +
+        "Con muchísimo gusto te ayudo con eso! 😊\n\n" +
           "Pero antes necesito saber quién eres, para mostrarte <b>tu</b> información y no la de otra persona 🔐\n\n" +
           "👉 Escríbeme el correo con el que entras a <b>metrics.bakano.ec</b>\n" +
           "Por ejemplo: <i>nombre@tuempresa.com</i>\n\n" +
@@ -151,7 +151,7 @@ export class TelegramBotService {
     if (chat.codigoEnviadoEn && Date.now() - chat.codigoEnviadoEn.getTime() < REENVIO_SEGUNDOS * 1000) {
       await telegramService.sendMessage(
         chat.chatId,
-        "¡Ya te mandé un código hace un momentito! 📬 Revisa tu bandeja (y el spam, por si acaso). Si no llega, espera un minuto y vuelve a escribir tu correo."
+        "Ya te mandé un código hace un momentito! 📬 Revisa tu bandeja (y el spam, por si acaso). Si no llega, espera un minuto y vuelve a escribir tu correo."
       );
       return;
     }
@@ -183,8 +183,8 @@ export class TelegramBotService {
 
     await telegramService.sendMessage(
       chat.chatId,
-      `¡Perfecto! 📬 Si <b>${escaparHtml(correo)}</b> tiene cuenta en metrics.bakano.ec, te acabo de enviar un código de 6 dígitos.\n\n` +
-        `Escríbelo aquí 👇 (vence en ${CODIGO_MINUTOS} minutos). ¿Te equivocaste de correo? Solo escribe el correcto.`
+      `Perfecto! 📬 Si <b>${escaparHtml(correo)}</b> tiene cuenta en metrics.bakano.ec, te acabo de enviar un código de 6 dígitos.\n\n` +
+        `Escríbelo aquí 👇 (vence en ${CODIGO_MINUTOS} minutos). Te equivocaste de correo? Solo escribe el correcto.`
     );
   }
 
@@ -233,7 +233,7 @@ export class TelegramBotService {
     await chat.save();
 
     const nombre = usuario.name ? `, ${escaparHtml(usuario.name.split(" ")[0])}` : "";
-    await telegramService.sendMessage(chat.chatId, `¡Listo${nombre}! 🎉 Tu cuenta quedó conectada. Qué bueno tenerte aquí.`);
+    await telegramService.sendMessage(chat.chatId, `Listo${nombre}! 🎉 Tu cuenta quedó conectada. Qué bueno tenerte aquí.`);
     return this.pedirEntorno(chat);
   }
 
@@ -277,7 +277,7 @@ export class TelegramBotService {
       chat.chatId,
       `${contexto}${EMOJI_TEMA[tema]} Para ${etiqueta} te atiende${personas.length > 1 ? "n" : ""} <b>${escaparHtml(equipoAtencionService.nombres(tema))}</b> 💛\n\n` +
         "Cuéntame qué necesitas y se lo paso ahora mismo a su correo 📩\n\n" +
-        "¿Prefieres hablarlo en persona? Toca abajo 👇",
+        "Prefieres hablarlo en persona? Toca abajo 👇",
       [
         [{ text: "📅 Agendar una reunión", callback_data: `ag:${tema}` }],
         [{ text: "📋 Volver al menú", callback_data: "menu:ver" }],
@@ -292,8 +292,8 @@ export class TelegramBotService {
     ]);
     await telegramService.sendMessage(
       chat.chatId,
-      "📅 ¡Claro que sí! Me encanta que quieras hablar directo con nosotros 🙌\n\n" +
-        "Lo dejo agendado en el calendario del equipo y les aviso a su correo. ¿Con quién te quieres reunir?\n\n" +
+      "📅 Claro que sí! Me encanta que quieras hablar directo con nosotros 🙌\n\n" +
+        "Lo dejo agendado en el calendario del equipo y les aviso a su correo. Con quién te quieres reunir?\n\n" +
         "🎬 Producción · 📝 Guiones · 🤝 Atención",
       botones
     );
@@ -326,7 +326,7 @@ export class TelegramBotService {
 
     await telegramService.sendMessage(
       chat.chatId,
-      `${aviso ? `${aviso}\n\n` : ""}¡Genial! 🙌 Estos son los próximos horarios libres de <b>${escaparHtml(equipoAtencionService.nombres(tema))}</b> (hora Ecuador).\n\nElige el que mejor te quede 👇`,
+      `${aviso ? `${aviso}\n\n` : ""}Genial! 🙌 Estos son los próximos horarios libres de <b>${escaparHtml(equipoAtencionService.nombres(tema))}</b> (hora Ecuador).\n\nElige el que mejor te quede 👇`,
       botones
     );
   }
@@ -362,12 +362,12 @@ export class TelegramBotService {
 
     await telegramService.sendMessage(
       chat.chatId,
-      "¡Listo, quedó agendada! 🎉\n\n" +
+      "Listo, quedó agendada! 🎉\n\n" +
         `📅 <b>${reserva.cuando}</b> (hora Ecuador)\n` +
         `👤 Con <b>${escaparHtml(equipoAtencionService.nombres(tema))}</b>\n\n` +
-        "Ya está en su calendario y le avisé a su correo. ¡Nos vemos pronto! 💛"
+        "Ya está en su calendario y le avisé a su correo. Nos vemos pronto! 💛"
     );
-    return this.mostrarMenu(chat, undefined, "¿Te ayudo con algo más? 😊");
+    return this.mostrarMenu(chat, undefined, "Te ayudo con algo más? 😊");
   }
 
   // ── Solicitudes al equipo ──────────────────────────────────────────────────
@@ -388,10 +388,10 @@ export class TelegramBotService {
     const { personas } = EQUIPO_ATENCION[tema];
     await telegramService.sendMessage(
       chat.chatId,
-      `¡Listo! ✅ Le pasé tu mensaje a <b>${escaparHtml(equipoAtencionService.nombres(tema))}</b>. ` +
+      `Listo! ✅ Le pasé tu mensaje a <b>${escaparHtml(equipoAtencionService.nombres(tema))}</b>. ` +
         `${personas.length > 1 ? "Te van" : "Te va"} a contactar lo antes posible 💛`
     );
-    return this.mostrarMenu(chat, undefined, "¿Te ayudo con algo más? 😊");
+    return this.mostrarMenu(chat, undefined, "Te ayudo con algo más? 😊");
   }
 
   // ── Entornos ───────────────────────────────────────────────────────────────
@@ -428,7 +428,7 @@ export class TelegramBotService {
     const botones: InlineButton[][] = entornos
       .slice(0, MAX_BOTONES_ENTORNO)
       .map((w) => [{ text: w.name, callback_data: `ws:${w._id.toString()}` }]);
-    await telegramService.sendMessage(chat.chatId, `Tienes ${entornos.length} entornos 🙌 ¿De cuál quieres hablar hoy?`, botones);
+    await telegramService.sendMessage(chat.chatId, `Tienes ${entornos.length} entornos 🙌 De cuál quieres hablar hoy?`, botones);
   }
 
   private async elegirEntorno(chat: ITelegramChat, workspaceId: string): Promise<void> {
@@ -456,9 +456,9 @@ export class TelegramBotService {
       nombreEntorno ?? (await models.workspaces.findById(chat.workspaceId).select("name").lean())?.name ?? "tu entorno";
     await telegramService.sendMessage(
       chat.chatId,
-      `${saludo ? `${saludo}\n\n` : ""}Estamos hablando de <b>${escaparHtml(nombre)}</b> 💛 ¿En qué te ayudo hoy?\n\n` +
-        "✍️ Escríbeme lo que necesites con tus palabras, por ejemplo <i>¿cómo van mis guiones?</i> o <i>quiero mover la grabación</i>.\n\n" +
-        "💬 ¿Prefieres hablar directo con nosotros? Toca <b>Agendar una reunión</b> y lo dejo en el calendario del equipo.",
+      `${saludo ? `${saludo}\n\n` : ""}Estamos hablando de <b>${escaparHtml(nombre)}</b> 💛 En qué te ayudo hoy?\n\n` +
+        "✍️ Escríbeme lo que necesites con tus palabras, por ejemplo <i>cómo van mis guiones?</i> o <i>quiero mover la grabación</i>.\n\n" +
+        "💬 Prefieres hablar directo con nosotros? Toca <b>Agendar una reunión</b> y lo dejo en el calendario del equipo.",
       [
         [{ text: "🎬 Producciones", callback_data: "menu:produccion" }],
         [{ text: "📝 Revisión de guiones", callback_data: "menu:guiones" }],
