@@ -3,6 +3,7 @@ import { handleMetaSchedulingWebhook } from "../controllers/webhook.controller";
 import { handleGhlSalesAppointment } from "../controllers/ghlBookingWebhook.controller";
 import { handleGhlProductionAppointment } from "../controllers/ghlProductionWebhook.controller";
 import { handleTelegramUpdate } from "../controllers/telegramWebhook.controller";
+import { recibirCorreoSoporte } from "../controllers/soporteEmail.controller";
 
 export const webhookRouter = Router();
 
@@ -12,3 +13,5 @@ webhookRouter.post("/ghl/sales-appointment", handleGhlSalesAppointment);
 webhookRouter.post("/ghl/production-appointment", handleGhlProductionAppointment);
 // Mensajes de clientes a @BakanoAgencyBot
 webhookRouter.post("/telegram", handleTelegramUpdate);
+// Correos a soporte@bakano.ec (reenviados a Resend) → tickets en Slack
+webhookRouter.post("/soporte-email", recibirCorreoSoporte);
