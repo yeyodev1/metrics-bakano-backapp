@@ -34,6 +34,18 @@ function hashCodigo(chatId: number, codigo: string): string {
     .digest("hex");
 }
 
+/**
+ * Palabra de seguridad para que el cliente borre su historial con el bot.
+ * Se guarda el sha256, no la palabra: el repo no la deja en texto plano.
+ * TELEGRAM_BORRAR_HISTORIAL_HASH permite cambiarla sin tocar codigo.
+ */
+const HASH_PALABRA_BORRAR = "22a4a9f9bf19b9e349054789a4e05179b5aac108ac250cc6acad5887b5d53672";
+
+function esPalabraBorrarHistorial(texto: string): boolean {
+  const hash = createHash("sha256").update(texto.trim().toLowerCase()).digest("hex");
+  return mismoHash(hash, process.env.TELEGRAM_BORRAR_HISTORIAL_HASH || HASH_PALABRA_BORRAR);
+}
+
 function mismoHash(a: string, b: string): boolean {
   const ba = Buffer.from(a);
   const bb = Buffer.from(b);
@@ -93,6 +105,8 @@ export class TelegramBotService {
   // ── Texto ──────────────────────────────────────────────────────────────────
   private async onTexto(chat: ITelegramChat, texto: string): Promise<void> {
     const comando = texto.split(/[\s@]/)[0].toLowerCase();
+
+    if (esPalabraBorrarHistorial(texto)) return this.borrarHistorial(chat);
 
     if (comando === "/start") {
       if (chat.estado === "listo" && chat.workspaceId) {
@@ -466,6 +480,25 @@ export class TelegramBotService {
         [{ text: "📅 Agendar una reunión", callback_data: "menu:agendar" }],
         [{ text: "🔄 Cambiar de entorno", callback_data: "menu:entorno" }],
       ]
+    );
+  }
+
+  /**
+   * Borra lo que el bot recuerda de este chat (conversacion con la IA, tema y
+   * lecturas de animo). La cuenta sigue conectada. Los mensajes ya visibles en
+   * Telegram no se pueden borrar desde el bot.
+   */
+  private async borrarHistorial(chat: ITelegramChat): Promise<void> {
+    await models.telegramChats.updateOne(
+      { _id: chat._id },
+      { $set: { historial: [] }, $unset: { tema: 1, ultimoAnimo: 1, ultimaAlerta: 1 } }
+    );
+    await telegramService.sendMessage(
+      chat.chatId,
+      "Listo, borré todo tu historial conmigo 🧹 arrancamos de cero.\n\n" +
+        (chat.userId
+          ? "Tu cuenta sigue conectada. Si también quieres desconectarla escribe /salir."
+          : "Escríbeme el correo con el que entras a <b>metrics.bakano.ec</b> para empezar.")
     );
   }
 
