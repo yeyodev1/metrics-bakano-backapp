@@ -126,11 +126,18 @@ export class GhlService {
    * Agenda una cita. Se niega en calendarios de produccion: el sync del CRM
    * la convertiria en una grabacion del Planificador.
    */
-  async createAppointment(cita: { calendarId: string; contactId: string; startTime: Date; title: string }): Promise<string> {
+  async createAppointment(cita: {
+    calendarId: string;
+    contactId: string;
+    startTime: Date;
+    title: string;
+    /** Solo el flujo de agendar produccion lo activa, a proposito. */
+    permitirProduccion?: boolean;
+  }): Promise<string> {
     const calendario = await this.getCalendar(cita.calendarId);
     if (!calendario) throw new Error(`Calendario ${cita.calendarId} no encontrado`);
     const nombre = calendario.name.normalize("NFD").replace(/[̀-ͯ]/g, "");
-    if (/^equipo\b|producc|grabaci|filmaci|rodaje/i.test(nombre)) {
+    if (!cita.permitirProduccion && /^equipo\b|producc|grabaci|filmaci|rodaje/i.test(nombre)) {
       throw new Error(`"${calendario.name}" es un calendario de producción; no se agendan reuniones ahí`);
     }
 

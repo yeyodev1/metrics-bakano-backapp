@@ -266,11 +266,13 @@ export class TelegramBotService {
     }
     if (data === "menu:agendar") return this.elegirTemaReunion(chat);
 
+    if (data.startsWith("prod:")) return this.agendarProduccion(chat, data.slice(5));
+
     const [accion, tema, extra] = data.split(":") as [string, TemaAtencion, string | undefined];
     if (!(tema in EQUIPO_ATENCION)) return this.mostrarMenu(chat);
 
     if (accion === "menu") return this.elegirTema(chat, tema);
-    if (accion === "ag") return this.mostrarHorarios(chat, tema);
+    if (accion === "ag") return tema === "produccion" ? this.mostrarHorariosProduccion(chat) : this.mostrarHorarios(chat, tema);
     if (accion === "slot" && extra) return this.agendar(chat, tema, extra);
     return this.mostrarMenu(chat);
   }
@@ -293,7 +295,7 @@ export class TelegramBotService {
         "Cuéntame qué necesitas y se lo paso ahora mismo a su correo 📩\n\n" +
         "Prefieres hablarlo en persona? Toca abajo 👇",
       [
-        [{ text: "📅 Agendar una reunión", callback_data: `ag:${tema}` }],
+        [{ text: tema === "produccion" ? "🎬 Agendar mi producción" : "📅 Agendar una reunión", callback_data: `ag:${tema}` }],
         [{ text: "📋 Volver al menú", callback_data: "menu:ver" }],
       ]
     );
@@ -320,22 +322,7 @@ export class TelegramBotService {
       return this.coordinarPorCorreo(chat, tema, "No encontré horarios libres esta semana en su calendario 😅");
     }
 
-    // Hasta dos por dia (el primero y uno a mitad de jornada) para ofrecer variedad.
-    const porDia = new Map<string, Date[]>();
-    for (const h of horarios) porDia.set(diaEcuador(h), [...(porDia.get(diaEcuador(h)) ?? []), h]);
-    const elegidos = [...porDia.values()]
-      .flatMap((dia) => [...new Set([dia[0], dia[Math.floor(dia.length / 2)]])])
-      .slice(0, MAX_HORARIOS);
-
-    const botones: InlineButton[][] = [];
-    for (let i = 0; i < elegidos.length; i += 2) {
-      botones.push(
-        elegidos.slice(i, i + 2).map((h) => ({
-          text: `🗓️ ${horarioCorto(h)}`,
-          callback_data: `slot:${tema}:${Math.floor(h.getTime() / 1000)}`,
-        }))
-      );
-    }
+    const botones = this.botonesHorarios(horarios, (h) => `slot:${tema}:${Math.floor(h.getTime() / 1000)}`);
     botones.push([{ text: "✍️ Prefiero escribirles", callback_data: `menu:${tema}` }]);
 
     await telegramService.sendMessage(
@@ -345,7 +332,91 @@ export class TelegramBotService {
     );
   }
 
-  /** Sin calendario propio (produccion) o sin horarios: la reunion se coordina por correo. */
+  /** Hasta dos horarios por dia (el primero y uno a mitad de jornada), en filas de dos. */
+  private botonesHorarios(horarios: Date[], callback: (h: Date) => string): InlineButton[][] {
+    const porDia = new Map<string, Date[]>();
+    for (const h of horarios) porDia.set(diaEcuador(h), [...(porDia.get(diaEcuador(h)) ?? []), h]);
+    const elegidos = [...porDia.values()]
+      .flatMap((dia) => [...new Set([dia[0], dia[Math.floor(dia.length / 2)]])])
+      .slice(0, MAX_HORARIOS);
+
+    const botones: InlineButton[][] = [];
+    for (let i = 0; i < elegidos.length; i += 2) {
+      botones.push(elegidos.slice(i, i + 2).map((h) => ({ text: `🗓️ ${horarioCorto(h)}`, callback_data: callback(h) })));
+    }
+    return botones;
+  }
+
+  // ── Produccion ─────────────────────────────────────────────────────────────
+  private async mostrarHorariosProduccion(chat: ITelegramChat, aviso?: string): Promise<void> {
+    const { estado, horarios } = await atencionClienteService.horariosProduccion(chat.workspaceId!);
+    const nombres = escaparHtml(equipoAtencionService.nombres("produccion"));
+    const intro = aviso ? `${aviso}\n\n` : "";
+
+    if (!estado.puedeAgendar) {
+      chat.tema = "produccion";
+      await chat.save();
+      await telegramService.sendMessage(
+        chat.chatId,
+        `${intro}🎬 Ya tienes una producción agendada para el <b>${fechaEcuador(estado.proxima!)}</b>.\n\n` +
+          "Agendamos una producción cada 2 meses, así que no puedo reservar otra por ahora. " +
+          `Si necesitas moverla o tienes otro tema de producción, cuéntame aquí y se lo paso a <b>${nombres}</b> 📩`
+      );
+      return;
+    }
+    if (horarios === null) return this.coordinarPorCorreo(chat, "produccion", aviso);
+    if (!horarios.length) {
+      return this.coordinarPorCorreo(
+        chat,
+        "produccion",
+        `${intro}No encontré horarios libres de producción desde el ${fechaEcuador(estado.habilitadaDesde!)} 😅`
+      );
+    }
+
+    const regla =
+      estado.esperar && estado.ultima
+        ? `Tu última producción fue el ${fechaEcuador(estado.ultima)} y agendamos una cada 2 meses, así que te muestro horarios desde el <b>${fechaEcuador(estado.habilitadaDesde!)}</b>.\n\n`
+        : "";
+    const botones = this.botonesHorarios(horarios, (h) => `prod:${Math.floor(h.getTime() / 1000)}`);
+    botones.push([{ text: "✍️ Prefiero escribirles", callback_data: "menu:produccion" }]);
+
+    await telegramService.sendMessage(
+      chat.chatId,
+      `${intro}🎬 Agendemos tu producción con <b>${nombres}</b>.\n\n` +
+        "Es la sesión en ambiente controlado para grabar las tomas de tu avatar y de los productos que vamos a promocionar.\n\n" +
+        `${regla}Elige el horario que te quede mejor 👇`,
+      botones
+    );
+  }
+
+  private async agendarProduccion(chat: ITelegramChat, segundos: string): Promise<void> {
+    const inicio = new Date(Number(segundos) * 1000);
+    if (Number.isNaN(inicio.getTime())) return this.mostrarHorariosProduccion(chat);
+
+    await telegramService.sendMessage(chat.chatId, "⏳ Un segundito, estoy reservando tu producción...");
+    const reserva = await atencionClienteService.reservarProduccion(chat, inicio);
+
+    if (!reserva.ok) {
+      if (reserva.motivo === "en_curso") {
+        await telegramService.sendMessage(chat.chatId, "Estoy terminando de agendar tu producción ⏳ dame un segundito.");
+        return;
+      }
+      if (reserva.motivo === "sin_calendario") return this.coordinarPorCorreo(chat, "produccion");
+      if (reserva.motivo === "ya_agendada" || reserva.motivo === "antes_de_tiempo") return this.mostrarHorariosProduccion(chat);
+      return this.mostrarHorariosProduccion(chat, "Uy, no pude reservar ese horario 😕 puede que lo hayan tomado justo ahora.");
+    }
+
+    await telegramService.sendMessage(
+      chat.chatId,
+      "Listo, tu producción quedó agendada 🎬\n\n" +
+        `📅 <b>${reserva.cuando}</b> (hora Ecuador)\n` +
+        `👥 Con <b>${escaparHtml(equipoAtencionService.nombres("produccion"))}</b>\n\n` +
+        "Ya está en su calendario y les avisé. Ten listos los productos que vamos a promocionar 💪"
+    );
+    return this.mostrarMenu(chat, undefined, "Te ayudo con algo más? 😊");
+  }
+
+  /** Sin calendario propio o sin horarios: se coordina por mensaje con quien atiende. */
   private async coordinarPorCorreo(chat: ITelegramChat, tema: TemaAtencion, aviso?: string): Promise<void> {
     chat.tema = tema;
     await chat.save();
