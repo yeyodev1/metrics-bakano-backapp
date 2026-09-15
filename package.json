@@ -17,6 +17,7 @@
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
     "@types/pdf-parse": "^1.1.5",
+    "ai": "^7.0.102",
     "axios": "^1.7.9",
     "bcryptjs": "^2.4.3",
     "cloudinary": "^2.9.0",
@@ -29,7 +30,8 @@
     "node-cron": "^4.2.1",
     "pdf-parse": "^2.4.5",
     "pdfkit": "^0.18.0",
-    "resend": "^6.9.4"
+    "resend": "^6.9.4",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",

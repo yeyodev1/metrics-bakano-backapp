@@ -3,20 +3,10 @@ import { Types } from "mongoose";
 import models from "../models";
 import type { ITelegramChat } from "../models/telegramChat.model";
 import { resendService } from "./resend.service";
-import { notificationService } from "./notification.service";
 import { EQUIPO_ATENCION, equipoAtencionService, type TemaAtencion } from "./equipoAtencion.service";
+import { atencionClienteService, diaEcuador, fechaEcuador, horarioCorto } from "./atencionCliente.service";
+import { telegramAgentService } from "./telegramAgent.service";
 import { escaparHtml, telegramService, type InlineButton, type TelegramUpdate } from "./telegram.service";
-
-function fechaEcuador(fecha: Date): string {
-  return new Intl.DateTimeFormat("es-EC", {
-    timeZone: "America/Guayaquil",
-    weekday: "long",
-    day: "numeric",
-    month: "long",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(fecha);
-}
 
 const CORREO_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const CODIGO_MINUTOS = 10;
@@ -24,10 +14,18 @@ const CODIGO_MAX_INTENTOS = 5;
 const REENVIO_SEGUNDOS = 60;
 // Un boton por entorno; el equipo interno ve decenas y Telegram se vuelve ilegible.
 const MAX_BOTONES_ENTORNO = 30;
+const MAX_HORARIOS = 8;
+
+const EMOJI_TEMA: Record<TemaAtencion, string> = { produccion: "🎬", guiones: "📝", atencion: "🤝" };
 
 const PEDIR_CORREO =
-  "Hola, soy el asistente de <b>Bakano</b>. Te ayudo con producciones, revisión de guiones y atención.\n\n" +
-  "Para empezar, escribe el correo con el que entras a <b>metrics.bakano.ec</b>.";
+  "¡Hola! 👋 Qué gusto tenerte por aquí. Soy tu asistente de <b>Bakano</b> 💛\n\n" +
+  "Conmigo puedes:\n" +
+  "🎬 Ver y coordinar tus producciones\n" +
+  "📝 Comentar la revisión de tus guiones\n" +
+  "📅 Agendar una reunión directo con tu equipo\n" +
+  "📩 Escribirle a quien te atiende (le llega a su correo al instante)\n\n" +
+  "Para empezar, escríbeme el correo con el que entras a <b>metrics.bakano.ec</b> ✨";
 
 function hashCodigo(chatId: number, codigo: string): string {
   // El secreto del webhook sirve de pimienta: sin el, el hash de 6 digitos se rompe en segundos.
@@ -50,6 +48,10 @@ function mismoHash(a: string, b: string): boolean {
  * El codigo llega al correo de la cuenta: escribir el correo de otra persona
  * no alcanza para hablar en su nombre. La respuesta al correo es la misma
  * exista o no la cuenta, para no revelar quien es cliente.
+ *
+ * Ya conectado, lo que el cliente escribe libre lo contesta la IA
+ * (telegramAgent.service). El menu sigue ahi para quien prefiera botones y
+ * como respaldo si la IA falla.
  */
 export class TelegramBotService {
   async handleUpdate(update: TelegramUpdate): Promise<void> {
@@ -93,12 +95,18 @@ export class TelegramBotService {
     const comando = texto.split(/[\s@]/)[0].toLowerCase();
 
     if (comando === "/start") {
-      if (chat.estado === "listo" && chat.workspaceId) return this.mostrarMenu(chat);
+      if (chat.estado === "listo" && chat.workspaceId) {
+        const nombre = chat.firstName ? `, ${escaparHtml(chat.firstName)}` : "";
+        return this.mostrarMenu(chat, undefined, `¡Hola de nuevo${nombre}! 👋 Qué bueno verte.`);
+      }
       if (chat.userId) return this.pedirEntorno(chat);
       return this.reiniciar(chat, PEDIR_CORREO);
     }
     if (comando === "/salir") {
-      return this.reiniciar(chat, "Listo, desconecté tu cuenta de este chat. Escribe /start cuando quieras volver.");
+      return this.reiniciar(
+        chat,
+        "Listo, desconecté tu cuenta de este chat 👋 Cuando quieras volver, escribe /start. ¡Aquí te espero! 💛"
+      );
     }
     if (comando === "/entorno") {
       if (!chat.userId) return this.reiniciar(chat, PEDIR_CORREO);
@@ -115,12 +123,14 @@ export class TelegramBotService {
       case "eligiendo_entorno":
         return this.pedirEntorno(chat);
       case "listo":
+        // Eligio un tema en el menu: su mensaje va directo a esa persona.
         if (chat.tema && chat.workspaceId) return this.enviarSolicitud(chat, chat.tema, texto);
-        await telegramService.sendMessage(
-          chat.chatId,
-          "Te leo. Elige primero el tema para pasarle tu mensaje a la persona correcta:"
+        if (chat.workspaceId && (await telegramAgentService.responder(chat, texto))) return;
+        return this.mostrarMenu(
+          chat,
+          undefined,
+          "¡Te leo! 😊 Para pasarle tu mensaje a la persona correcta, elige primero el tema:"
         );
-        return this.mostrarMenu(chat);
     }
   }
 
@@ -129,13 +139,20 @@ export class TelegramBotService {
     if (!CORREO_RE.test(correo)) {
       await telegramService.sendMessage(
         chat.chatId,
-        "Ese no parece un correo. Escribe el correo con el que entras a <b>metrics.bakano.ec</b>."
+        "¡Con muchísimo gusto te ayudo con eso! 😊\n\n" +
+          "Pero antes necesito saber quién eres, para mostrarte <b>tu</b> información y no la de otra persona 🔐\n\n" +
+          "👉 Escríbeme el correo con el que entras a <b>metrics.bakano.ec</b>\n" +
+          "Por ejemplo: <i>nombre@tuempresa.com</i>\n\n" +
+          "Te llega un código y en menos de un minuto estamos conectados ✨"
       );
       return;
     }
 
     if (chat.codigoEnviadoEn && Date.now() - chat.codigoEnviadoEn.getTime() < REENVIO_SEGUNDOS * 1000) {
-      await telegramService.sendMessage(chat.chatId, "Acabo de enviar un código. Espera un minuto antes de pedir otro.");
+      await telegramService.sendMessage(
+        chat.chatId,
+        "¡Ya te mandé un código hace un momentito! 📬 Revisa tu bandeja (y el spam, por si acaso). Si no llega, espera un minuto y vuelve a escribir tu correo."
+      );
       return;
     }
 
@@ -166,8 +183,8 @@ export class TelegramBotService {
 
     await telegramService.sendMessage(
       chat.chatId,
-      `Si <b>${escaparHtml(correo)}</b> tiene cuenta en metrics.bakano.ec, te llegó un código de 6 dígitos. Escríbelo aquí.\n\n` +
-        `Vence en ${CODIGO_MINUTOS} minutos. ¿Correo equivocado? Escribe el correcto.`
+      `¡Perfecto! 📬 Si <b>${escaparHtml(correo)}</b> tiene cuenta en metrics.bakano.ec, te acabo de enviar un código de 6 dígitos.\n\n` +
+        `Escríbelo aquí 👇 (vence en ${CODIGO_MINUTOS} minutos). ¿Te equivocaste de correo? Solo escribe el correcto.`
     );
   }
 
@@ -175,30 +192,36 @@ export class TelegramBotService {
     const codigo = texto.replace(/\s/g, "");
 
     if (!chat.codigoHash || !chat.codigoExpira || chat.codigoExpira.getTime() < Date.now()) {
-      return this.reiniciar(chat, "El código venció. Escribe tu correo otra vez y te mando uno nuevo.");
+      return this.reiniciar(chat, "Ese código ya venció ⌛ Escríbeme tu correo otra vez y te mando uno nuevo al toque.");
     }
     if (!/^\d{6}$/.test(codigo)) {
-      await telegramService.sendMessage(chat.chatId, "El código tiene 6 dígitos. Revisa tu correo y escríbelo aquí.");
+      await telegramService.sendMessage(chat.chatId, "El código tiene 6 números 🔢 Búscalo en tu correo y escríbelo aquí.");
       return;
     }
 
     if (!mismoHash(hashCodigo(chat.chatId, codigo), chat.codigoHash)) {
       chat.codigoIntentos += 1;
       if (chat.codigoIntentos >= CODIGO_MAX_INTENTOS) {
-        return this.reiniciar(chat, "Demasiados intentos. Escribe tu correo otra vez para recibir un código nuevo.");
+        return this.reiniciar(
+          chat,
+          "Hubo demasiados intentos, así que por seguridad lo reinicié 🔒 Escríbeme tu correo otra vez y te mando un código nuevo."
+        );
       }
       await chat.save();
       const quedan = CODIGO_MAX_INTENTOS - chat.codigoIntentos;
       await telegramService.sendMessage(
         chat.chatId,
-        `Código incorrecto. Te queda${quedan === 1 ? "" : "n"} ${quedan} intento${quedan === 1 ? "" : "s"}.`
+        `Ups, ese código no coincide 😅 Te queda${quedan === 1 ? "" : "n"} ${quedan} intento${quedan === 1 ? "" : "s"}.`
       );
       return;
     }
 
     const usuario = await models.users.findOne({ email: chat.correoPendiente, isActive: true }).select("_id name").lean();
     if (!usuario) {
-      return this.reiniciar(chat, "No encontré una cuenta activa con ese correo. Escribe tu correo otra vez.");
+      return this.reiniciar(
+        chat,
+        "No encontré una cuenta activa con ese correo 🤔 Escríbelo otra vez o pídenos ayuda en soporte@bakano.ec."
+      );
     }
 
     chat.userId = usuario._id as Types.ObjectId;
@@ -210,7 +233,7 @@ export class TelegramBotService {
     await chat.save();
 
     const nombre = usuario.name ? `, ${escaparHtml(usuario.name.split(" ")[0])}` : "";
-    await telegramService.sendMessage(chat.chatId, `Listo${nombre}. Tu cuenta quedó conectada.`);
+    await telegramService.sendMessage(chat.chatId, `¡Listo${nombre}! 🎉 Tu cuenta quedó conectada. Qué bueno tenerte aquí.`);
     return this.pedirEntorno(chat);
   }
 
@@ -222,96 +245,153 @@ export class TelegramBotService {
     if (data === "menu:entorno") return this.pedirEntorno(chat);
     if (!chat.workspaceId) return this.pedirEntorno(chat);
 
-    const tema = data.slice("menu:".length) as TemaAtencion;
-    if (!data.startsWith("menu:") || !(tema in EQUIPO_ATENCION)) return this.mostrarMenu(chat);
+    if (data === "menu:ver") {
+      chat.tema = undefined;
+      await chat.save();
+      return this.mostrarMenu(chat);
+    }
+    if (data === "menu:agendar") return this.elegirTemaReunion(chat);
 
+    const [accion, tema, extra] = data.split(":") as [string, TemaAtencion, string | undefined];
+    if (!(tema in EQUIPO_ATENCION)) return this.mostrarMenu(chat);
+
+    if (accion === "menu") return this.elegirTema(chat, tema);
+    if (accion === "ag") return this.mostrarHorarios(chat, tema);
+    if (accion === "slot" && extra) return this.agendar(chat, tema, extra);
+    return this.mostrarMenu(chat);
+  }
+
+  private async elegirTema(chat: ITelegramChat, tema: TemaAtencion): Promise<void> {
     chat.tema = tema;
     await chat.save();
 
     const { etiqueta, personas } = EQUIPO_ATENCION[tema];
     let contexto = "";
     if (tema === "produccion") {
-      const proxima = await this.proximaProduccion(chat.workspaceId);
+      const proxima = await atencionClienteService.proximaProduccion(chat.workspaceId!);
       contexto = proxima
-        ? `Tu próxima producción es el <b>${fechaEcuador(proxima)}</b>.\n\n`
-        : "Todavía no tienes una producción agendada.\n\n";
+        ? `🎬 Tu próxima producción es el <b>${fechaEcuador(proxima)}</b>.\n\n`
+        : "🎬 Todavía no tienes una producción agendada.\n\n";
     }
     await telegramService.sendMessage(
       chat.chatId,
-      `${contexto}Para ${etiqueta} te atiende${personas.length > 1 ? "n" : ""} <b>${escaparHtml(equipoAtencionService.nombres(tema))}</b>.\n\n` +
-        "Escríbeme aquí qué necesitas y se lo paso ahora mismo."
+      `${contexto}${EMOJI_TEMA[tema]} Para ${etiqueta} te atiende${personas.length > 1 ? "n" : ""} <b>${escaparHtml(equipoAtencionService.nombres(tema))}</b> 💛\n\n` +
+        "Cuéntame qué necesitas y se lo paso ahora mismo a su correo 📩\n\n" +
+        "¿Prefieres hablarlo en persona? Toca abajo 👇",
+      [
+        [{ text: "📅 Agendar una reunión", callback_data: `ag:${tema}` }],
+        [{ text: "📋 Volver al menú", callback_data: "menu:ver" }],
+      ]
     );
+  }
+
+  // ── Reuniones ──────────────────────────────────────────────────────────────
+  private async elegirTemaReunion(chat: ITelegramChat): Promise<void> {
+    const botones: InlineButton[][] = (Object.keys(EQUIPO_ATENCION) as TemaAtencion[]).map((tema) => [
+      { text: `${EMOJI_TEMA[tema]} ${equipoAtencionService.nombres(tema)}`, callback_data: `ag:${tema}` },
+    ]);
+    await telegramService.sendMessage(
+      chat.chatId,
+      "📅 ¡Claro que sí! Me encanta que quieras hablar directo con nosotros 🙌\n\n" +
+        "Lo dejo agendado en el calendario del equipo y les aviso a su correo. ¿Con quién te quieres reunir?\n\n" +
+        "🎬 Producción · 📝 Guiones · 🤝 Atención",
+      botones
+    );
+  }
+
+  private async mostrarHorarios(chat: ITelegramChat, tema: TemaAtencion, aviso?: string): Promise<void> {
+    const horarios = await atencionClienteService.horariosLibres(tema);
+    if (horarios === null) return this.coordinarPorCorreo(chat, tema, aviso);
+    if (!horarios.length) {
+      return this.coordinarPorCorreo(chat, tema, "No encontré horarios libres esta semana en su calendario 😅");
+    }
+
+    // Hasta dos por dia (el primero y uno a mitad de jornada) para ofrecer variedad.
+    const porDia = new Map<string, Date[]>();
+    for (const h of horarios) porDia.set(diaEcuador(h), [...(porDia.get(diaEcuador(h)) ?? []), h]);
+    const elegidos = [...porDia.values()]
+      .flatMap((dia) => [...new Set([dia[0], dia[Math.floor(dia.length / 2)]])])
+      .slice(0, MAX_HORARIOS);
+
+    const botones: InlineButton[][] = [];
+    for (let i = 0; i < elegidos.length; i += 2) {
+      botones.push(
+        elegidos.slice(i, i + 2).map((h) => ({
+          text: `🗓️ ${horarioCorto(h)}`,
+          callback_data: `slot:${tema}:${Math.floor(h.getTime() / 1000)}`,
+        }))
+      );
+    }
+    botones.push([{ text: "✍️ Prefiero escribirles", callback_data: `menu:${tema}` }]);
+
+    await telegramService.sendMessage(
+      chat.chatId,
+      `${aviso ? `${aviso}\n\n` : ""}¡Genial! 🙌 Estos son los próximos horarios libres de <b>${escaparHtml(equipoAtencionService.nombres(tema))}</b> (hora Ecuador).\n\nElige el que mejor te quede 👇`,
+      botones
+    );
+  }
+
+  /** Sin calendario propio (produccion) o sin horarios: la reunion se coordina por correo. */
+  private async coordinarPorCorreo(chat: ITelegramChat, tema: TemaAtencion, aviso?: string): Promise<void> {
+    chat.tema = tema;
+    await chat.save();
+    const { etiqueta, personas } = EQUIPO_ATENCION[tema];
+    await telegramService.sendMessage(
+      chat.chatId,
+      `${aviso ? `${aviso}\n\n` : ""}${EMOJI_TEMA[tema]} Para ${etiqueta} te atiende${personas.length > 1 ? "n" : ""} <b>${escaparHtml(equipoAtencionService.nombres(tema))}</b> 💪\n\n` +
+        "Cuéntame qué día y hora te quedan mejor, y de qué quieres hablar. Se lo paso ahora mismo a su correo para que coordinen contigo 📩"
+    );
+  }
+
+  private async agendar(chat: ITelegramChat, tema: TemaAtencion, segundos: string): Promise<void> {
+    const inicio = new Date(Number(segundos) * 1000);
+    if (Number.isNaN(inicio.getTime())) return this.mostrarHorarios(chat, tema);
+    if (inicio.getTime() < Date.now()) return this.mostrarHorarios(chat, tema, "Ese horario ya pasó ⌛ Te muestro los que siguen libres.");
+
+    await telegramService.sendMessage(chat.chatId, "⏳ Un segundito, estoy reservando tu reunión...");
+    const reserva = await atencionClienteService.reservarReunion(chat, tema, inicio);
+
+    if (!reserva.ok) {
+      if (reserva.motivo === "en_curso") {
+        await telegramService.sendMessage(chat.chatId, "Estoy terminando de agendar tu reunión ⏳ Dame un segundito.");
+        return;
+      }
+      if (reserva.motivo === "sin_calendario") return this.coordinarPorCorreo(chat, tema);
+      return this.mostrarHorarios(chat, tema, "Uy, no pude reservar ese horario 😕 Puede que alguien lo haya tomado justo ahora.");
+    }
+
+    await telegramService.sendMessage(
+      chat.chatId,
+      "¡Listo, quedó agendada! 🎉\n\n" +
+        `📅 <b>${reserva.cuando}</b> (hora Ecuador)\n` +
+        `👤 Con <b>${escaparHtml(equipoAtencionService.nombres(tema))}</b>\n\n` +
+        "Ya está en su calendario y le avisé a su correo. ¡Nos vemos pronto! 💛"
+    );
+    return this.mostrarMenu(chat, undefined, "¿Te ayudo con algo más? 😊");
   }
 
   // ── Solicitudes al equipo ──────────────────────────────────────────────────
-  private async proximaProduccion(workspaceId: Types.ObjectId): Promise<Date | null> {
-    const proxima = await models.planning
-      .findOne({ workspaceId, date: { $gte: new Date() }, title: { $not: /^CANCELADA/ } })
-      .sort({ date: 1 })
-      .select("date")
-      .lean();
-    return proxima?.date ?? null;
-  }
-
-  /** El mensaje del cliente llega por correo y en la plataforma a quien atiende el tema. */
   private async enviarSolicitud(chat: ITelegramChat, tema: TemaAtencion, texto: string): Promise<void> {
-    const mensaje = texto.slice(0, 3000);
-    const [workspace, cliente, internos, proxima] = await Promise.all([
-      models.workspaces.findById(chat.workspaceId).select("name").lean(),
-      models.users.findById(chat.userId).select("name lastName email").lean(),
-      equipoAtencionService.usuarios(tema),
-      tema === "produccion" ? this.proximaProduccion(chat.workspaceId!) : null,
-    ]);
-    const nombreEntorno = workspace?.name || "Cliente";
-    const nombreCliente = [cliente?.name, cliente?.lastName].filter(Boolean).join(" ") || cliente?.email || "Cliente";
-    const { etiqueta, personas } = EQUIPO_ATENCION[tema];
-
-    const avisosInApp = await Promise.allSettled(
-      internos.map((u) =>
-        notificationService.create(
-          u._id,
-          "solicitud_cliente",
-          `${nombreEntorno} escribió por Telegram · ${etiqueta}`,
-          `${nombreCliente}: “${mensaje.slice(0, 280)}”`,
-          { workspaceId: chat.workspaceId! }
-        )
-      )
-    );
-
-    let correoEnviado = false;
-    try {
-      await resendService.sendSolicitudClienteEmail({
-        to: equipoAtencionService.correos(tema),
-        tema: etiqueta,
-        workspaceName: nombreEntorno,
-        clienteNombre: nombreCliente,
-        clienteEmail: cliente?.email,
-        telegramUsername: chat.telegramUsername,
-        mensaje,
-        proximaProduccion: proxima ? fechaEcuador(proxima) : undefined,
-      });
-      correoEnviado = true;
-    } catch (error) {
-      console.error("[Telegram] no se pudo enviar el correo de la solicitud:", error);
-    }
+    const entregado = await atencionClienteService.enviarMensaje(chat, tema, texto);
 
     // Solo se confirma al cliente si el mensaje llego por algun lado.
-    if (!correoEnviado && !avisosInApp.some((r) => r.status === "fulfilled")) {
+    if (!entregado) {
       await telegramService.sendMessage(
         chat.chatId,
-        "No pude pasar tu mensaje ahora. Inténtalo de nuevo en unos minutos o escríbenos a soporte@bakano.ec."
+        "Uy, no pude enviar tu mensaje ahora mismo 😕 Inténtalo de nuevo en unos minutos o escríbenos a soporte@bakano.ec."
       );
       return;
     }
 
     chat.tema = undefined;
     await chat.save();
+    const { personas } = EQUIPO_ATENCION[tema];
     await telegramService.sendMessage(
       chat.chatId,
-      `Listo. Le pasé tu mensaje a <b>${escaparHtml(equipoAtencionService.nombres(tema))}</b>. ` +
-        `${personas.length > 1 ? "Te van" : "Te va"} a contactar lo antes posible.`
+      `¡Listo! ✅ Le pasé tu mensaje a <b>${escaparHtml(equipoAtencionService.nombres(tema))}</b>. ` +
+        `${personas.length > 1 ? "Te van" : "Te va"} a contactar lo antes posible 💛`
     );
-    return this.mostrarMenu(chat);
+    return this.mostrarMenu(chat, undefined, "¿Te ayudo con algo más? 😊");
   }
 
   // ── Entornos ───────────────────────────────────────────────────────────────
@@ -336,7 +416,7 @@ export class TelegramBotService {
       await chat.save();
       await telegramService.sendMessage(
         chat.chatId,
-        "Tu cuenta no tiene entornos activos. Escríbenos a soporte@bakano.ec y lo revisamos."
+        "Tu cuenta todavía no tiene entornos activos 😕 Escríbenos a soporte@bakano.ec y lo resolvemos contigo."
       );
       return;
     }
@@ -348,24 +428,22 @@ export class TelegramBotService {
     const botones: InlineButton[][] = entornos
       .slice(0, MAX_BOTONES_ENTORNO)
       .map((w) => [{ text: w.name, callback_data: `ws:${w._id.toString()}` }]);
-    await telegramService.sendMessage(
-      chat.chatId,
-      `Tienes acceso a ${entornos.length} entornos. ¿Sobre cuál quieres hablar?`,
-      botones
-    );
+    await telegramService.sendMessage(chat.chatId, `Tienes ${entornos.length} entornos 🙌 ¿De cuál quieres hablar hoy?`, botones);
   }
 
   private async elegirEntorno(chat: ITelegramChat, workspaceId: string): Promise<void> {
     // El callback_data viene del cliente: se valida contra el acceso real.
     const entorno = (await this.entornosDe(chat.userId!)).find((w) => w._id.toString() === workspaceId);
     if (!entorno) {
-      await telegramService.sendMessage(chat.chatId, "Ese entorno ya no está disponible para tu cuenta.");
+      await telegramService.sendMessage(chat.chatId, "Ese entorno ya no está disponible para tu cuenta 😕 Elige otro:");
       return this.pedirEntorno(chat);
     }
     return this.fijarEntorno(chat, entorno);
   }
 
   private async fijarEntorno(chat: ITelegramChat, entorno: { _id: Types.ObjectId; name: string }): Promise<void> {
+    // La conversacion de la IA es por entorno: no se mezcla con la del anterior.
+    if (String(chat.workspaceId) !== String(entorno._id)) chat.set("historial", []);
     chat.workspaceId = entorno._id;
     chat.tema = undefined;
     chat.estado = "listo";
@@ -373,17 +451,20 @@ export class TelegramBotService {
     return this.mostrarMenu(chat, entorno.name);
   }
 
-  private async mostrarMenu(chat: ITelegramChat, nombreEntorno?: string): Promise<void> {
+  private async mostrarMenu(chat: ITelegramChat, nombreEntorno?: string, saludo?: string): Promise<void> {
     const nombre =
       nombreEntorno ?? (await models.workspaces.findById(chat.workspaceId).select("name").lean())?.name ?? "tu entorno";
     await telegramService.sendMessage(
       chat.chatId,
-      `Estamos hablando de <b>${escaparHtml(nombre)}</b>. ¿En qué te ayudo?`,
+      `${saludo ? `${saludo}\n\n` : ""}Estamos hablando de <b>${escaparHtml(nombre)}</b> 💛 ¿En qué te ayudo hoy?\n\n` +
+        "✍️ Escríbeme lo que necesites con tus palabras, por ejemplo <i>¿cómo van mis guiones?</i> o <i>quiero mover la grabación</i>.\n\n" +
+        "💬 ¿Prefieres hablar directo con nosotros? Toca <b>Agendar una reunión</b> y lo dejo en el calendario del equipo.",
       [
-        [{ text: "Producciones", callback_data: "menu:produccion" }],
-        [{ text: "Revisión de guiones", callback_data: "menu:guiones" }],
-        [{ text: "Atención al cliente", callback_data: "menu:atencion" }],
-        [{ text: "Cambiar de entorno", callback_data: "menu:entorno" }],
+        [{ text: "🎬 Producciones", callback_data: "menu:produccion" }],
+        [{ text: "📝 Revisión de guiones", callback_data: "menu:guiones" }],
+        [{ text: "🤝 Atención al cliente", callback_data: "menu:atencion" }],
+        [{ text: "📅 Agendar una reunión", callback_data: "menu:agendar" }],
+        [{ text: "🔄 Cambiar de entorno", callback_data: "menu:entorno" }],
       ]
     );
   }
@@ -393,6 +474,7 @@ export class TelegramBotService {
     chat.userId = undefined;
     chat.workspaceId = undefined;
     chat.tema = undefined;
+    chat.set("historial", []);
     chat.correoPendiente = undefined;
     chat.codigoHash = undefined;
     chat.codigoExpira = undefined;

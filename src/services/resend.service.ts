@@ -1220,8 +1220,10 @@ export class ResendService {
     telegramUsername?: string;
     mensaje: string;
     proximaProduccion?: string;
+    asunto?: string;
+    encabezado?: string;
   }): Promise<void> {
-    const { to, tema, workspaceName, clienteNombre, clienteEmail, telegramUsername, mensaje, proximaProduccion } = params;
+    const { to, tema, workspaceName, clienteNombre, clienteEmail, telegramUsername, mensaje, proximaProduccion, asunto, encabezado } = params;
     if (!to.length) return;
     const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
     const fila = (etiqueta: string, valor: string) =>
@@ -1238,7 +1240,7 @@ export class ResendService {
         <tr>
           <td style="background:linear-gradient(135deg,#e6285c 0%,#85529c 100%);padding:32px 40px;text-align:center;">
             <p style="margin:0;font-size:13px;font-weight:700;color:rgba(255,255,255,0.75);letter-spacing:2px;text-transform:uppercase;">Telegram · ${esc(tema)}</p>
-            <h1 style="margin:12px 0 0;font-size:24px;font-weight:800;color:#ffffff;">${esc(workspaceName)} te escribió</h1>
+            <h1 style="margin:12px 0 0;font-size:24px;font-weight:800;color:#ffffff;">${esc(encabezado ?? `${workspaceName} te escribió`)}</h1>
           </td>
         </tr>
 
@@ -1275,7 +1277,7 @@ export class ResendService {
       from: this.from,
       to,
       replyTo: clienteEmail,
-      subject: `${workspaceName} escribió por Telegram (${tema})`,
+      subject: asunto ?? `${workspaceName} escribió por Telegram (${tema})`,
       html,
     });
   }
