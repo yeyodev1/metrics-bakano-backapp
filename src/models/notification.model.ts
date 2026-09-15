@@ -15,7 +15,8 @@ export type NotificationType =
   | "produccion_cancelada"
   | "produccion_sin_entorno"
   | "solicitud_cliente"
-  | "reunion_agendada";
+  | "reunion_agendada"
+  | "cliente_en_riesgo";
 
 export interface INotification extends Document {
   userId: Types.ObjectId;
@@ -54,6 +55,7 @@ const NotificationSchema = new Schema<INotification>(
         "produccion_sin_entorno",
         "solicitud_cliente",
         "reunion_agendada",
+        "cliente_en_riesgo",
       ],
       required: true,
     },

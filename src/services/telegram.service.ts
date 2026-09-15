@@ -47,6 +47,11 @@ export class TelegramService {
     });
   }
 
+  /** "escribiendo..." mientras la IA piensa. Dura 5 s o hasta el siguiente mensaje. */
+  async sendChatAction(chatId: number, action: "typing"): Promise<void> {
+    await axios.post(`${this.api}/sendChatAction`, { chat_id: chatId, action });
+  }
+
   /** Sin esto el boton se queda con el relojito girando en Telegram. */
   async answerCallbackQuery(callbackQueryId: string, text?: string): Promise<void> {
     await axios.post(`${this.api}/answerCallbackQuery`, {

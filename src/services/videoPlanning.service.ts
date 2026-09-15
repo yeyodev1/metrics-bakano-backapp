@@ -214,7 +214,7 @@ function sinAcentos(s: string): string {
 }
 
 /** Horas antes de la produccion hasta las que el cliente puede pedir cambios al guion. */
-function horasDeCorreccion(): number {
+export function horasDeCorreccion(): number {
   const n = Number(process.env.GUION_CORRECCION_HORAS);
   return Number.isFinite(n) && n > 0 ? n : 48;
 }
