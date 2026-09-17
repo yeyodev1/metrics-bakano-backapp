@@ -6,6 +6,7 @@ import { resendService } from "./resend.service";
 import { EQUIPO_ATENCION, equipoAtencionService, type TemaAtencion } from "./equipoAtencion.service";
 import { atencionClienteService, diaEcuador, fechaEcuador, horarioCorto } from "./atencionCliente.service";
 import { onboardingBotService } from "./onboardingBot.service";
+import { perfilClienteService } from "./perfilCliente.service";
 import { SESIONES_ONBOARDING, type SesionOnboarding } from "./onboardingSesiones.service";
 import { telegramAgentService } from "./telegramAgent.service";
 import { escaparHtml, telegramService, type InlineButton, type TelegramUpdate } from "./telegram.service";
@@ -635,6 +636,20 @@ export class TelegramBotService {
     chat.tema = undefined;
     chat.estado = "listo";
     await chat.save();
+
+    // Cliente nuevo o a medio arrancar: lo primero que ve es su onboarding,
+    // no un menu generico. El que ya esta en marcha va directo al menu.
+    const perfil = await perfilClienteService.de(entorno._id);
+    if (perfil.tipo !== "activo") {
+      await telegramService.sendMessage(
+        chat.chatId,
+        `Perfecto, estamos en <b>${escaparHtml(entorno.name)}</b> 💛\n\n` +
+          (perfil.tipo === "nuevo"
+            ? "Te acompaño desde el inicio: son tres sesiones cortas y después grabamos tu primera producción."
+            : "Sigamos donde quedamos, te falta poco para grabar tu primera producción.")
+      );
+      return this.mostrarOnboarding(chat);
+    }
     return this.mostrarMenu(chat, entorno.name);
   }
 

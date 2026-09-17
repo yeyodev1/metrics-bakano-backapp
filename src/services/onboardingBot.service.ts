@@ -1,6 +1,7 @@
 import { Types } from "mongoose";
 import models from "../models";
 import type { ITelegramChat } from "../models/telegramChat.model";
+import type { EstadoSesionOnboarding } from "../models/workspace.model";
 import { ghlService } from "./ghl.service";
 import { slackService } from "./slack.service";
 import { resendService } from "./resend.service";
@@ -41,6 +42,8 @@ export interface EstadoSesion {
   emoji: string;
   responsable: string;
   agendada: boolean;
+  /** Lo que marco el responsable; si nadie lo movio, se deduce de la agenda. */
+  estado: EstadoSesionOnboarding;
   fecha?: Date;
   link: string;
   requisitos: string[];
@@ -75,6 +78,7 @@ class OnboardingBotService {
         emoji: def.emoji,
         responsable: def.responsable.nombre,
         agendada: Boolean(guardada?.agendada),
+        estado: guardada?.estado && guardada.estado !== "pendiente" ? guardada.estado : guardada?.agendada ? "agendada" : "pendiente",
         fecha: guardada?.fecha,
         link: def.link,
         requisitos: def.requisitos,
@@ -220,23 +224,44 @@ class OnboardingBotService {
 
     let marcadas = 0;
     let avisadas = 0;
+    // Por que se descarta cada cita: sin esto el cron dice "0 marcadas" y no
+    // hay forma de saber si fue por el contacto, por el correo o por el entorno.
+    const descartes: Record<string, number> = {};
+    const descartar = (motivo: string) => {
+      descartes[motivo] = (descartes[motivo] || 0) + 1;
+    };
     const contactos = new Map<string, any>();
     for (const evento of eventos) {
       const sesion = SESION_POR_CALENDARIO[evento.calendarId];
       const inicio = evento.startTime ? new Date(evento.startTime) : null;
-      if (!sesion || !inicio || Number.isNaN(inicio.getTime())) continue;
-      if (["cancelled", "canceled", "noshow"].includes(String(evento.appointmentStatus || "").toLowerCase())) continue;
+      if (!sesion || !inicio || Number.isNaN(inicio.getTime())) {
+        descartar("sin sesión o sin fecha");
+        continue;
+      }
+      if (["cancelled", "canceled", "noshow"].includes(String(evento.appointmentStatus || "").toLowerCase())) {
+        descartar("cita cancelada");
+        continue;
+      }
 
       if (!contactos.has(evento.contactId)) contactos.set(evento.contactId, await ghlService.getContact(evento.contactId));
       const correo = String(contactos.get(evento.contactId)?.email || "").toLowerCase();
-      if (!correo) continue;
+      if (!correo) {
+        descartar("contacto del CRM sin correo");
+        continue;
+      }
 
       const usuario = await models.users.findOne({ email: correo }).select("workspaceId workspaces").lean();
       const workspaceId = (usuario?.workspaceId || usuario?.workspaces?.[0]?.workspaceId) as Types.ObjectId | undefined;
-      if (!workspaceId) continue;
+      if (!workspaceId) {
+        descartar("ese correo no es usuario de un entorno");
+        continue;
+      }
 
       const workspace = await models.workspaces.findById(workspaceId).select("name onboardingSesiones").lean();
-      if (workspace?.onboardingSesiones?.[sesion]?.agendada) continue;
+      if (workspace?.onboardingSesiones?.[sesion]?.agendada) {
+        descartar("ya estaba marcada");
+        continue;
+      }
 
       await this.marcar(workspaceId, sesion, { fecha: inicio, appointmentId: evento.id, origen: "link" });
       marcadas++;
@@ -255,13 +280,61 @@ class OnboardingBotService {
       );
       avisadas++;
     }
+    if (Object.keys(descartes).length) {
+      console.log("[Onboarding] citas descartadas:", JSON.stringify(descartes));
+    }
     return { revisadas: eventos.length, marcadas, avisadas };
   }
 
   /**
-   * Correo de arranque: le dice al cliente que todo se maneja por Telegram.
-   * Solo a entornos nuevos (corte por ONBOARDING_BIENVENIDA_DESDE) para no
-   * escribirle de golpe a toda la cartera.
+   * Correo de arranque de un entorno: descarga de Telegram, link del bot y
+   * acceso a la plataforma. Idempotente: `onboardingBienvenidaEnviadaEn`
+   * garantiza que salga una sola vez por entorno.
+   */
+  async enviarBienvenida(workspaceId: Types.ObjectId | string, opts: { forzar?: boolean } = {}): Promise<boolean> {
+    const id = new Types.ObjectId(String(workspaceId));
+    const workspace = await models.workspaces.findById(id).select("name isActive onboardingBienvenidaEnviadaEn").lean();
+    if (!workspace || !workspace.isActive) return false;
+    if (workspace.onboardingBienvenidaEnviadaEn && !opts.forzar) return false;
+
+    const clientes = await models.users
+      .find({ isInternal: { $ne: true }, isActive: true, $or: [{ workspaceId: id }, { "workspaces.workspaceId": id }] })
+      .select("email name")
+      .lean();
+    const destinatarios = clientes.map((c) => c.email).filter(Boolean);
+    if (!destinatarios.length) return false;
+
+    // Se marca antes de enviar: si Resend falla, el cron reintenta, pero dos
+    // altas seguidas no pueden disparar dos correos al mismo entorno.
+    await models.workspaces.updateOne({ _id: id }, { $set: { onboardingBienvenidaEnviadaEn: new Date() } });
+
+    try {
+      await resendService.sendOnboardingBienvenida({
+        to: destinatarios,
+        recipientName: clientes[0]?.name,
+        workspaceName: workspace.name,
+        botUrl: BOT_URL,
+        correoCliente: destinatarios[0],
+        sesiones: ORDEN_SESIONES.map((s) => ({
+          etiqueta: SESIONES_ONBOARDING[s].etiqueta,
+          responsable: SESIONES_ONBOARDING[s].responsable.nombre,
+          link: SESIONES_ONBOARDING[s].link,
+          resumen: SESIONES_ONBOARDING[s].resumen,
+        })),
+      });
+      console.log(`[Onboarding] bienvenida enviada a ${workspace.name} (${destinatarios.length} destinatarios)`);
+      return true;
+    } catch (error: any) {
+      console.error(`[Onboarding] bienvenida de ${workspace.name}:`, error?.message || error);
+      await models.workspaces.updateOne({ _id: id }, { $unset: { onboardingBienvenidaEnviadaEn: 1 } });
+      return false;
+    }
+  }
+
+  /**
+   * Red de seguridad del cron: entornos que se quedaron sin su correo.
+   * Solo a partir de ONBOARDING_BIENVENIDA_DESDE, para no escribirle de golpe
+   * a toda la cartera vieja.
    */
   async enviarBienvenidasPendientes(): Promise<{ enviadas: number }> {
     const corte = process.env.ONBOARDING_BIENVENIDA_DESDE ? new Date(process.env.ONBOARDING_BIENVENIDA_DESDE) : null;
@@ -275,30 +348,7 @@ class OnboardingBotService {
 
     let enviadas = 0;
     for (const workspace of pendientes) {
-      const clientes = await models.users
-        .find({ isInternal: { $ne: true }, isActive: true, $or: [{ workspaceId: workspace._id }, { "workspaces.workspaceId": workspace._id }] })
-        .select("email name")
-        .lean();
-      if (!clientes.length) continue;
-
-      try {
-        await resendService.sendOnboardingBienvenida({
-          to: clientes.map((c) => c.email).filter(Boolean),
-          recipientName: clientes[0]?.name,
-          workspaceName: workspace.name,
-          botUrl: BOT_URL,
-          sesiones: ORDEN_SESIONES.map((s) => ({
-            etiqueta: SESIONES_ONBOARDING[s].etiqueta,
-            responsable: SESIONES_ONBOARDING[s].responsable.nombre,
-            link: SESIONES_ONBOARDING[s].link,
-            resumen: SESIONES_ONBOARDING[s].resumen,
-          })),
-        });
-        await models.workspaces.updateOne({ _id: workspace._id }, { $set: { onboardingBienvenidaEnviadaEn: new Date() } });
-        enviadas++;
-      } catch (error: any) {
-        console.error(`[Onboarding] bienvenida de ${workspace.name}:`, error?.message || error);
-      }
+      if (await this.enviarBienvenida(workspace._id as Types.ObjectId)) enviadas++;
     }
     return { enviadas };
   }

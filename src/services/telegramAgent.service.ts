@@ -4,6 +4,7 @@ import type { ITelegramChat } from "../models/telegramChat.model";
 import { EQUIPO_ATENCION, equipoAtencionService, type TemaAtencion } from "./equipoAtencion.service";
 import { atencionClienteService, fechaEcuador, type DatosCliente } from "./atencionCliente.service";
 import { onboardingBotService } from "./onboardingBot.service";
+import { perfilClienteService, type PerfilCliente } from "./perfilCliente.service";
 import { SESIONES_ONBOARDING, type SesionOnboarding } from "./onboardingSesiones.service";
 import { horasDeCorreccion } from "./videoPlanning.service";
 import { escaparHtml, telegramService } from "./telegram.service";
@@ -58,7 +59,10 @@ class TelegramAgentService {
     let respuesta = "";
     try {
       const { generateText, isStepCount } = await cargarAi();
-      const cliente = await atencionClienteService.datosCliente(chat);
+      const [cliente, perfil] = await Promise.all([
+        atencionClienteService.datosCliente(chat),
+        perfilClienteService.de(chat.workspaceId!),
+      ]);
       const historial: Mensaje[] = (chat.historial || []).slice(-MAX_HISTORIAL).map((m) => ({
         role: m.rol === "cliente" ? "user" : "assistant",
         content: m.texto,
@@ -68,7 +72,7 @@ class TelegramAgentService {
       const [resultado, clasificacion] = await Promise.all([
         generateText({
           model: modelo(),
-          system: this.instrucciones(cliente),
+          system: this.instrucciones(cliente, perfil),
           messages: [...historial, { role: "user", content: texto }],
           tools: this.herramientas(chat, texto),
           stopWhen: isStepCount(6),
@@ -109,7 +113,7 @@ class TelegramAgentService {
     return true;
   }
 
-  private instrucciones(cliente: DatosCliente): string {
+  private instrucciones(cliente: DatosCliente, perfil: PerfilCliente): string {
     const equipo = (Object.keys(EQUIPO_ATENCION) as TemaAtencion[])
       .map(
         (t) =>
@@ -124,6 +128,8 @@ class TelegramAgentService {
 
     return `Eres el asistente de Bakano, una agencia de marketing de Ecuador. Atiendes por Telegram a ${cliente.nombre}, del cliente "${cliente.entorno}".
 Hoy es ${fechaEcuador(new Date())} (hora Ecuador).
+
+En qué punto está este cliente: ${perfilClienteService.describir(perfil)}
 
 Cómo hablas:
 - Como una persona normal escribiendo por WhatsApp: amigable, cercana y relajada, pero sin exagerar. Tratas de tú.

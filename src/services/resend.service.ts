@@ -1235,9 +1235,11 @@ export class ResendService {
     recipientName?: string;
     workspaceName: string;
     botUrl: string;
+    /** Con cuál correo se conecta al bot y a la plataforma. */
+    correoCliente?: string;
     sesiones: { etiqueta: string; responsable: string; link: string; resumen: string }[];
   }): Promise<void> {
-    const { to, recipientName, workspaceName, botUrl, sesiones } = params;
+    const { to, recipientName, workspaceName, botUrl, correoCliente, sesiones } = params;
     if (!to.length) return;
     const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
     const firstName = recipientName ? recipientName.split(" ")[0] : "Hola";
@@ -1274,18 +1276,47 @@ export class ResendService {
         <tr>
           <td style="padding:32px 40px 8px;">
             <p style="margin:0 0 20px;font-size:16px;color:#1e293b;">${esc(firstName)},</p>
-            <p style="margin:0 0 20px;font-size:15px;color:#475569;line-height:1.7;">
-              Tu entorno en <strong>metrics.bakano.ec</strong> ya está activo. Desde ahora, todo tu proceso lo llevamos por nuestro <strong>bot de Telegram</strong>: ahí resuelves dudas, agendas tus sesiones y ves en qué paso vas, cuando quieras.
+            <p style="margin:0 0 24px;font-size:15px;color:#475569;line-height:1.7;">
+              Tu entorno <strong>${esc(workspaceName)}</strong> ya está activo. Todo tu proceso lo llevamos por <strong>Telegram</strong>: ahí agendas tus sesiones, resuelves dudas y ves en qué paso vas. Son 3 pasos y te toma 5 minutos dejarlo listo.
             </p>
-            <div style="text-align:center;margin-bottom:28px;">
-              <a href="${botUrl}" style="display:inline-block;background:linear-gradient(135deg,#e6285c 0%,#85529c 100%);color:#ffffff;text-decoration:none;padding:14px 36px;border-radius:10px;font-size:15px;font-weight:700;">Escríbenos por Telegram</a>
-              <p style="margin:10px 0 0;font-size:12px;color:#94a3b8;">Conéctate con este mismo correo y listo.</p>
-            </div>
-            <p style="margin:0 0 16px;font-size:15px;color:#1e293b;font-weight:700;">Tus tres sesiones de arranque</p>
+
+            <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:8px;">
+              <tr><td style="padding:0 0 14px;">
+                <table width="100%" cellpadding="0" cellspacing="0" style="background:#f8fafc;border:1.5px solid #e2e8f0;border-radius:12px;"><tr><td style="padding:16px 20px;">
+                  <p style="margin:0 0 4px;font-size:12px;font-weight:800;color:#e6285c;letter-spacing:1px;">PASO 1</p>
+                  <p style="margin:0 0 6px;font-size:16px;font-weight:700;color:#1e293b;">Descarga Telegram</p>
+                  <p style="margin:0 0 12px;font-size:14px;color:#475569;line-height:1.6;">Es gratis y funciona como WhatsApp. Si ya lo tienes, salta al paso 2.</p>
+                  <a href="https://telegram.org/dl" style="display:inline-block;background:#1e293b;color:#ffffff;text-decoration:none;padding:9px 18px;border-radius:8px;font-size:13px;font-weight:700;">Descargar Telegram</a>
+                  <p style="margin:10px 0 0;font-size:12px;color:#94a3b8;">iPhone: App Store · Android: Google Play · Computadora: telegram.org/dl</p>
+                </td></tr></table>
+              </td></tr>
+              <tr><td style="padding:0 0 14px;">
+                <table width="100%" cellpadding="0" cellspacing="0" style="background:#fff5f8;border:1.5px solid #fbcfe8;border-radius:12px;"><tr><td style="padding:16px 20px;">
+                  <p style="margin:0 0 4px;font-size:12px;font-weight:800;color:#e6285c;letter-spacing:1px;">PASO 2</p>
+                  <p style="margin:0 0 6px;font-size:16px;font-weight:700;color:#1e293b;">Escríbele a tu asistente de Bakano</p>
+                  <p style="margin:0 0 12px;font-size:14px;color:#475569;line-height:1.6;">
+                    Abre el chat y escribe <strong>/start</strong>. Te va a pedir tu correo${correoCliente ? ` (<strong>${esc(correoCliente)}</strong>)` : ""} y te manda un código para conectarte. Desde ahí te guía paso a paso.
+                  </p>
+                  <a href="${botUrl}" style="display:inline-block;background:linear-gradient(135deg,#e6285c 0%,#85529c 100%);color:#ffffff;text-decoration:none;padding:11px 24px;border-radius:8px;font-size:14px;font-weight:700;">Abrir el chat de Bakano</a>
+                </td></tr></table>
+              </td></tr>
+              <tr><td style="padding:0 0 14px;">
+                <table width="100%" cellpadding="0" cellspacing="0" style="background:#f8fafc;border:1.5px solid #e2e8f0;border-radius:12px;"><tr><td style="padding:16px 20px;">
+                  <p style="margin:0 0 4px;font-size:12px;font-weight:800;color:#e6285c;letter-spacing:1px;">PASO 3</p>
+                  <p style="margin:0 0 6px;font-size:16px;font-weight:700;color:#1e293b;">Entra a tu plataforma</p>
+                  <p style="margin:0 0 12px;font-size:14px;color:#475569;line-height:1.6;">
+                    En <strong>metrics.bakano.ec</strong> ves tus guiones, tus videos y tus métricas${correoCliente ? `. Entra con <strong>${esc(correoCliente)}</strong>` : ""}.
+                  </p>
+                  <a href="https://metrics.bakano.ec" style="display:inline-block;background:#1e293b;color:#ffffff;text-decoration:none;padding:9px 18px;border-radius:8px;font-size:13px;font-weight:700;">Ir a metrics.bakano.ec</a>
+                </td></tr></table>
+              </td></tr>
+            </table>
+
+            <p style="margin:20px 0 16px;font-size:15px;color:#1e293b;font-weight:700;">Tus tres sesiones de arranque</p>
+            <p style="margin:0 0 14px;font-size:14px;color:#475569;line-height:1.7;">
+              El asistente te las agenda por el chat, sin que salgas de Telegram. Si prefieres hacerlo tú, aquí están los links:
+            </p>
             <table width="100%" cellpadding="0" cellspacing="0">${filas}</table>
-            <p style="margin:8px 0 0;font-size:14px;color:#475569;line-height:1.7;">
-              Si prefieres, escríbele al bot y él te muestra los horarios libres y te agenda sin salir del chat.
-            </p>
           </td>
         </tr>
         <tr>

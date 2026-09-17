@@ -521,6 +521,13 @@ export class WorkspaceService {
       await models.workspaces.findByIdAndUpdate(payload.workspaceId, { adminId: user._id });
     }
 
+    // El onboarding arranca solo: con el entorno ya creado y su primer
+    // cliente dentro, sale el correo con Telegram y el acceso a la
+    // plataforma. Import diferido para no enredar servicios entre si.
+    import("./onboardingBot.service")
+      .then(({ onboardingBotService }) => onboardingBotService.enviarBienvenida(payload.workspaceId))
+      .catch((error) => console.error("[Onboarding] bienvenida al crear usuario:", error?.message || error));
+
     const { password, ...userWithoutPassword } = user.toObject();
 
     // Return mapped role for frontend
@@ -809,6 +816,14 @@ export class WorkspaceService {
       await user.populate("workspaces.workspaceId", "name");
       // All workspaces are new for a brand-new user
       newWorkspaceIds = payload.workspaces.map(ws => ws.workspaceId);
+
+      // Cliente nuevo (no del equipo): arranca su onboarding por correo.
+      if (!payload.isInternal) {
+        const entornos = [...newWorkspaceIds];
+        import("./onboardingBot.service")
+          .then(({ onboardingBotService }) => Promise.all(entornos.map((id) => onboardingBotService.enviarBienvenida(id))))
+          .catch((error) => console.error("[Onboarding] bienvenida al crear cliente:", error?.message || error));
+      }
     }
 
     // Fire notifications for newly assigned workspaces (non-blocking)
