@@ -62,7 +62,13 @@ export type ResultadoAgenda =
   | { ok: true; cuando: string; responsable: string }
   | { ok: false; motivo: "ya_agendada" | "sin_calendario" | "ocupado" | "error" };
 
+function normalizar(texto: string): string {
+  return (texto || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
 class OnboardingBotService {
+  private entornosCache: { en: number; lista: { id: Types.ObjectId; n: string }[] } | null = null;
+
   async estado(workspaceId: Types.ObjectId): Promise<EstadoOnboarding> {
     const [workspace, produccion] = await Promise.all([
       models.workspaces.findById(workspaceId).select("onboardingSesiones").lean(),
@@ -263,12 +269,12 @@ class OnboardingBotService {
         continue;
       }
 
-      const usuario = await models.users.findOne({ email: correo }).select("workspaceId workspaces").lean();
-      const workspaceId = (usuario?.workspaceId || usuario?.workspaces?.[0]?.workspaceId) as Types.ObjectId | undefined;
-      if (!workspaceId) {
-        descartar("ese correo no es usuario de un entorno");
+      const resuelto = await this.entornoDeLaCita(correo, contactos.get(evento.contactId), evento.title);
+      if (!resuelto.id) {
+        descartar(resuelto.motivo || "sin entorno");
         continue;
       }
+      const workspaceId = resuelto.id;
 
       const workspace = await models.workspaces.findById(workspaceId).select("name onboardingSesiones").lean();
       if (workspace?.onboardingSesiones?.[sesion]?.agendada) {
@@ -297,6 +303,52 @@ class OnboardingBotService {
       console.log("[Onboarding] citas descartadas:", JSON.stringify(descartes));
     }
     return { revisadas: eventos.length, marcadas, avisadas };
+  }
+
+  /**
+   * De quien es la cita. En el CRM el contacto no siempre es el cliente: en
+   * los calendarios de soporte el contacto es el propio responsable, y hay
+   * clientes que agendan con un correo personal que no esta en la plataforma.
+   * Por eso se resuelve en cascada: usuario → empresa del contacto → titulo.
+   */
+  private async entornoDeLaCita(
+    correo: string,
+    contacto: any,
+    titulo?: string
+  ): Promise<{ id?: Types.ObjectId; motivo?: string }> {
+    const usuario = await models.users.findOne({ email: correo }).select("workspaceId workspaces isInternal").lean();
+    const porUsuario = (usuario?.workspaceId || usuario?.workspaces?.[0]?.workspaceId) as Types.ObjectId | undefined;
+    if (porUsuario && !usuario?.isInternal) return { id: porUsuario };
+
+    for (const texto of [contacto?.companyName, titulo].filter(Boolean) as string[]) {
+      const id = await this.entornoPorNombre(texto);
+      if (id) return { id };
+    }
+    if (porUsuario) return { id: porUsuario };
+
+    return {
+      motivo: usuario?.isInternal
+        ? "cita del equipo, sin cliente identificable"
+        : usuario
+          ? "usuario sin entorno asignado"
+          : "contacto sin usuario ni empresa reconocible",
+    };
+  }
+
+  /** Empareja "MEMOS" o "Flash CarWash" con el entorno que les corresponde. */
+  private async entornoPorNombre(texto: string): Promise<Types.ObjectId | undefined> {
+    const objetivo = normalizar(texto);
+    if (objetivo.length < 4) return undefined;
+    if (!this.entornosCache || Date.now() - this.entornosCache.en > 10 * 60_000) {
+      const lista = await models.workspaces.find({ isActive: true }).select("_id name").lean();
+      this.entornosCache = {
+        en: Date.now(),
+        lista: lista.map((w) => ({ id: w._id as Types.ObjectId, n: normalizar(w.name) })),
+      };
+    }
+    // Igualdad, o el nombre del entorno dentro del texto ("Flash CarWash" → "FLASH CAR").
+    const match = this.entornosCache.lista.find((w) => w.n && (w.n === objetivo || (w.n.length >= 5 && objetivo.includes(w.n))));
+    return match?.id;
   }
 
   /**
