@@ -58,6 +58,39 @@ export interface IOnboardingStatus {
   meetingScheduled: boolean;
 }
 
+/**
+ * Una de las tres sesiones tecnicas del onboarding (Meta, CRM, Estrategia).
+ * El cliente la agenda por el bot o por el link del CRM; el cron reconoce las
+ * del link y las marca igual, para que el estado nunca mienta.
+ */
+export interface ISesionOnboarding {
+  agendada: boolean;
+  fecha?: Date;
+  appointmentId?: string;
+  agendadoEn?: Date;
+  origen?: "telegram" | "link";
+  /** Cuando se aviso al responsable, para no repetir el aviso. */
+  avisadoEn?: Date;
+}
+
+export interface IOnboardingSesiones {
+  meta?: ISesionOnboarding;
+  crm?: ISesionOnboarding;
+  estrategia?: ISesionOnboarding;
+}
+
+const SesionOnboardingSchema = new Schema<ISesionOnboarding>(
+  {
+    agendada: { type: Boolean, default: false },
+    fecha: { type: Date },
+    appointmentId: { type: String },
+    agendadoEn: { type: Date },
+    origen: { type: String, enum: ["telegram", "link"] },
+    avisadoEn: { type: Date },
+  },
+  { _id: false }
+);
+
 export interface IWorkspace extends Document {
   name: string;
   adminId?: Types.ObjectId;
@@ -89,6 +122,9 @@ export interface IWorkspace extends Document {
   brandProfileInviteSentAt?: Date;
   resources?: IResource[];
   onboardingStatus?: IOnboardingStatus;
+  onboardingSesiones?: IOnboardingSesiones;
+  /** Correo de arranque del onboarding (el que manda al bot de Telegram). */
+  onboardingBienvenidaEnviadaEn?: Date;
   preNegotiatedContract?: any; // Stores predefined contract parameters
   contractData?: any; // Stores the final contract form and signature
   teamInfo?: {
@@ -251,6 +287,18 @@ const WorkspaceSchema = new Schema<IWorkspace>(
         resourcesCompleted: false,
         meetingScheduled: false,
       },
+    },
+    onboardingSesiones: {
+      type: {
+        meta: { type: SesionOnboardingSchema, default: undefined },
+        crm: { type: SesionOnboardingSchema, default: undefined },
+        estrategia: { type: SesionOnboardingSchema, default: undefined },
+      },
+      default: undefined,
+    },
+    onboardingBienvenidaEnviadaEn: {
+      type: Date,
+      default: null,
     },
     preNegotiatedContract: {
       type: Schema.Types.Mixed,

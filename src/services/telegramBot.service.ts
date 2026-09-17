@@ -5,6 +5,8 @@ import type { ITelegramChat } from "../models/telegramChat.model";
 import { resendService } from "./resend.service";
 import { EQUIPO_ATENCION, equipoAtencionService, type TemaAtencion } from "./equipoAtencion.service";
 import { atencionClienteService, diaEcuador, fechaEcuador, horarioCorto } from "./atencionCliente.service";
+import { onboardingBotService } from "./onboardingBot.service";
+import { SESIONES_ONBOARDING, type SesionOnboarding } from "./onboardingSesiones.service";
 import { telegramAgentService } from "./telegramAgent.service";
 import { escaparHtml, telegramService, type InlineButton, type TelegramUpdate } from "./telegram.service";
 
@@ -265,6 +267,12 @@ export class TelegramBotService {
       return this.mostrarMenu(chat);
     }
     if (data === "menu:agendar") return this.elegirTemaReunion(chat);
+    if (data === "menu:onboarding") return this.mostrarOnboarding(chat);
+    if (data.startsWith("onb:")) return this.mostrarHorariosOnboarding(chat, data.slice(4) as SesionOnboarding);
+    if (data.startsWith("onbs:")) {
+      const [, sesion, segundos] = data.split(":");
+      return this.agendarOnboarding(chat, sesion as SesionOnboarding, segundos);
+    }
 
     if (data.startsWith("prod:")) return this.agendarProduccion(chat, data.slice(5));
 
@@ -345,6 +353,100 @@ export class TelegramBotService {
       botones.push(elegidos.slice(i, i + 2).map((h) => ({ text: `🗓️ ${horarioCorto(h)}`, callback_data: callback(h) })));
     }
     return botones;
+  }
+
+  // ── Onboarding ─────────────────────────────────────────────────────────────
+  /** En que paso va el cliente, con botones para agendar lo que falte. */
+  private async mostrarOnboarding(chat: ITelegramChat): Promise<void> {
+    const estado = await onboardingBotService.estado(chat.workspaceId!);
+    const lineas = estado.sesiones.map((s) =>
+      s.agendada
+        ? `✅ ${s.emoji} ${s.etiqueta} · con ${escaparHtml(s.responsable)}\n     ${s.fecha ? fechaEcuador(s.fecha) : "agendada"}`
+        : `⬜ ${s.emoji} ${s.etiqueta} · con ${escaparHtml(s.responsable)}`
+    );
+    const produccion = estado.produccion.agendada
+      ? `✅ 🎬 Producción · ${fechaEcuador(estado.produccion.agendada)}`
+      : estado.completo
+        ? "⬜ 🎬 Producción · agéndala cuando quieras"
+        : "⬜ 🎬 Producción · después de tus sesiones";
+
+    const botones: InlineButton[][] = estado.sesiones
+      .filter((s) => !s.agendada)
+      .map((s) => [{ text: `📅 Agendar ${s.etiqueta}`, callback_data: `onb:${s.sesion}` }]);
+    if (estado.completo && estado.produccion.puedeAgendar) {
+      botones.push([{ text: "🎬 Agendar mi producción", callback_data: "ag:produccion" }]);
+    }
+    botones.push([{ text: "📋 Volver al menú", callback_data: "menu:ver" }]);
+
+    const siguiente = estado.sesiones.find((s) => s.sesion === estado.siguiente);
+    await telegramService.sendMessage(
+      chat.chatId,
+      "🚀 <b>Así va tu onboarding</b>\n\n" +
+        `${lineas.join("\n")}\n${produccion}\n\n` +
+        (siguiente
+          ? `Lo que sigue es <b>${siguiente.etiqueta}</b> con <b>${escaparHtml(siguiente.responsable)}</b>.\n${siguiente.resumen}\n\nPara esa sesión necesitas:\n${siguiente.requisitos.map((r) => `• ${r}`).join("\n")}`
+          : "Ya tienes todas tus sesiones agendadas 🎉 cualquier duda me escribes."),
+      botones
+    );
+  }
+
+  private async mostrarHorariosOnboarding(chat: ITelegramChat, sesion: SesionOnboarding, aviso?: string): Promise<void> {
+    if (!(sesion in SESIONES_ONBOARDING)) return this.mostrarOnboarding(chat);
+    const def = SESIONES_ONBOARDING[sesion];
+    const horarios = await onboardingBotService.horarios(sesion);
+    const intro = aviso ? `${aviso}\n\n` : "";
+
+    if (!horarios || !horarios.length) {
+      await telegramService.sendMessage(
+        chat.chatId,
+        `${intro}${def.emoji} No pude ver los horarios de <b>${escaparHtml(def.responsable.nombre)}</b> ahora mismo 😅\n\n` +
+          `Puedes agendar desde aquí: ${def.link}\n\nO cuéntame qué día te queda mejor y se lo paso.`
+      );
+      chat.tema = "atencion";
+      await chat.save();
+      return;
+    }
+
+    const botones = this.botonesHorarios(horarios, (h) => `onbs:${sesion}:${Math.floor(h.getTime() / 1000)}`);
+    botones.push([{ text: "🔗 Prefiero el link", callback_data: `onb:${sesion}` }, { text: "📋 Menú", callback_data: "menu:ver" }]);
+
+    await telegramService.sendMessage(
+      chat.chatId,
+      `${intro}${def.emoji} <b>${def.etiqueta}</b> con <b>${escaparHtml(def.responsable.nombre)}</b>\n\n` +
+        `${def.resumen}\n\nAntes de la sesión ten listo:\n${def.requisitos.map((r) => `• ${r}`).join("\n")}\n\n` +
+        "Elige el horario que te quede mejor 👇",
+      botones
+    );
+  }
+
+  private async agendarOnboarding(chat: ITelegramChat, sesion: SesionOnboarding, segundos: string): Promise<void> {
+    if (!(sesion in SESIONES_ONBOARDING)) return this.mostrarOnboarding(chat);
+    const inicio = new Date(Number(segundos) * 1000);
+    if (Number.isNaN(inicio.getTime())) return this.mostrarHorariosOnboarding(chat, sesion);
+
+    await telegramService.sendMessage(chat.chatId, "⏳ Un segundito, estoy agendando tu sesión...");
+    const r = await onboardingBotService.agendar(chat, sesion, inicio);
+
+    if (!r.ok) {
+      if (r.motivo === "ya_agendada") return this.mostrarOnboarding(chat);
+      if (r.motivo === "ocupado") {
+        return this.mostrarHorariosOnboarding(chat, sesion, "Uy, ese horario lo tomaron justo ahora 😕");
+      }
+      const def = SESIONES_ONBOARDING[sesion];
+      await telegramService.sendMessage(
+        chat.chatId,
+        `No pude agendarlo desde aquí 😕 agéndalo en este link y quedamos listos: ${def.link}`
+      );
+      return;
+    }
+
+    const def = SESIONES_ONBOARDING[sesion];
+    await telegramService.sendMessage(
+      chat.chatId,
+      `Listo, quedó agendada 🎉\n\n${def.emoji} <b>${def.etiqueta}</b>\n📅 <b>${r.cuando}</b> (hora Ecuador)\n👤 Con <b>${escaparHtml(r.responsable)}</b>\n\n` +
+        `Ya le avisé. Recuerda tener listo:\n${def.requisitos.map((x) => `• ${x}`).join("\n")}`
+    );
+    return this.mostrarOnboarding(chat);
   }
 
   // ── Produccion ─────────────────────────────────────────────────────────────
@@ -545,6 +647,7 @@ export class TelegramBotService {
         "✍️ Escríbeme lo que necesites con tus palabras, por ejemplo <i>cómo van mis guiones?</i> o <i>quiero mover la grabación</i>.\n\n" +
         "💬 Prefieres hablar directo con nosotros? Toca <b>Agendar una reunión</b> y lo dejo en el calendario del equipo.",
       [
+        [{ text: "🚀 Mi onboarding", callback_data: "menu:onboarding" }],
         [{ text: "🎬 Producciones", callback_data: "menu:produccion" }],
         [{ text: "📝 Revisión de guiones", callback_data: "menu:guiones" }],
         [{ text: "🤝 Atención al cliente", callback_data: "menu:atencion" }],

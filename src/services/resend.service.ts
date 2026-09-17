@@ -1226,6 +1226,87 @@ export class ResendService {
     });
   }
 
+  /**
+   * Arranque del onboarding: le dice al cliente que todo se maneja por el bot
+   * de Telegram y le deja los links de las tres sesiones tecnicas.
+   */
+  async sendOnboardingBienvenida(params: {
+    to: string[];
+    recipientName?: string;
+    workspaceName: string;
+    botUrl: string;
+    sesiones: { etiqueta: string; responsable: string; link: string; resumen: string }[];
+  }): Promise<void> {
+    const { to, recipientName, workspaceName, botUrl, sesiones } = params;
+    if (!to.length) return;
+    const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const firstName = recipientName ? recipientName.split(" ")[0] : "Hola";
+
+    const filas = sesiones
+      .map(
+        (s, i) => `
+      <tr><td style="padding:0 0 14px;">
+        <table width="100%" cellpadding="0" cellspacing="0" style="background:#f8fafc;border:1.5px solid #e2e8f0;border-radius:12px;">
+          <tr><td style="padding:16px 20px;">
+            <p style="margin:0 0 4px;font-size:12px;font-weight:800;color:#e6285c;letter-spacing:1px;">PASO ${i + 1}</p>
+            <p style="margin:0 0 6px;font-size:16px;font-weight:700;color:#1e293b;">${esc(s.etiqueta)} · con ${esc(s.responsable)}</p>
+            <p style="margin:0 0 12px;font-size:14px;color:#475569;line-height:1.6;">${esc(s.resumen)}</p>
+            <a href="${s.link}" style="display:inline-block;background:#1e293b;color:#ffffff;text-decoration:none;padding:9px 18px;border-radius:8px;font-size:13px;font-weight:700;">Agendar esta sesión</a>
+          </td></tr>
+        </table>
+      </td></tr>`
+      )
+      .join("");
+
+    const html = `<!DOCTYPE html>
+<html lang="es">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+<body style="margin:0;padding:0;background:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="padding:40px 20px;">
+    <tr><td align="center">
+      <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
+        ${barraMarca()}
+        <tr>
+          <td style="background:linear-gradient(135deg,#e6285c 0%,#85529c 100%);padding:32px 40px;text-align:center;">
+            <h1 style="margin:0;font-size:24px;font-weight:800;color:#ffffff;">Arrancamos con ${esc(workspaceName)}</h1>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:32px 40px 8px;">
+            <p style="margin:0 0 20px;font-size:16px;color:#1e293b;">${esc(firstName)},</p>
+            <p style="margin:0 0 20px;font-size:15px;color:#475569;line-height:1.7;">
+              Tu entorno en <strong>metrics.bakano.ec</strong> ya está activo. Desde ahora, todo tu proceso lo llevamos por nuestro <strong>bot de Telegram</strong>: ahí resuelves dudas, agendas tus sesiones y ves en qué paso vas, cuando quieras.
+            </p>
+            <div style="text-align:center;margin-bottom:28px;">
+              <a href="${botUrl}" style="display:inline-block;background:linear-gradient(135deg,#e6285c 0%,#85529c 100%);color:#ffffff;text-decoration:none;padding:14px 36px;border-radius:10px;font-size:15px;font-weight:700;">Escríbenos por Telegram</a>
+              <p style="margin:10px 0 0;font-size:12px;color:#94a3b8;">Conéctate con este mismo correo y listo.</p>
+            </div>
+            <p style="margin:0 0 16px;font-size:15px;color:#1e293b;font-weight:700;">Tus tres sesiones de arranque</p>
+            <table width="100%" cellpadding="0" cellspacing="0">${filas}</table>
+            <p style="margin:8px 0 0;font-size:14px;color:#475569;line-height:1.7;">
+              Si prefieres, escríbele al bot y él te muestra los horarios libres y te agenda sin salir del chat.
+            </p>
+          </td>
+        </tr>
+        <tr>
+          <td style="background:#f8fafc;padding:16px 40px;border-top:1px solid #e2e8f0;text-align:center;">
+            <p style="margin:0;color:#94a3b8;font-size:12px;">Enviado automáticamente por <strong>${MARCA}</strong>.<br/>Si tienes dudas, escríbenos a soporte@bakano.ec</p>
+          </td>
+        </tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+
+    await this.client.emails.send({
+      from: this.from,
+      to,
+      subject: `🚀 ${workspaceName}: así arrancamos tu onboarding con Bakano`,
+      html,
+    });
+  }
+
   /** Un cliente escribio por Telegram: le llega directo a quien atiende el tema. */
   async sendSolicitudClienteEmail(params: {
     to: string[];
