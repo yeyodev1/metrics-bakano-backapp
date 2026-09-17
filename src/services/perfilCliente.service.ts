@@ -14,6 +14,8 @@ export type TipoCliente = "nuevo" | "en_onboarding" | "activo";
 
 export interface PerfilCliente {
   tipo: TipoCliente;
+  /** Quien escribe es del equipo de Bakano, no el cliente: nada de onboarding. */
+  esEquipo: boolean;
   entorno: string;
   diasDesdeCreacion?: number;
   tieneProducciones: boolean;
@@ -26,12 +28,13 @@ export interface PerfilCliente {
 }
 
 class PerfilClienteService {
-  async de(workspaceId: Types.ObjectId): Promise<PerfilCliente> {
-    const [workspace, producciones, guiones, onboarding] = await Promise.all([
+  async de(workspaceId: Types.ObjectId, userId?: Types.ObjectId): Promise<PerfilCliente> {
+    const [workspace, producciones, guiones, onboarding, usuario] = await Promise.all([
       models.workspaces.findById(workspaceId).select("name createdAt").lean(),
       models.planning.countDocuments({ workspaceId }),
       models.videoPlanning.countDocuments({ workspaceId }),
       onboardingBotService.estado(workspaceId),
+      userId ? models.users.findById(userId).select("isInternal role").lean() : null,
     ]);
 
     const sesiones = onboarding.sesiones;
@@ -50,6 +53,7 @@ class PerfilClienteService {
 
     return {
       tipo,
+      esEquipo: Boolean(usuario?.isInternal || usuario?.role === "superadmin"),
       entorno: workspace?.name || "Cliente",
       diasDesdeCreacion: workspace?.createdAt
         ? Math.floor((Date.now() - new Date(workspace.createdAt).getTime()) / 86_400_000)
@@ -65,6 +69,9 @@ class PerfilClienteService {
 
   /** Lo que el bot le dice a la IA para que trate distinto a cada cliente. */
   describir(perfil: PerfilCliente): string {
+    if (perfil.esEquipo) {
+      return `Estás hablando con alguien del equipo de Bakano que está viendo la cuenta de ${perfil.entorno}, no con el cliente. Trátalo como colega: dale los datos directos, sin onboarding ni explicaciones de venta, y no le ofrezcas agendar como si fuera el cliente.`;
+    }
     if (perfil.tipo === "activo") {
       return `Cliente en marcha: ya tiene ${perfil.tieneProducciones ? "producciones" : "guiones"} con nosotros. No lo trates como si empezara; ayúdalo con lo que pida.`;
     }

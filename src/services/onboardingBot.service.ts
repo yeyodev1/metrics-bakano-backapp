@@ -163,6 +163,7 @@ class OnboardingBotService {
         $set: {
           [`onboardingSesiones.${sesion}`]: {
             agendada: true,
+            estado: "agendada",
             fecha: datos.fecha,
             appointmentId: datos.appointmentId,
             agendadoEn: new Date(),
@@ -172,6 +173,18 @@ class OnboardingBotService {
         },
       }
     );
+
+    // Tambien en la bitacora: el tablero tiene que poder contar la historia
+    // completa, venga del bot o del link del CRM.
+    await models.onboardingEventos
+      .create({
+        workspaceId,
+        paso: sesion,
+        estado: "agendada",
+        nota: `Agendada ${datos.origen === "telegram" ? "por Telegram" : "desde el link del CRM"} para el ${fechaEcuador(datos.fecha)}`,
+        origen: "sistema",
+      })
+      .catch((error: any) => console.error("[Onboarding] bitácora:", error?.message || error));
   }
 
   /** Aviso al responsable de la sesion (Slack + correo + in-app) y a seguimiento. */
