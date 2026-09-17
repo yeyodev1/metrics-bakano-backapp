@@ -639,8 +639,8 @@ export class TelegramBotService {
 
     // Cliente nuevo o a medio arrancar: lo primero que ve es su onboarding,
     // no un menu generico. El que ya esta en marcha va directo al menu.
-    const perfil = await perfilClienteService.de(entorno._id);
-    if (perfil.tipo !== "activo") {
+    const perfil = await perfilClienteService.de(entorno._id, chat.userId);
+    if (!perfil.esEquipo && perfil.tipo !== "activo") {
       await telegramService.sendMessage(
         chat.chatId,
         `Perfecto, estamos en <b>${escaparHtml(entorno.name)}</b> 💛\n\n` +

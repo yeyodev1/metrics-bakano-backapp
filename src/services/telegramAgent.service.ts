@@ -61,7 +61,7 @@ class TelegramAgentService {
       const { generateText, isStepCount } = await cargarAi();
       const [cliente, perfil] = await Promise.all([
         atencionClienteService.datosCliente(chat),
-        perfilClienteService.de(chat.workspaceId!),
+        perfilClienteService.de(chat.workspaceId!, chat.userId),
       ]);
       const historial: Mensaje[] = (chat.historial || []).slice(-MAX_HISTORIAL).map((m) => ({
         role: m.rol === "cliente" ? "user" : "assistant",
