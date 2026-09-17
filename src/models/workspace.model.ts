@@ -63,6 +63,13 @@ export interface IOnboardingStatus {
  * El cliente la agenda por el bot o por el link del CRM; el cron reconoce las
  * del link y las marca igual, para que el estado nunca mienta.
  */
+/**
+ * Avance de una sesion. Lo mueve el responsable desde Metrics: "cumplida"
+ * cuando ya la dio, "bloqueada" cuando algo no deja avanzar (y ahi el motivo
+ * es obligatorio, que es justo lo que antes se perdia en conversaciones).
+ */
+export type EstadoSesionOnboarding = "pendiente" | "agendada" | "cumplida" | "bloqueada" | "no_aplica";
+
 export interface ISesionOnboarding {
   agendada: boolean;
   fecha?: Date;
@@ -71,6 +78,19 @@ export interface ISesionOnboarding {
   origen?: "telegram" | "link";
   /** Cuando se aviso al responsable, para no repetir el aviso. */
   avisadoEn?: Date;
+
+  estado?: EstadoSesionOnboarding;
+  /** Por que no avanza. Obligatorio al marcar "bloqueada". */
+  motivo?: string;
+  /** Que se hizo o que sigue, en palabras del responsable. */
+  nota?: string;
+  /** Que se le pide al cliente; el bot se lo puede recordar por Telegram. */
+  pendienteDelCliente?: string;
+  actualizadoPorId?: Types.ObjectId;
+  actualizadoPorNombre?: string;
+  actualizadoEn?: Date;
+  /** Ultimo recordatorio enviado al cliente, para no repetirlo. */
+  recordatorioEn?: Date;
 }
 
 export interface IOnboardingSesiones {
@@ -87,6 +107,14 @@ const SesionOnboardingSchema = new Schema<ISesionOnboarding>(
     agendadoEn: { type: Date },
     origen: { type: String, enum: ["telegram", "link"] },
     avisadoEn: { type: Date },
+    estado: { type: String, enum: ["pendiente", "agendada", "cumplida", "bloqueada", "no_aplica"], default: "pendiente" },
+    motivo: { type: String, trim: true, maxlength: 1000 },
+    nota: { type: String, trim: true, maxlength: 1000 },
+    pendienteDelCliente: { type: String, trim: true, maxlength: 500 },
+    actualizadoPorId: { type: Schema.Types.ObjectId, ref: "User" },
+    actualizadoPorNombre: { type: String, trim: true },
+    actualizadoEn: { type: Date },
+    recordatorioEn: { type: Date },
   },
   { _id: false }
 );
