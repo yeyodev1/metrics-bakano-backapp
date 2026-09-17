@@ -21,6 +21,7 @@ import { ReviewEventModel } from "./reviewEvent.model";
 import { MonthlyTargetModel } from "./monthlyTarget.model";
 import { TelegramChatModel } from "./telegramChat.model";
 import { SoporteTicketModel } from "./soporteTicket.model";
+import { OnboardingEventoModel } from "./onboardingEvento.model";
 
 const models = {
   users: UserModel,
@@ -46,6 +47,7 @@ const models = {
   monthlyTargets: MonthlyTargetModel,
   telegramChats: TelegramChatModel,
   soporteTickets: SoporteTicketModel,
+  onboardingEventos: OnboardingEventoModel,
 };
 
 export default models;
