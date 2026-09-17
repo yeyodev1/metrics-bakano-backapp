@@ -16,6 +16,20 @@ export class GhlService {
     };
   }
 
+  /**
+   * Cabeceras para la API de contactos.
+   *
+   * El token de produccion lee calendarios pero devuelve los contactos sin
+   * correo (sin ese permiso), y sin correo no se puede saber de que cliente es
+   * la cita. `GHL_PIT_TOKEN_CONTACTOS` permite usar uno con ese permiso sin
+   * tocar el token principal; si no existe, se usa el de siempre.
+   */
+  private getContactHeaders() {
+    const token = process.env.GHL_PIT_TOKEN_CONTACTOS || process.env.GHL_PIT_TOKEN;
+    if (!token) throw new Error("GHL_PIT_TOKEN no configurado en variables de entorno");
+    return { Authorization: `Bearer ${token}`, Version: "2021-07-28", Accept: "application/json" };
+  }
+
   private getLocationId() {
     const locationId = process.env.GHL_LOCATION_ID;
     if (!locationId) throw new Error("GHL_LOCATION_ID no configurado en variables de entorno");
@@ -81,7 +95,7 @@ export class GhlService {
       // La API de contactos de GHL exige su propia version; con la de
       // calendarios responde error y la cita llegaba sin correo ni empresa.
       const response = await axios.get(`${GHL_API_BASE}/contacts/${contactId}`, {
-        headers: { ...this.getHeaders(), Version: "2021-07-28" },
+        headers: this.getContactHeaders(),
       });
       return response.data?.contact || null;
     } catch (error: any) {
@@ -115,7 +129,7 @@ export class GhlService {
     const response = await axios.post(
       `${GHL_API_BASE}/contacts/upsert`,
       { locationId: this.getLocationId(), ...datos, source: "Telegram Bakano" },
-      { headers: { ...this.getHeaders(), Version: "2021-07-28" } }
+      { headers: this.getContactHeaders() }
     );
     const id = response.data?.contact?.id;
     if (!id) throw new Error("El CRM no devolvió el id del contacto");
