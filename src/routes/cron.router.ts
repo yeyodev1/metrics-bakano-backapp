@@ -5,6 +5,29 @@ import { runMetaMetricsSync } from "../crons/metaMetrics.cron";
 
 const cronRouter = Router();
 
+// GET /api/cron/onboarding-sync — cada 30 min.
+// Marca las sesiones de onboarding que el cliente agendo por el link del CRM
+// y manda el correo de arranque de los entornos nuevos.
+cronRouter.get("/onboarding-sync", async (req: Request, res: Response) => {
+  const secret = process.env.CRON_SECRET;
+  if (!secret || req.headers["authorization"] !== `Bearer ${secret}`) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  try {
+    const { onboardingBotService } = await import("../services/onboardingBot.service");
+    const [sync, bienvenidas] = await Promise.all([
+      onboardingBotService.sincronizarDesdeCrm(),
+      onboardingBotService.enviarBienvenidasPendientes(),
+    ]);
+    console.log(`[Cron] Onboarding — citas revisadas: ${sync.revisadas}, marcadas: ${sync.marcadas}, bienvenidas: ${bienvenidas.enviadas}`);
+    res.json({ ok: true, sync, bienvenidas });
+  } catch (err: any) {
+    console.error("[Cron] Onboarding sync falló:", err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 const BOLONCITY_WORKSPACE_ID = "69bdadc67386136fc3682734";
 
 // GET /api/cron/tumesero-sync

@@ -4,7 +4,9 @@
     {
       "src": "src/index.ts",
       "use": "@vercel/node",
-      "config": { "maxDuration": 60 }
+      "config": {
+        "maxDuration": 60
+      }
     }
   ],
   "rewrites": [
@@ -37,6 +39,10 @@
     {
       "path": "/api/cron/ghl-production-sync",
       "schedule": "*/30 * * * *"
+    },
+    {
+      "path": "/api/cron/onboarding-sync",
+      "schedule": "10,40 * * * *"
     }
   ]
 }

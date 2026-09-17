@@ -3,6 +3,8 @@ import models from "../models";
 import type { ITelegramChat } from "../models/telegramChat.model";
 import { EQUIPO_ATENCION, equipoAtencionService, type TemaAtencion } from "./equipoAtencion.service";
 import { atencionClienteService, fechaEcuador, type DatosCliente } from "./atencionCliente.service";
+import { onboardingBotService } from "./onboardingBot.service";
+import { SESIONES_ONBOARDING, type SesionOnboarding } from "./onboardingSesiones.service";
 import { horasDeCorreccion } from "./videoPlanning.service";
 import { escaparHtml, telegramService } from "./telegram.service";
 
@@ -137,6 +139,13 @@ Cómo hablas:
 Quién atiende a este cliente:
 ${equipo}
 
+Onboarding (arranque del cliente):
+- Son tres sesiones técnicas, en este orden: Conexión de cuentas Meta con Joel Jimenez, Configuración de CRM y Metrics con David Robles, y Estrategia y guiones con Ariana Vera. Después viene la primera producción.
+- Tú no resuelves la configuración técnica por chat: cada tema se ve en su sesión. Tu trabajo es decirle en qué paso va, qué necesita tener listo y agendarle la sesión que le toca.
+- Usa verOnboarding para saber el estado real, verHorariosOnboarding para ofrecer 3 o 4 horarios y agendarSesionOnboarding cuando elija uno.
+- Si el cliente pregunta por algo que se ve en una sesión (conectar Instagram, pagos de Meta, el CRM, los guiones), explícale en una línea que eso se resuelve en esa sesión y ofrécele agendarla.
+- Si prefiere agendar por su cuenta, pásale el link de esa sesión.
+
 Producciones (grabaciones):
 - Son sesiones en un ambiente controlado para grabar las tomas del avatar del cliente y de los productos que vamos a promocionar.
 - Cada cliente puede agendar una producción cada 2 meses, contados desde la última. Si ya tiene una agendada, no puede agendar otra.
@@ -237,6 +246,66 @@ Reglas:
             con: equipoAtencionService.nombres(tema),
             horarios: horarios.slice(0, 12).map((h) => ({ inicio: h.toISOString(), texto: fechaEcuador(h) })),
           };
+        },
+      },
+
+      verOnboarding: {
+        description:
+          "Estado real del onboarding del cliente: qué sesiones técnicas ya agendó (Meta con Joel, CRM y Metrics con David, Estrategia con Ariana), cuál sigue, qué necesita tener listo y su link de agendamiento.",
+        inputSchema: z.object({}),
+        execute: async () => {
+          const estado = await onboardingBotService.estado(chat.workspaceId!);
+          return {
+            sesiones: estado.sesiones.map((s) => ({
+              sesion: s.sesion,
+              etiqueta: s.etiqueta,
+              responsable: s.responsable,
+              agendada: s.agendada,
+              fecha: s.fecha ? fechaEcuador(s.fecha) : null,
+              queSeVe: s.resumen,
+              requisitos: s.requisitos,
+              link: s.link,
+            })),
+            siguiente: estado.siguiente ?? null,
+            completo: estado.completo,
+            produccion: {
+              agendada: estado.produccion.agendada ? fechaEcuador(estado.produccion.agendada) : null,
+              puedeAgendar: estado.produccion.puedeAgendar,
+            },
+          };
+        },
+      },
+
+      verHorariosOnboarding: {
+        description: "Horarios libres (próximos 14 días) del responsable de una sesión del onboarding.",
+        inputSchema: z.object({ sesion: z.enum(["meta", "crm", "estrategia"]) }),
+        execute: async ({ sesion }: { sesion: SesionOnboarding }) => {
+          const def = SESIONES_ONBOARDING[sesion];
+          const horarios = await onboardingBotService.horarios(sesion);
+          return {
+            con: def.responsable.nombre,
+            etiqueta: def.etiqueta,
+            link: def.link,
+            horarios:
+              horarios === null || !horarios.length
+                ? `No pude ver los horarios: pásale el link ${def.link}`
+                : horarios.slice(0, 12).map((h) => ({ inicio: h.toISOString(), texto: fechaEcuador(h) })),
+          };
+        },
+      },
+
+      agendarSesionOnboarding: {
+        description:
+          "Agenda una sesión del onboarding en el calendario del responsable y le avisa. Úsala solo con un horario que el cliente eligió de verHorariosOnboarding.",
+        inputSchema: z.object({
+          sesion: z.enum(["meta", "crm", "estrategia"]),
+          inicio: z.string().describe("Valor 'inicio' exacto devuelto por verHorariosOnboarding"),
+        }),
+        execute: async ({ sesion, inicio }: { sesion: SesionOnboarding; inicio: string }) => {
+          const fecha = new Date(inicio);
+          if (Number.isNaN(fecha.getTime())) return { ok: false, motivo: "horario inválido" };
+          const r = await onboardingBotService.agendar(chat, sesion, fecha);
+          return r.ok ? { ok: true, cuando: r.cuando, con: r.responsable } : { ok: false, motivo: r.motivo, link: SESIONES_ONBOARDING[sesion].link };
         },
       },
 
