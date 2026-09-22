@@ -5,9 +5,11 @@ import axios from "axios";
  * Solo lo que usa el bot: mandar mensajes con botones y contestar clics.
  */
 
+/** Telegram exige exactamente uno: o `callback_data` o `url`. */
 export interface InlineButton {
   text: string;
-  callback_data: string;
+  callback_data?: string;
+  url?: string;
 }
 
 export interface TelegramUpdate {

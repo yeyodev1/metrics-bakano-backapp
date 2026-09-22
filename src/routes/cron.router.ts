@@ -20,7 +20,10 @@ cronRouter.get("/onboarding-sync", async (req: Request, res: Response) => {
       onboardingBotService.sincronizarDesdeCrm(),
       onboardingBotService.enviarBienvenidasPendientes(),
     ]);
-    console.log(`[Cron] Onboarding — citas revisadas: ${sync.revisadas}, marcadas: ${sync.marcadas}, bienvenidas: ${bienvenidas.enviadas}`);
+    console.log(
+      `[Cron] Onboarding — citas revisadas: ${sync.revisadas}, marcadas: ${sync.marcadas}, ` +
+        `cumplidas desde el CRM: ${sync.cumplidas}, bienvenidas: ${bienvenidas.enviadas}`
+    );
     res.json({ ok: true, sync, bienvenidas });
   } catch (err: any) {
     console.error("[Cron] Onboarding sync falló:", err.message);
