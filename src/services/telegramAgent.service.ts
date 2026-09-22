@@ -4,9 +4,17 @@ import type { ITelegramChat } from "../models/telegramChat.model";
 import { EQUIPO_ATENCION, equipoAtencionService, type TemaAtencion } from "./equipoAtencion.service";
 import { atencionClienteService, fechaEcuador, type DatosCliente } from "./atencionCliente.service";
 import { onboardingBotService } from "./onboardingBot.service";
+import { citasClienteService } from "./citasCliente.service";
+import { CAMPOS_MARCA, ENTREGABLES, onboardingDatosService } from "./onboardingDatos.service";
+import { metricasClienteService } from "./metricasCliente.service";
 import { CATEGORIAS_GUION, revisionGuionesService } from "./revisionGuiones.service";
 import { perfilClienteService, type PerfilCliente } from "./perfilCliente.service";
-import { SESIONES_ONBOARDING, type SesionOnboarding } from "./onboardingSesiones.service";
+import {
+  PROCESO_ONBOARDING,
+  SESIONES_ONBOARDING,
+  procesoOnboardingEnTexto,
+  type SesionOnboarding,
+} from "./onboardingSesiones.service";
 import { horasDeCorreccion } from "./videoPlanning.service";
 import { escaparHtml, telegramService } from "./telegram.service";
 import { notificationService } from "./notification.service";
@@ -74,69 +82,122 @@ type Clasificacion = z.infer<typeof clasificacionSchema>;
 class TelegramAgentService {
   /** Responde con IA. false si la IA fallo: el bot vuelve al menu. */
   async responder(chat: ITelegramChat, texto: string): Promise<boolean> {
+    const historial: Mensaje[] = (chat.historial || []).slice(-MAX_HISTORIAL).map((m) => ({
+      role: m.rol === "cliente" ? "user" : "assistant",
+      content: m.texto,
+    }));
+    // El animo se lee en paralelo pero la respuesta no lo espera: antes el
+    // cliente esperaba hasta 30 s extra cuando el clasificador tardaba.
+    const clasificacion = this.clasificar(historial, texto).catch((error) => {
+      console.error("[Telegram IA] clasificación:", error?.message || error);
+      return null;
+    });
+
     let respuesta = "";
+    let cliente: DatosCliente | null = null;
+    // Lo que paso en este turno: si se propuso un cambio de cita, van botones.
+    const turno = { inicio: new Date(), propuesta: false };
     try {
       const { generateText, isStepCount } = await cargarAi();
-      const [cliente, perfil] = await Promise.all([
+      const [datos, perfil] = await Promise.all([
         atencionClienteService.datosCliente(chat),
         perfilClienteService.de(chat.workspaceId!, chat.userId),
       ]);
-      const historial: Mensaje[] = (chat.historial || []).slice(-MAX_HISTORIAL).map((m) => ({
-        role: m.rol === "cliente" ? "user" : "assistant",
-        content: m.texto,
-      }));
+      cliente = datos;
+      // Cliente arrancando: lo pendiente va en las instrucciones y el modelo
+      // no gasta un paso (5-10 s) en consultarlo en cada mensaje.
+      const pendientes =
+        !perfil.esEquipo && perfil.tipo !== "activo"
+          ? await onboardingDatosService.pendientes(chat.workspaceId!).catch(() => null)
+          : null;
       await telegramService.sendChatAction(chat.chatId, "typing").catch(() => undefined);
+      const inicio = Date.now();
+      let marca: number | undefined;
 
-      const [resultado, clasificacion] = await Promise.all([
-        generateText({
-          model: modelo(),
-          system: this.instrucciones(cliente, perfil),
-          messages: [...historial, { role: "user", content: texto }],
-          tools: this.herramientas(chat, texto),
-          stopWhen: isStepCount(6),
-          abortSignal: AbortSignal.timeout(LIMITE_MS),
-          ...opcionesModelo(),
-        }),
-        this.clasificar(historial, texto).catch((error) => {
-          console.error("[Telegram IA] clasificación:", error?.message || error);
-          return null;
-        }),
-      ]);
+      const resultado = await generateText({
+        model: modelo(),
+        system: this.instrucciones(datos, perfil, pendientes),
+        messages: [...historial, { role: "user", content: texto }],
+        tools: this.herramientas(chat, texto, turno),
+        stopWhen: isStepCount(6),
+        // Tiempo por paso en los logs: sin esto un corte a los 50 s no dice
+        // si fue el modelo pensando o una herramienta lenta.
+        onStepFinish: (paso: any) => {
+          const ahora = Date.now();
+          console.log(
+            `[Telegram IA] paso ${((ahora - (marca ?? inicio)) / 1000).toFixed(1)} s · ${
+              (paso.toolCalls || []).map((c: any) => c.toolName).join(", ") || "texto"
+            }`
+          );
+          marca = ahora;
+          for (const parte of paso.content || []) {
+            if (parte?.type === "tool-error") {
+              console.error(`[Telegram IA] herramienta ${parte.toolName} falló:`, String(parte.error?.message || parte.error).slice(0, 300));
+            }
+          }
+        },
+        abortSignal: AbortSignal.timeout(LIMITE_MS),
+        ...opcionesModelo(),
+      });
       // Por si el modelo se salta la regla: sin markdown ni signos de apertura.
       respuesta = resultado.text.replace(/\*\*?|__|#+ /g, "").replace(/[¡¿]/g, "").trim();
-      if (clasificacion) await this.alertarSiHaceFalta(chat, cliente, clasificacion, texto);
     } catch (error: any) {
       console.error("[Telegram IA] respuesta:", error?.message || error);
-      return false;
-    }
-    if (!respuesta) return false;
-
-    await telegramService.sendMessage(chat.chatId, escaparHtml(respuesta).slice(0, 4000), [
-      [{ text: "📋 Ver menú", callback_data: "menu:ver" }],
-    ]);
-    const ahora = new Date();
-    await models.telegramChats.updateOne(
-      { _id: chat._id },
-      {
-        $push: {
-          historial: {
-            $each: [
-              { rol: "cliente", texto: texto.slice(0, 2000), en: ahora },
-              { rol: "bot", texto: respuesta.slice(0, 2000), en: ahora },
-            ],
-            $slice: -MAX_HISTORIAL,
-          },
-        },
+      // Si alcanzo a proponer un cambio de cita, el cliente igual tiene que
+      // ver que confirma: sin esto quedaria pendiente y sin botones.
+      if (turno.propuesta && chat.cambioPendiente) {
+        respuesta = `Te lo dejo listo para confirmar:\n${chat.cambioPendiente.resumen} (hora Ecuador).\n\nConfirmas?`;
       }
-    );
-    return true;
+    }
+
+    if (respuesta) {
+      await telegramService.sendMessage(
+        chat.chatId,
+        escaparHtml(respuesta).slice(0, 4000),
+        turno.propuesta
+          ? [
+              [
+                { text: "✅ Sí, confirmo", callback_data: "cita:si" },
+                { text: "✖️ No", callback_data: "cita:no" },
+              ],
+            ]
+          : [[{ text: "📋 Ver menú", callback_data: "menu:ver" }]]
+      );
+      const ahora = new Date();
+      await models.telegramChats.updateOne(
+        { _id: chat._id },
+        {
+          $push: {
+            historial: {
+              $each: [
+                { rol: "cliente", texto: texto.slice(0, 2000), en: ahora },
+                { rol: "bot", texto: respuesta.slice(0, 2000), en: ahora },
+              ],
+              $slice: -MAX_HISTORIAL,
+            },
+          },
+        }
+      );
+    }
+
+    // La queja se escala aunque la IA no haya podido responder.
+    const c = await clasificacion;
+    if (c) {
+      cliente ??= await atencionClienteService.datosCliente(chat).catch(() => null);
+      if (cliente) await this.alertarSiHaceFalta(chat, cliente, c, texto);
+    }
+    return Boolean(respuesta);
   }
 
-  private instrucciones(cliente: DatosCliente, perfil: PerfilCliente): string {
+  private instrucciones(
+    cliente: DatosCliente,
+    perfil: PerfilCliente,
+    pendientes: Awaited<ReturnType<typeof onboardingDatosService.pendientes>> | null
+  ): string {
     const equipo = (Object.keys(EQUIPO_ATENCION) as TemaAtencion[])
       .map(
         (t) =>
-          `- ${EQUIPO_ATENCION[t].etiqueta}: ${equipoAtencionService.nombres(t)}` +
+          `- ${EQUIPO_ATENCION[t].etiqueta}: ${equipoAtencionService.nombres(t)} (${equipoAtencionService.correos(t).join(", ")})` +
           (t === "produccion"
             ? " (la producción se agenda en su calendario con agendarProduccion)"
             : EQUIPO_ATENCION[t].calendarioId
@@ -149,7 +210,15 @@ class TelegramAgentService {
 Hoy es ${fechaEcuador(new Date())} (hora Ecuador).
 
 En qué punto está este cliente: ${perfilClienteService.describir(perfil)}
-
+${
+  pendientes
+    ? `Lo que le falta ahora mismo (dato real, no hace falta llamar verPendientesOnboarding salvo que registres algo):
+- Sesiones sin agendar: ${pendientes.sesionesPendientes.map((x) => `${x.etiqueta} con ${x.con} (${x.sesion})`).join("; ") || "ninguna"}
+- Datos de marca que faltan: ${pendientes.datosMarcaFaltantes.map((x) => `${x.campo} (${x.que})`).join("; ") || "ninguno"}
+- Envíos pendientes: ${pendientes.entregables.filter((x) => x.estado === "pendiente").map((x) => `${x.clave} (${x.etiqueta}, a ${x.enviarA})`).join("; ") || "ninguno"}
+`
+    : ""
+}
 Cómo hablas:
 - Como una persona normal escribiendo por WhatsApp: amigable, cercana y relajada, pero sin exagerar. Tratas de tú.
 - NUNCA uses signos de apertura: nada de "¡" ni de "¿". Escribe "hola!", "cómo estás?", "listo!", nunca "¡Hola!" ni "¿Cómo estás?".
@@ -178,17 +247,49 @@ Onboarding (arranque del cliente):
 - Usa verOnboarding para saber el estado real, verHorariosOnboarding para ofrecer 3 o 4 horarios y agendarSesionOnboarding cuando elija uno.
 - Si el cliente pregunta por algo que se ve en una sesión (conectar Instagram, pagos de Meta, el CRM, los guiones), explícale en una línea que eso se resuelve en esa sesión y ofrécele agendarla.
 - Si prefiere agendar por su cuenta, pásale el link de esa sesión.
+- Manda links (agendamiento, metrics.bakano.ec) solo cuando correspondan al paso en el que está el cliente, no todos de golpe.
+- Para que todo funcione el cliente necesita un entorno creado en metrics.bakano.ec; si te dice que no puede entrar o no ve su información, recuérdaselo.
+
+Arrancar el onboarding (tú tomas la iniciativa):
+- Si el cliente es nuevo o está en onboarding, apenas termines de responder lo que preguntó, usa verPendientesOnboarding y sigue con lo que falta. No esperes a que él lo pida.
+- Una cosa a la vez, en este orden: agendar la sesión que le toca, luego los datos de su marca que falten y luego los envíos (archivos de marca, facturación, catálogo, invitación a Meta).
+- Datos de marca: pregúntale de forma natural, uno por mensaje (por ejemplo "cuéntame, a quién le vendes?"). Cuando responda algo concreto, guárdalo con registrarDatoMarca usando sus palabras, y confírmale en pocas palabras que quedó en el sistema. Si responde algo vago, pídele un poco más de detalle antes de guardar.
+- Envíos: dile qué enviar y a qué correo. Cuando te diga que ya lo mandó, regístralo con registrarEntregable: así el responsable lo verifica. No lo marques si solo dice que lo va a mandar.
+- Si el cliente está apurado o pregunta otra cosa, atiéndelo primero y retoma lo pendiente después, sin presionar.
+- Si es un cliente en marcha, no le ofrezcas sesiones del onboarding ni le pidas envíos. Solo si faltan datos de su marca, pídele uno al final de la conversación y sin insistir.
+- Si es alguien del equipo de Bakano, no le pidas datos: solo dile qué falta.
+
+Métricas:
+- Para facturación, gasto en Meta, ROAS o qué videos funcionan mejor, usa verMetricas. Da los números redondeados y en una o dos líneas.
+- Si faltan días de facturación, dile que el ROAS está incompleto y que puede registrar la facturación diaria en metrics.bakano.ec.
+- Si no hay datos, dile que todavía no hay información suficiente y que Denisse Quimi (dquimi@bakano.ec) le cuenta cómo van sus campañas.
+- No interpretes de más ni prometas resultados.
+
+Proceso completo de implementación (esto lo sabes de memoria):
+${procesoOnboardingEnTexto()}
 
 Producciones (grabaciones):
 - Son sesiones en un ambiente controlado para grabar las tomas del avatar del cliente y de los productos que vamos a promocionar.
 - Cada cliente puede agendar una producción cada 2 meses, contados desde la última. Si ya tiene una agendada, no puede agendar otra.
 - Para agendar: usa verHorariosProduccion, ofrece 3 o 4 horarios y, cuando el cliente elija uno concreto, usa agendarProduccion con el valor "inicio" exacto. Confirma fecha, hora y que lo atienden ${equipoAtencionService.nombres("produccion")}.
 - Si todavía no puede agendar, explica la regla con naturalidad y dile desde qué fecha puede.
-- Mover o cancelar una producción, o cualquier otro tema de producción, no lo resuelves tú: pásale el mensaje a ${equipoAtencionService.nombres("produccion")} con pasarMensajeAlEquipo.
+- Mover una producción no cambia la regla: la nueva fecha también tiene que respetar los 2 meses desde la última grabación.
+
+Mover o cancelar citas (producción, sesiones del onboarding y reuniones):
+- Usa verMisCitas para ver sus citas. Solo puedes tocar las que salen ahí.
+- Solo se pueden mover o cancelar hasta 48 horas antes. Si falta menos, no lo hagas: dile que lo coordina directo con el responsable, dale su correo y pásale el mensaje con pasarMensajeAlEquipo.
+- Antes de cancelar, sugiere mover: casi siempre conviene más. Si igual quiere cancelar, pregúntale el motivo.
+- Para mover: verHorariosParaMover, ofrece 3 o 4 horarios y, cuando elija uno, llama reprogramarCita. Eso NO la mueve todavía: repítele la cita, la fecha actual y la nueva y pídele que confirme (le aparecen botones).
+- Para cancelar: cuando quede claro que quiere cancelar, llama cancelarCita. Eso NO la cancela todavía: repítele qué cita y qué fecha se cancela y pídele que confirme (le aparecen botones).
+- Si en su siguiente mensaje te dice que sí, usa confirmarCambioCita. Si dice que no o cambia de idea, no hagas nada.
+- Cuando el cambio se hace, el sistema ya le avisa al responsable: no uses pasarMensajeAlEquipo para eso.
+- Después confírmale que ya quedó en el calendario y que le avisamos al responsable.
 - Si agendarProduccion falla, discúlpate y ofrece pasarle el mensaje al equipo con el horario que quería.
 
 Reglas:
-- Nunca inventes datos. Para producciones, guiones u horarios usa siempre las herramientas. Si no hay dato, dilo tal cual y ofrece pasarle el mensaje al equipo.
+- Nunca inventes datos. Para producciones, guiones, horarios o métricas usa siempre las herramientas.
+- Si no hay dato o no sabes la respuesta, no inventes: dile que el encargado de ese tema se comunica con él en breve, y que si quiere agilizarlo puede escribirle directo a su correo (dale el correo del encargado). Y pásale el mensaje con pasarMensajeAlEquipo.
+- Otros encargados por tema: Meta Ads y campañas → Denisse Quimi (dquimi@bakano.ec); CRM → David Robles (drobles@bakano.ec); metrics.bakano.ec y tecnología → Diego Reyes (dreyes@bakano.ec).
 - Si el cliente quiere hablar con alguien o tiene algo que no puedes resolver, ofrécele dos caminos: agendar una reunión (guiones y atención tienen calendario de reuniones; producción se agenda con agendarProduccion) o pasarle su mensaje a la persona.
 - Para agendar: consulta horarios libres, ofrece 3 o 4 opciones y agenda solo cuando el cliente elija un horario concreto. Usa exactamente el valor "inicio" que devuelve la herramienta.
 - Antes de pasar un mensaje al equipo asegúrate de entender qué necesita. Después confírmale a quién se lo enviaste.
@@ -196,10 +297,11 @@ Reglas:
 - No prometas descuentos, reembolsos, cambios de contrato ni fechas que el equipo no confirmó.
 - Solo hablas de la cuenta de ${cliente.entorno}. Si pregunta algo ajeno a Bakano, redirígelo con buena onda.
 - Si una herramienta falla, discúlpate y ofrece pasar el mensaje al equipo.
+- Al confirmar una cita agendada, dile con quién es y el correo del responsable por si necesita escribirle.
 - Nunca menciones, recomiendes ni ofrezcas contactar a Luis Reyes, ni agendar con él. No es un canal de atención. Si el cliente lo pide, dile con buena onda que su equipo es quien lo atiende y ofrece a la persona que corresponda.`;
   }
 
-  private herramientas(chat: ITelegramChat, textoCliente: string) {
+  private herramientas(chat: ITelegramChat, textoCliente: string, turno: { inicio: Date; propuesta: boolean }) {
     return {
       verProducciones: {
         description: "Próximas producciones (grabaciones) del cliente y la última realizada.",
@@ -207,12 +309,21 @@ Reglas:
         execute: async () => {
           const ahora = new Date();
           const [proximas, ultima] = await Promise.all([
-            models.planning.find({ workspaceId: chat.workspaceId, date: { $gte: ahora } }).sort({ date: 1 }).limit(3).select("title date").lean(),
-            models.planning.findOne({ workspaceId: chat.workspaceId, date: { $lt: ahora } }).sort({ date: -1 }).select("title date cumplida").lean(),
+            models.planning
+              .find({ workspaceId: chat.workspaceId, date: { $gte: ahora }, title: { $not: /^CANCELADA/ } })
+              .sort({ date: 1 })
+              .limit(3)
+              .select("title date")
+              .lean(),
+            models.planning
+              .findOne({ workspaceId: chat.workspaceId, date: { $lt: ahora }, title: { $not: /^CANCELADA/ } })
+              .sort({ date: -1 })
+              .select("title date cumplida")
+              .lean(),
           ]);
           return {
             atienden: equipoAtencionService.nombres("produccion"),
-            proximas: proximas.map((p) => ({ fecha: fechaEcuador(p.date), titulo: p.title, cancelada: /^CANCELADA/.test(p.title) })),
+            proximas: proximas.map((p) => ({ fecha: fechaEcuador(p.date), titulo: p.title })),
             ultima: ultima ? { fecha: fechaEcuador(ultima.date), titulo: ultima.title, grabada: ultima.cumplida } : null,
           };
         },
@@ -369,11 +480,15 @@ Reglas:
               etiqueta: s.etiqueta,
               responsable: s.responsable,
               agendada: s.agendada,
+              estado: s.estado,
               fecha: s.fecha ? fechaEcuador(s.fecha) : null,
               queSeVe: s.resumen,
+              temas: SESIONES_ONBOARDING[s.sesion].temas,
               requisitos: s.requisitos,
               link: s.link,
+              correoResponsable: SESIONES_ONBOARDING[s.sesion].responsable.email,
             })),
+            envios: PROCESO_ONBOARDING.envios,
             siguiente: estado.siguiente ?? null,
             completo: estado.completo,
             produccion: {
@@ -413,7 +528,10 @@ Reglas:
           const fecha = new Date(inicio);
           if (Number.isNaN(fecha.getTime())) return { ok: false, motivo: "horario inválido" };
           const r = await onboardingBotService.agendar(chat, sesion, fecha);
-          return r.ok ? { ok: true, cuando: r.cuando, con: r.responsable } : { ok: false, motivo: r.motivo, link: SESIONES_ONBOARDING[sesion].link };
+          const def = SESIONES_ONBOARDING[sesion];
+          return r.ok
+            ? { ok: true, cuando: r.cuando, con: r.responsable, correo: def.responsable.email, llevarListo: def.requisitos }
+            : { ok: false, motivo: r.motivo, link: def.link };
         },
       },
 
@@ -447,7 +565,9 @@ Reglas:
           const fecha = new Date(inicio);
           if (Number.isNaN(fecha.getTime())) return { ok: false, motivo: "horario inválido" };
           const r = await atencionClienteService.reservarProduccion(chat, fecha);
-          return r.ok ? { ok: true, cuando: r.cuando, con: equipoAtencionService.nombres("produccion") } : { ok: false, motivo: r.motivo };
+          return r.ok
+            ? { ok: true, cuando: r.cuando, con: equipoAtencionService.nombres("produccion"), correos: equipoAtencionService.correos("produccion") }
+            : { ok: false, motivo: r.motivo };
         },
       },
 
@@ -462,8 +582,135 @@ Reglas:
           const fecha = new Date(inicio);
           if (Number.isNaN(fecha.getTime())) return { ok: false, motivo: "horario inválido" };
           const r = await atencionClienteService.reservarReunion(chat, tema, fecha);
-          return r.ok ? { ok: true, cuando: r.cuando, con: equipoAtencionService.nombres(tema) } : { ok: false, motivo: r.motivo };
+          return r.ok
+            ? { ok: true, cuando: r.cuando, con: equipoAtencionService.nombres(tema), correos: equipoAtencionService.correos(tema) }
+            : { ok: false, motivo: r.motivo };
         },
+      },
+
+      verMisCitas: {
+        description:
+          "Citas futuras del cliente que se pueden gestionar (producción, sesiones del onboarding y reuniones), con su ref, con quién y si todavía se pueden mover o cancelar (hasta 48 h antes).",
+        inputSchema: z.object({}),
+        execute: async () => {
+          const citas = await citasClienteService.listar(chat);
+          if (!citas.length) return { citas: [], nota: "No tiene citas futuras que se puedan gestionar desde aquí." };
+          return {
+            citas: citas.map((c) => ({
+              ref: c.ref,
+              cita: c.etiqueta,
+              cuando: fechaEcuador(c.inicio),
+              con: c.con,
+              correos: c.correos,
+              sePuedeCambiar: citasClienteService.editable(c),
+            })),
+          };
+        },
+      },
+
+      verHorariosParaMover: {
+        description:
+          "Horarios libres para mover una cita (ref de verMisCitas). En producción respeta la regla de 2 meses desde la última grabación.",
+        inputSchema: z.object({ ref: z.string().describe("ref exacta de verMisCitas") }),
+        execute: async ({ ref }: { ref: string }) => {
+          const r = await citasClienteService.horariosParaMover(chat, ref);
+          if (!r.cita) return { ok: false, motivo: "No encontré esa cita. Usa verMisCitas." };
+          if (r.motivo === "fuera_de_plazo")
+            return { ok: false, motivo: "Faltan menos de 48 horas: ya no se puede mover desde aquí.", responsable: r.cita.con, correos: r.cita.correos };
+          return {
+            ok: true,
+            cita: r.cita.etiqueta,
+            actual: fechaEcuador(r.cita.inicio),
+            con: r.cita.con,
+            horarios: r.horarios.length
+              ? r.horarios.slice(0, 12).map((h) => ({ inicio: h.toISOString(), texto: fechaEcuador(h) }))
+              : "No hay horarios libres en los próximos 30 días: ofrece pasarle el mensaje al responsable.",
+          };
+        },
+      },
+
+      reprogramarCita: {
+        description:
+          "Propone mover una cita a un horario de verHorariosParaMover. NO la mueve: deja el cambio listo y al cliente le aparecen botones para confirmarlo. Muéstrale el resumen y pídele que confirme.",
+        inputSchema: z.object({
+          ref: z.string().describe("ref exacta de verMisCitas"),
+          inicio: z.string().describe("Valor 'inicio' exacto devuelto por verHorariosParaMover"),
+        }),
+        execute: async ({ ref, inicio }: { ref: string; inicio: string }) => {
+          const r = await citasClienteService.proponer(chat, { accion: "reprogramar", ref, inicio });
+          if (r.ok && "resumen" in r) turno.propuesta = true;
+          return r.ok ? { ...r, siguiente: "Pídele que confirme con el botón o respondiéndote que sí." } : r;
+        },
+      },
+
+      cancelarCita: {
+        description:
+          "Propone cancelar una cita. NO la cancela: deja el cambio listo y al cliente le aparecen botones para confirmarlo. Muéstrale el resumen y pídele que confirme.",
+        inputSchema: z.object({
+          ref: z.string().describe("ref exacta de verMisCitas"),
+          motivo: z.string().nullish().describe("Por qué cancela, con sus palabras"),
+        }),
+        execute: async ({ ref, motivo }: { ref: string; motivo?: string | null }) => {
+          const r = await citasClienteService.proponer(chat, { accion: "cancelar", ref, motivo: motivo ?? undefined });
+          if (r.ok && "resumen" in r) turno.propuesta = true;
+          return r.ok ? { ...r, siguiente: "Pídele que confirme con el botón o respondiéndote que sí." } : r;
+        },
+      },
+
+      confirmarCambioCita: {
+        description:
+          "Ejecuta el cambio de cita que ya propusiste en un mensaje anterior, cuando el cliente responde que sí lo confirma. No sirve en el mismo mensaje en que lo propusiste.",
+        inputSchema: z.object({}),
+        execute: async () => citasClienteService.confirmar(chat, { antesDe: turno.inicio }),
+      },
+
+      verPendientesOnboarding: {
+        description:
+          "Lo que le falta al cliente para arrancar: sesiones sin agendar, datos de su marca que no tenemos, envíos pendientes (archivos, facturación, catálogo, invitación a Meta) y si ya conectó Meta.",
+        inputSchema: z.object({}),
+        execute: async () => {
+          const [pendientes, perfil] = await Promise.all([
+            onboardingDatosService.pendientes(chat.workspaceId!),
+            perfilClienteService.de(chat.workspaceId!, chat.userId),
+          ]);
+          // Un cliente en marcha ya paso el arranque (muchos antes de que
+          // existieran las sesiones): solo se completan datos de su marca.
+          if (perfil.tipo === "activo") {
+            return { clienteEnMarcha: true, datosMarcaFaltantes: pendientes.datosMarcaFaltantes, datosMarcaCompletos: pendientes.datosMarcaCompletos };
+          }
+          return pendientes;
+        },
+      },
+
+      registrarDatoMarca: {
+        description: `Guarda en el perfil de marca un dato que el cliente contó. Campos: ${Object.entries(CAMPOS_MARCA)
+          .map(([k, v]) => `${k} (${v})`)
+          .join(", ")}.`,
+        inputSchema: z.object({
+          campo: z.enum(Object.keys(CAMPOS_MARCA) as [string, ...string[]]),
+          valor: z.string().describe("Lo que dijo el cliente, con sus palabras, completo"),
+          reemplazar: z.boolean().nullish().describe("true solo si el cliente pidió cambiar un dato que ya estaba"),
+        }),
+        execute: async ({ campo, valor, reemplazar }: { campo: string; valor: string; reemplazar?: boolean | null }) =>
+          onboardingDatosService.registrarDatoMarca(chat, campo, valor, reemplazar ?? false),
+      },
+
+      registrarEntregable: {
+        description: `Registra que el cliente YA envió algo del onboarding y avisa al responsable para verificarlo. Claves: ${Object.entries(ENTREGABLES)
+          .map(([k, v]) => `${k} (${v.etiqueta}, a ${v.a})`)
+          .join(", ")}.`,
+        inputSchema: z.object({
+          clave: z.enum(Object.keys(ENTREGABLES) as [string, ...string[]]),
+          nota: z.string().nullish().describe("Detalle que dio el cliente (qué mandó, desde qué correo)"),
+        }),
+        execute: async ({ clave, nota }: { clave: string; nota?: string | null }) => onboardingDatosService.registrarEntregable(chat, clave, nota ?? undefined),
+      },
+
+      verMetricas: {
+        description:
+          "Métricas del entorno: facturación, gasto en Meta y ROAS del mes actual y del anterior, días sin facturación registrada y los videos con más vistas del mes.",
+        inputSchema: z.object({}),
+        execute: async () => metricasClienteService.resumen(chat.workspaceId!),
       },
 
       pasarMensajeAlEquipo: {
@@ -495,7 +742,7 @@ Reglas:
       system: `Clasificas el ánimo de un cliente de una agencia de marketing según su último mensaje y el contexto. Responde SOLO un JSON válido, sin texto extra:
 {"estado":"en_peligro|molesto|feliz|neutral","tema":"produccion|guiones|atencion","motivo":"...","frase":"frase exacta del cliente que lo muestra","recomendacion":"acción concreta para el equipo"}
 tema: produccion si habla de grabaciones o fechas de producción; guiones si habla de guiones, contenido o videos; atencion para pagos, resultados, contrato o cualquier otra cosa.
-en_peligro: quiere cancelar o pausar, no ve resultados, siente que pierde dinero, compara con otra agencia, amenaza con irse.
+en_peligro: quiere cancelar o pausar el SERVICIO con la agencia (no una cita, sesión o grabación puntual), no ve resultados, siente que pierde dinero, compara con otra agencia, amenaza con irse.
 molesto: queja, frustración, reclamo por demoras o errores, tono duro.
 feliz: satisfacción clara, agradecimiento entusiasta, buenos resultados.
 neutral: todo lo demás. Ante la duda, neutral.`,

@@ -134,12 +134,27 @@ class AtencionClienteService {
       try {
         if (!(await this.sigueLibre(calendarioId, inicio))) return { ok: false, motivo: "ocupado" };
         const contactId = await this.contactoCrm(cliente);
-        await ghlService.createAppointment({
+        const appointmentId = await ghlService.createAppointment({
           calendarId: calendarioId,
           contactId,
           startTime: inicio,
           title: `${cliente.entorno} · Reunión de ${etiqueta} (Telegram)`,
         });
+        // Se guarda para poder moverla o cancelarla despues desde el chat.
+        const cita = {
+          appointmentId,
+          tipo: "reunion" as const,
+          tema,
+          calendarId: calendarioId,
+          inicio,
+          agendadaEn: new Date(),
+          workspaceId: chat.workspaceId,
+          userId: chat.userId,
+        };
+        await models.telegramChats
+          .updateOne({ _id: chat._id }, { $push: { citas: { $each: [cita], $slice: -20 } } })
+          .catch((error: any) => console.error("[Atención] guardar cita:", error?.message || error));
+        chat.citas = [...(chat.citas || []), cita];
       } catch (error: any) {
         console.error("[Atención] no se pudo agendar en el CRM:", error.response?.data || error.message);
         return { ok: false, motivo: "error" };
@@ -247,7 +262,16 @@ class AtencionClienteService {
           return null;
         });
 
-      if (sync && sync.creadas > 0) {
+      // "creadas" es 0 si el webhook del CRM ya la habia creado: lo que importa
+      // es si ya esta en el Planificador (ahi el sync ya aviso al equipo).
+      const enPlanificador =
+        sync !== null &&
+        (await models.planning.exists({
+          workspaceId: chat.workspaceId,
+          date: { $gte: new Date(inicio.getTime() - 60_000), $lte: new Date(inicio.getTime() + 60_000) },
+          title: { $not: /^CANCELADA/ },
+        }));
+      if (enPlanificador) {
         await slackService
           .avisarEquipo({
             titulo: `🎬 ${cliente.entorno} agendó su producción · ${cuando}`,
@@ -332,7 +356,7 @@ class AtencionClienteService {
 
   // ── Utilidades de agenda ───────────────────────────────────────────────────
   /** Candado: dos toques (o dos llamadas de la IA) seguidos no crean dos citas. */
-  private async tomarCandado(chat: ITelegramChat): Promise<boolean> {
+  async tomarCandado(chat: ITelegramChat): Promise<boolean> {
     const tomado = await models.telegramChats.findOneAndUpdate(
       {
         _id: chat._id,
@@ -343,12 +367,12 @@ class AtencionClienteService {
     return Boolean(tomado);
   }
 
-  private async soltarCandado(chat: ITelegramChat): Promise<void> {
+  async soltarCandado(chat: ITelegramChat): Promise<void> {
     await models.telegramChats.updateOne({ _id: chat._id }, { $unset: { agendandoDesde: 1 } });
   }
 
   /** El horario pudo ocuparse mientras el cliente elegia. */
-  private async sigueLibre(calendarioId: string, inicio: Date): Promise<boolean> {
+  async sigueLibre(calendarioId: string, inicio: Date): Promise<boolean> {
     const libres = await ghlService.getFreeSlots(calendarioId, new Date(inicio.getTime() - 60_000), new Date(inicio.getTime() + 86_400_000));
     return libres.some((h) => Math.abs(h.getTime() - inicio.getTime()) < 60_000);
   }
