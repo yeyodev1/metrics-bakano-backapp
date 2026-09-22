@@ -869,7 +869,10 @@ export class TelegramBotService {
       const def = SESIONES_ONBOARDING[sesion];
       await telegramService.sendMessage(
         chat.chatId,
-        `No pude agendarlo desde aquí 😕 agéndalo en este link y quedamos listos: ${def.link}`
+        `Uy, el calendario no me dejó reservarlo desde aquí 😕\n\n` +
+          `Agéndalo en este link y quedamos listos: ${def.link}\n\n` +
+          `Apenas lo agendes me entero y lo marco en tu onboarding. Ya le avisé al equipo para que lo revisen.`,
+        [[{ text: "🚀 Ver mi onboarding", callback_data: "menu:onboarding" }], [{ text: "📋 Volver al menú", callback_data: "menu:ver" }]]
       );
       return;
     }
