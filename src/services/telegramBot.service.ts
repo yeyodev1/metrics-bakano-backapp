@@ -9,6 +9,7 @@ import { onboardingBotService } from "./onboardingBot.service";
 import { perfilClienteService } from "./perfilCliente.service";
 import { onboardingDatosService } from "./onboardingDatos.service";
 import { citasClienteService } from "./citasCliente.service";
+import { archivosClienteService, ETIQUETA_CATEGORIA, type CategoriaRecurso } from "./archivosCliente.service";
 import { revisionGuionesService, type RevisionPendiente } from "./revisionGuiones.service";
 import { SESIONES_ONBOARDING, type SesionOnboarding } from "./onboardingSesiones.service";
 import { telegramAgentService } from "./telegramAgent.service";
@@ -95,8 +96,18 @@ export class TelegramBotService {
 
     const msg = update.message;
     // Solo chats privados: en un grupo cualquiera leeria el codigo.
-    if (!msg || msg.chat.type !== "private" || !msg.from || typeof msg.text !== "string") return;
+    if (!msg || msg.chat.type !== "private" || !msg.from) return;
 
+    // El cliente manda su logo o su catálogo por el chat: es lo natural para
+    // él, y el archivo tiene que terminar en su entorno, no en la conversación.
+    if (msg.photo?.length || msg.document) {
+      const doc = await this.cargarChat(msg.chat.id, msg.from);
+      if (!(await this.esNuevo(doc, update.update_id))) return;
+      await this.onArchivo(doc, msg);
+      return;
+    }
+
+    if (typeof msg.text !== "string") return;
     const doc = await this.cargarChat(msg.chat.id, msg.from);
     if (!(await this.esNuevo(doc, update.update_id))) return;
     await this.onTexto(doc, msg.text.trim());
@@ -115,6 +126,83 @@ export class TelegramBotService {
     );
     if (!r.modifiedCount) console.log(`[Telegram] update ${updateId} repetido: se ignora`);
     return Boolean(r.modifiedCount);
+  }
+
+  /** Foto o archivo enviado al chat: se valida, se guarda y se confirma. */
+  private async onArchivo(chat: ITelegramChat, msg: NonNullable<TelegramUpdate["message"]>): Promise<void> {
+    if (chat.estado !== "listo" || !chat.workspaceId) {
+      await telegramService.sendMessage(
+        chat.chatId,
+        "Para guardarte archivos primero necesito saber quién eres 🔐\n\nEscríbeme el correo con el que entras a <b>metrics.bakano.ec</b> y seguimos."
+      );
+      return;
+    }
+
+    const comprimido = Boolean(msg.photo?.length && !msg.document);
+    const foto = msg.photo?.[msg.photo.length - 1];
+    const fileId = msg.document?.file_id || foto?.file_id;
+    if (!fileId) return;
+
+    const categoria = archivosClienteService.categoriaPorTexto(msg.caption);
+    await telegramService.sendChatAction(chat.chatId, "typing").catch(() => undefined);
+    const buffer = await telegramService.descargarArchivo(fileId);
+    if (!buffer) {
+      await telegramService.sendMessage(chat.chatId, "Se me complicó bajar ese archivo 😅 me lo reenvías?");
+      return;
+    }
+
+    const r = await archivosClienteService.guardar(
+      chat,
+      {
+        buffer,
+        nombre: msg.document?.file_name || `foto-${Date.now()}.jpg`,
+        mime: msg.document?.mime_type || "image/jpeg",
+        comprimido,
+      },
+      categoria
+    );
+
+    if (!r.ok) {
+      const explicacion: Record<string, string> = {
+        logo_comprimido:
+          "Ese logo me llegó como foto y Telegram lo comprime a JPG, así que pierde el fondo transparente 😕\n\n" +
+          "Mándamelo otra vez con el clip 📎 → <b>Archivo</b> (no como foto), en PNG.",
+        logo_no_png:
+          "Para el logo necesito un <b>PNG</b> con fondo transparente 🙏 Si lo tienes en .ai, .psd o .jpg, expórtalo a PNG y me lo mandas.",
+        tipo: "Ese formato no lo puedo guardar 😕 Acepto PNG, JPG, WEBP o PDF (y el logo siempre en PNG).",
+        peso: "Ese archivo pesa más de 10 MB y no me entra 😅 Mándamelo más liviano.",
+        sin_entorno: "Primero elige de qué entorno hablamos y te lo guardo.",
+        error: "No pude guardarlo 😕 inténtalo de nuevo o súbelo desde metrics.bakano.ec.",
+      };
+      await telegramService.sendMessage(chat.chatId, explicacion[r.motivo] || explicacion["error"]!, [
+        [{ text: "📋 Volver al menú", callback_data: "menu:ver" }],
+      ]);
+      return;
+    }
+
+    if (r.preguntarCategoria) {
+      await telegramService.sendMessage(
+        chat.chatId,
+        `Recibido <b>${escaparHtml(r.nombre)}</b> ✅ ya lo guardé en tu entorno.\n\nQué es, para dejarlo en su lugar?`,
+        [
+          [
+            { text: "🎨 Mi logo", callback_data: `arch:logo:${r.recursoId}` },
+            { text: "🖌️ Línea gráfica", callback_data: `arch:linea_grafica:${r.recursoId}` },
+          ],
+          [{ text: "🏷️ Catálogo o precios", callback_data: `arch:catalogo:${r.recursoId}` }],
+        ]
+      );
+      return;
+    }
+
+    await telegramService.sendMessage(
+      chat.chatId,
+      `Listo, guardé tu <b>${ETIQUETA_CATEGORIA[r.categoria]}</b> en tu entorno ✅\n\nYa le avisé al equipo para que lo revise. Seguimos?`,
+      [
+        [{ text: "🚀 Ver mi onboarding", callback_data: "menu:onboarding" }],
+        [{ text: "📋 Volver al menú", callback_data: "menu:ver" }],
+      ]
+    );
   }
 
   private async cargarChat(
@@ -323,6 +411,20 @@ export class TelegramBotService {
     if (data === "menu:onboarding") return this.mostrarOnboarding(chat);
     if (data === "cita:si" || data === "cita:no") return this.responderCambioCita(chat, data === "cita:si");
     if (data === "citas:ver") return this.mostrarCitas(chat);
+    if (data.startsWith("arch:")) {
+      const [, categoria, recursoId] = data.split(":");
+      const r = await archivosClienteService.recategorizar(chat, recursoId!, categoria as CategoriaRecurso);
+      await telegramService.sendMessage(
+        chat.chatId,
+        r.ok
+          ? `Perfecto, lo dejé como <b>${ETIQUETA_CATEGORIA[categoria as CategoriaRecurso]}</b> ✅ ya le avisé al equipo.`
+          : r.motivo === "logo_no_png"
+            ? `Para el logo necesito un <b>PNG</b> con fondo transparente 🙏 "${escaparHtml(r.nombre || "ese archivo")}" no lo es, así que lo dejé guardado igual. Mándame el PNG cuando puedas (con el clip 📎 → Archivo).`
+            : "No encontré ese archivo 😕 me lo reenvías?",
+        [[{ text: "🚀 Ver mi onboarding", callback_data: "menu:onboarding" }], [{ text: "📋 Volver al menú", callback_data: "menu:ver" }]]
+      );
+      return;
+    }
     if (data === "datos:contar") {
       chat.tema = undefined;
       await chat.save();

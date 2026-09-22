@@ -19,6 +19,12 @@ export interface TelegramUpdate {
     chat: { id: number; type: string };
     from?: { id: number; username?: string; first_name?: string };
     text?: string;
+    /** Pie de foto o del archivo: ahí suele venir "este es mi logo". */
+    caption?: string;
+    /** Foto comprimida por Telegram (varios tamaños, el último es el mayor). */
+    photo?: { file_id: string; file_size?: number; width?: number; height?: number }[];
+    /** Archivo enviado "como archivo": conserva el formato original. */
+    document?: { file_id: string; file_name?: string; mime_type?: string; file_size?: number };
   };
   callback_query?: {
     id: string;
@@ -33,10 +39,39 @@ export function escaparHtml(texto: string): string {
   return texto.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
+/** Un archivo que mandó el cliente, ya descargado de Telegram. */
+export interface ArchivoDeTelegram {
+  buffer: Buffer;
+  nombre: string;
+  mime: string;
+  /** true si Telegram lo comprimió a JPG (se envió como foto, no como archivo). */
+  comprimido: boolean;
+}
+
 export class TelegramService {
   // Lazy: se lee el env al llamar, no al importar el modulo.
   private get api(): string {
     return `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}`;
+  }
+
+  /**
+   * Descarga un archivo del chat. Telegram da primero una ruta temporal y
+   * luego el binario; el token va en la URL, por eso no se loguea.
+   */
+  async descargarArchivo(fileId: string): Promise<Buffer | null> {
+    try {
+      const { data } = await axios.get(`${this.api}/getFile`, { params: { file_id: fileId }, timeout: 15_000 });
+      const ruta = data?.result?.file_path;
+      if (!ruta) return null;
+      const archivo = await axios.get(`https://api.telegram.org/file/bot${process.env.TELEGRAM_BOT_TOKEN}/${ruta}`, {
+        responseType: "arraybuffer",
+        timeout: 30_000,
+      });
+      return Buffer.from(archivo.data);
+    } catch (error: any) {
+      console.error("[Telegram] no se pudo descargar el archivo:", error.response?.status || error.message);
+      return null;
+    }
   }
 
   async sendMessage(chatId: number, text: string, botones?: InlineButton[][]): Promise<void> {
