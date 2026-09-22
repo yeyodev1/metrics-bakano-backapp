@@ -30,6 +30,50 @@ export class GhlService {
     return { Authorization: `Bearer ${token}`, Version: "2021-07-28", Accept: "application/json" };
   }
 
+  /**
+   * Los dos tokens, para reintentar cuando uno no tiene el permiso.
+   *
+   * Cada Private Integration Token del CRM lleva sus propios scopes: el de
+   * contactos puede ser de solo lectura y el principal puede no leer correos.
+   * Un 401 "not authorized for this scope" con uno no significa que la
+   * operacion sea imposible: puede que el otro si pueda.
+   */
+  private cabecerasContacto(): Record<string, string>[] {
+    const principal = process.env.GHL_PIT_TOKEN;
+    const contactos = process.env.GHL_PIT_TOKEN_CONTACTOS;
+    const tokens = [...new Set([contactos, principal].filter(Boolean) as string[])];
+    return tokens.map((token) => ({ Authorization: `Bearer ${token}`, Version: "2021-07-28", Accept: "application/json" }));
+  }
+
+  /** true si el CRM respondio "no autorizado para este scope". */
+  private esFaltaDePermiso(error: any): boolean {
+    const status = error?.response?.status;
+    const mensaje = String(error?.response?.data?.message || "");
+    return status === 401 || status === 403 || /not authorized for this scope/i.test(mensaje);
+  }
+
+  /** Busca el contacto por correo. Es solo lectura: no necesita permiso de escritura. */
+  async buscarContactoPorCorreo(email: string): Promise<string | null> {
+    for (const headers of this.cabecerasContacto()) {
+      try {
+        const response = await axios.get(`${GHL_API_BASE}/contacts/`, {
+          headers,
+          params: { locationId: this.getLocationId(), query: email, limit: 20 },
+          timeout: 15_000,
+        });
+        const encontrado = (response.data?.contacts || []).find(
+          (c: any) => String(c?.email || "").toLowerCase() === email.toLowerCase()
+        );
+        if (encontrado?.id) return encontrado.id;
+      } catch (error: any) {
+        if (!this.esFaltaDePermiso(error)) {
+          console.error("[GHL] búsqueda de contacto:", error.response?.data || error.message);
+        }
+      }
+    }
+    return null;
+  }
+
   private getLocationId() {
     const locationId = process.env.GHL_LOCATION_ID;
     if (!locationId) throw new Error("GHL_LOCATION_ID no configurado en variables de entorno");
@@ -126,14 +170,29 @@ export class GhlService {
 
   /** Crea o actualiza el contacto por correo y devuelve su id. */
   async upsertContact(datos: { email: string; firstName?: string; lastName?: string; companyName?: string }): Promise<string> {
-    const response = await axios.post(
-      `${GHL_API_BASE}/contacts/upsert`,
-      { locationId: this.getLocationId(), ...datos, source: "Telegram Bakano" },
-      { headers: this.getContactHeaders() }
-    );
-    const id = response.data?.contact?.id;
-    if (!id) throw new Error("El CRM no devolvió el id del contacto");
-    return id;
+    // Si ya existe, basta con leerlo: agendar no puede depender de tener
+    // permiso de ESCRITURA sobre contactos.
+    const existente = await this.buscarContactoPorCorreo(datos.email);
+    if (existente) return existente;
+
+    let ultimo: any = null;
+    for (const headers of this.cabecerasContacto()) {
+      try {
+        const response = await axios.post(
+          `${GHL_API_BASE}/contacts/upsert`,
+          { locationId: this.getLocationId(), ...datos, source: "Telegram Bakano" },
+          { headers, timeout: 15_000 }
+        );
+        const id = response.data?.contact?.id;
+        if (id) return id;
+      } catch (error: any) {
+        ultimo = error;
+        // Con el otro token puede que sí se pueda: se sigue intentando.
+        if (!this.esFaltaDePermiso(error)) break;
+      }
+    }
+    console.error("[GHL] contacts/upsert:", ultimo?.response?.status, ultimo?.response?.data || ultimo?.message);
+    throw new Error("El CRM no dejó crear el contacto (revisa los permisos del token: contacts.write)");
   }
 
   /**
@@ -157,23 +216,53 @@ export class GhlService {
 
     const minutos =
       calendario.slotDurationUnit === "hours" ? (calendario.slotDuration || 1) * 60 : calendario.slotDuration || 30;
-    const response = await axios.post(
-      `${GHL_API_BASE}/calendars/events/appointments`,
-      {
-        calendarId: cita.calendarId,
-        locationId: this.getLocationId(),
-        contactId: cita.contactId,
-        startTime: cita.startTime.toISOString(),
-        endTime: new Date(cita.startTime.getTime() + minutos * 60_000).toISOString(),
-        title: cita.title,
-        appointmentStatus: "confirmed",
-        toNotify: true,
-      },
-      { headers: this.getHeaders() }
-    );
+    let response;
+    try {
+      response = await axios.post(
+        `${GHL_API_BASE}/calendars/events/appointments`,
+        {
+          calendarId: cita.calendarId,
+          locationId: this.getLocationId(),
+          contactId: cita.contactId,
+          startTime: cita.startTime.toISOString(),
+          endTime: new Date(cita.startTime.getTime() + minutos * 60_000).toISOString(),
+          title: cita.title,
+          appointmentStatus: "confirmed",
+          toNotify: true,
+        },
+        { headers: this.getHeaders(), timeout: 20_000 }
+      );
+    } catch (error: any) {
+      // Sin el scope de escritura de citas NADIE puede agendar por el bot:
+      // eso no se puede quedar solo en un log que nadie mira.
+      if (this.esFaltaDePermiso(error)) await this.alertarPermisos("crear la cita (calendars/events.write)");
+      console.error("[GHL] crear cita:", error.response?.status, error.response?.data || error.message);
+      throw error;
+    }
     const id = response.data?.id || response.data?.appointment?.id;
     if (!id) throw new Error("El CRM no devolvió el id de la cita");
     return id;
+  }
+
+  private ultimaAlertaPermisos = 0;
+  /** Avisa al equipo (una vez por hora) que el token del CRM se quedó sin permisos. */
+  private async alertarPermisos(que: string): Promise<void> {
+    if (Date.now() - this.ultimaAlertaPermisos < 3_600_000) return;
+    this.ultimaAlertaPermisos = Date.now();
+    try {
+      const { slackService } = await import("./slack.service");
+      await slackService.avisarEquipo({
+        titulo: "🔴 El CRM rechaza al bot por permisos",
+        detalle:
+          `GoHighLevel respondió 401 "not authorized for this scope" al intentar ${que}.\n\n` +
+          "Mientras tanto, los clientes NO pueden agendar desde Telegram (se les manda el link del CRM).\n" +
+          "Arreglo: en GHL → Settings → Private Integrations, edita el token de Bakano Metrics y añade los scopes " +
+          "`calendars/events.write` y `contacts.write`, y actualiza GHL_PIT_TOKEN en Vercel.",
+        correos: ["dreyes@bakano.ec"],
+      });
+    } catch (error: any) {
+      console.error("[GHL] no se pudo avisar del permiso:", error?.message || error);
+    }
   }
 
   /** Una cita por id. null si no existe o el CRM no responde. */
