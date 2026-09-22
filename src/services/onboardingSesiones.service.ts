@@ -20,6 +20,8 @@ export interface DefinicionSesion {
   requisitos: string[];
   /** Que se resuelve en la sesion, para que el bot lo explique. */
   resumen: string;
+  /** Temas exactos de la sesion segun el documento de proceso. */
+  temas: string[];
 }
 
 export const SESIONES_ONBOARDING: Record<SesionOnboarding, DefinicionSesion> = {
@@ -32,12 +34,22 @@ export const SESIONES_ONBOARDING: Record<SesionOnboarding, DefinicionSesion> = {
     link: "https://api.leadconnectorhq.com/widget/bookings/meta-sessions",
     requisitos: [
       "Conéctate desde una computadora",
-      "Ten el usuario y la clave del Instagram del negocio",
-      "Ten a la mano el WhatsApp Business del negocio",
-      "Ten una tarjeta de crédito o débito para Meta",
+      "Ten el usuario y la clave de la cuenta de Instagram del negocio",
+      "Ten el número de WhatsApp Business del negocio",
+      "Ten un método de pago para Meta (tarjeta de crédito o débito)",
     ],
     resumen:
       "Portafolio comercial en Meta, fanpage, cuenta de Instagram empresarial, cuenta publicitaria, WhatsApp Business y método de pago.",
+    temas: [
+      "Importancia del portafolio comercial y cómo se maneja",
+      "Configuración del portafolio comercial en Meta",
+      "Conexión o creación (si aplica) de la fanpage en Facebook",
+      "Conexión o creación (si aplica) de la cuenta empresarial de Instagram",
+      "Conexión o creación (si aplica) de la cuenta publicitaria",
+      "Normas de la comunidad y buenas prácticas para evitar el baneo de Meta",
+      "Conexión de WhatsApp Business con la cuenta publicitaria",
+      "Configuración del método de pago en la cuenta publicitaria",
+    ],
   },
   crm: {
     orden: 2,
@@ -48,10 +60,15 @@ export const SESIONES_ONBOARDING: Record<SesionOnboarding, DefinicionSesion> = {
     link: "https://api.leadconnectorhq.com/widget/bookings/soporte-tecnico-crm",
     requisitos: [
       "Conéctate desde una computadora",
-      "Ten el celular con el WhatsApp Business a la mano",
-      "Deja abiertas las cuentas de Facebook e Instagram del negocio",
+      "Ten a la mano el dispositivo con el WhatsApp Business",
+      "Deja abiertas en tu computadora las cuentas de Facebook e Instagram del negocio",
     ],
     resumen: "Conexión del CRM con tus cuentas y configuración de tu entorno en metrics.bakano.ec.",
+    temas: [
+      "Conexión del CRM con el WhatsApp Business del negocio",
+      "Conexión con las cuentas de Facebook e Instagram",
+      "Configuración de tu entorno en metrics.bakano.ec",
+    ],
   },
   estrategia: {
     orden: 3,
@@ -61,14 +78,85 @@ export const SESIONES_ONBOARDING: Record<SesionOnboarding, DefinicionSesion> = {
     calendarioId: "JDzGl2qjoWwAk5TvBNUp",
     link: "https://api.leadconnectorhq.com/widget/bookings/arianna-reunion",
     requisitos: [
-      "Ten claro qué producto o servicio quieres promocionar este mes",
       "Ten a la mano tu catálogo y precios",
-      "Piensa en qué te diferencia de tu competencia",
+      "Piensa en qué diferencia a tu marca y a tu producto o servicio de la competencia",
+      "Si tienes videos de referencia que te gusten, tenlos listos",
     ],
     resumen:
       "Diferenciación de tu marca, comprensión de tus servicios, ejemplos de videos y definición de la fecha de tu primera producción.",
+    temas: [
+      "Verificar que tu empresa se diferencie de la competencia en marca y producto o servicio",
+      "Por qué importa esa diferenciación y sugerencias si todavía no la tienes",
+      "Entender tus servicios según tu vertical de negocio para la estrategia y los guiones",
+      "Definir la fecha de tu primera producción (levantamiento de avatar o grabación, según el servicio)",
+      "Ejemplos de videos de Bakano editados con IA; si no te convencen, se te piden videos de referencia para hacerlo a semejanza",
+    ],
   },
 };
+
+/**
+ * Proceso completo de implementacion (documento "Proceso de implementacion de
+ * estrategia Bakano"). Es lo que el bot sabe para guiar al cliente de punta
+ * a punta; las sesiones de la etapa 1 viven arriba con su calendario.
+ */
+export const PROCESO_ONBOARDING = {
+  envios: [
+    {
+      que: "Archivos de la marca: logos en PNG, JPEG y vector (editable o .ai), identidad de marca, datos de facturación de al menos los últimos 6 meses, y el catálogo con precios de tus productos",
+      a: "dquimi@bakano.ec",
+    },
+    {
+      que: "Invitación al portafolio comercial de Meta con permisos de ADMINISTRACIÓN",
+      a: "agenciademi@gmail.com",
+    },
+  ],
+  etapas: [
+    {
+      numero: 1,
+      nombre: "Conexiones con plataformas",
+      pasos: [
+        "Onboarding en metrics.bakano.ec: subes tus datos de facturación (mínimo 6 meses de histórico), archivos e identidad de marca",
+        "Nos envías tu catálogo y precios",
+        "Sesión técnica de Meta con Joel Jimenez",
+        "Sesión técnica de CRM y Metrics con David Robles",
+        "Sesión de estrategia con Ariana Vera",
+      ],
+    },
+    {
+      numero: 2,
+      nombre: "Producción",
+      pasos: [
+        "Producción o levantamiento de recursos como tu avatar",
+        "Edición de los videos con IA",
+        "Entrega de los videos",
+      ],
+    },
+    {
+      numero: 3,
+      nombre: "Campañas y ROAS",
+      pasos: [
+        "Configuración de las campañas publicitarias en Meta",
+        "Activación de los anuncios (aprobados por Meta)",
+        "Revisión y estabilización del ROAS: análisis de métricas de los anuncios, ajuste y optimización de campañas y seguimiento del ROAS",
+      ],
+    },
+  ],
+};
+
+/** El proceso en texto corto, para el system prompt de la IA. */
+export function procesoOnboardingEnTexto(): string {
+  const envios = PROCESO_ONBOARDING.envios.map((e) => `- ${e.que} → a ${e.a}`).join("\n");
+  const etapas = PROCESO_ONBOARDING.etapas
+    .map((e) => `Etapa ${e.numero} · ${e.nombre}:\n${e.pasos.map((p) => `  - ${p}`).join("\n")}`)
+    .join("\n");
+  const sesiones = (Object.keys(SESIONES_ONBOARDING) as SesionOnboarding[])
+    .map((s) => {
+      const d = SESIONES_ONBOARDING[s];
+      return `${d.etiqueta} con ${d.responsable.nombre} (${d.responsable.email}):\n  Requisitos: ${d.requisitos.join("; ")}\n  Temas: ${d.temas.join("; ")}\n  Link: ${d.link}`;
+    })
+    .join("\n");
+  return `Envíos que pide el proceso:\n${envios}\n\n${etapas}\n\nSesiones de la etapa 1:\n${sesiones}`;
+}
 
 export const ORDEN_SESIONES = (Object.keys(SESIONES_ONBOARDING) as SesionOnboarding[]).sort(
   (a, b) => SESIONES_ONBOARDING[a].orden - SESIONES_ONBOARDING[b].orden

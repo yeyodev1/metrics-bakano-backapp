@@ -153,6 +153,11 @@ export interface IWorkspace extends Document {
   onboardingSesiones?: IOnboardingSesiones;
   /** Correo de arranque del onboarding (el que manda al bot de Telegram). */
   onboardingBienvenidaEnviadaEn?: Date;
+  /**
+   * Envios del onboarding (logos, facturacion, catalogo, invitacion a Meta).
+   * El cliente los "declara" por el bot; el responsable los verifica.
+   */
+  onboardingEntregables?: Record<string, { estado: "pendiente" | "declarado" | "verificado"; declaradoEn?: Date; nota?: string }>;
   preNegotiatedContract?: any; // Stores predefined contract parameters
   contractData?: any; // Stores the final contract form and signature
   teamInfo?: {
@@ -327,6 +332,10 @@ const WorkspaceSchema = new Schema<IWorkspace>(
     onboardingBienvenidaEnviadaEn: {
       type: Date,
       default: null,
+    },
+    onboardingEntregables: {
+      type: Schema.Types.Mixed,
+      default: undefined,
     },
     preNegotiatedContract: {
       type: Schema.Types.Mixed,

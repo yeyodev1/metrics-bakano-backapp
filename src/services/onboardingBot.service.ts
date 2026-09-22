@@ -60,7 +60,7 @@ export interface EstadoOnboarding {
 
 export type ResultadoAgenda =
   | { ok: true; cuando: string; responsable: string }
-  | { ok: false; motivo: "ya_agendada" | "sin_calendario" | "ocupado" | "error" };
+  | { ok: false; motivo: "ya_agendada" | "sin_calendario" | "ocupado" | "error" | "en_curso" | "pasado" };
 
 function normalizar(texto: string): string {
   return (texto || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -92,10 +92,13 @@ class OnboardingBotService {
       };
     });
 
+    // Una sesion esta resuelta si esta agendada o si el responsable la marco
+    // cumplida o "no aplica": esas no pueden aparecer como "lo que sigue".
+    const resuelta = (s: EstadoSesion) => s.agendada || s.estado === "cumplida" || s.estado === "no_aplica";
     return {
       sesiones,
-      siguiente: sesiones.find((s) => !s.agendada)?.sesion,
-      completo: sesiones.every((s) => s.agendada),
+      siguiente: sesiones.find((s) => !resuelta(s))?.sesion,
+      completo: sesiones.every(resuelta),
       produccion: {
         agendada: produccion.proxima,
         puedeAgendar: produccion.puedeAgendar,
@@ -121,15 +124,37 @@ class OnboardingBotService {
 
   /** Agenda la sesion en el calendario del responsable y avisa. */
   async agendar(chat: ITelegramChat, sesion: SesionOnboarding, inicio: Date): Promise<ResultadoAgenda> {
-    const def = SESIONES_ONBOARDING[sesion];
     if (!ghlService.isConfigured()) return { ok: false, motivo: "sin_calendario" };
 
     const workspaceId = chat.workspaceId!;
+    if (inicio.getTime() < Date.now()) return { ok: false, motivo: "pasado" };
     const estado = await this.estado(workspaceId);
     if (estado.sesiones.find((s) => s.sesion === sesion)?.agendada) return { ok: false, motivo: "ya_agendada" };
 
     const cliente = await atencionClienteService.datosCliente(chat);
     if (!cliente.email) return { ok: false, motivo: "error" };
+
+    // Candado: dos toques seguidos (o la IA y un boton) no crean dos citas.
+    if (!(await atencionClienteService.tomarCandado(chat))) return { ok: false, motivo: "en_curso" };
+    try {
+      return await this.agendarConCandado(chat, sesion, inicio, cliente);
+    } finally {
+      await atencionClienteService.soltarCandado(chat);
+    }
+  }
+
+  private async agendarConCandado(
+    chat: ITelegramChat,
+    sesion: SesionOnboarding,
+    inicio: Date,
+    cliente: Awaited<ReturnType<typeof atencionClienteService.datosCliente>>
+  ): Promise<ResultadoAgenda> {
+    const def = SESIONES_ONBOARDING[sesion];
+    const workspaceId = chat.workspaceId!;
+    // Relectura dentro del candado: otro pedido pudo agendarla recien.
+    const guardada = (await models.workspaces.findById(workspaceId).select(`onboardingSesiones.${sesion}`).lean()) as any;
+    const actual = guardada?.onboardingSesiones?.[sesion];
+    if (actual?.agendada || actual?.estado === "cumplida" || actual?.estado === "no_aplica") return { ok: false, motivo: "ya_agendada" };
 
     let appointmentId: string;
     try {
@@ -137,7 +162,7 @@ class OnboardingBotService {
       if (!libres.some((h) => Math.abs(h.getTime() - inicio.getTime()) < 60_000)) return { ok: false, motivo: "ocupado" };
 
       const contactId = await ghlService.upsertContact({
-        email: cliente.email,
+        email: cliente.email!,
         firstName: cliente.firstName,
         lastName: cliente.lastName,
         companyName: cliente.entorno,
@@ -163,21 +188,33 @@ class OnboardingBotService {
     sesion: SesionOnboarding,
     datos: { fecha: Date; appointmentId?: string; origen: "telegram" | "link" }
   ): Promise<void> {
+    // Campo por campo: pisar el subdocumento entero borraba el motivo, la nota
+    // y lo pendiente del cliente que habia anotado el responsable.
+    const ruta = `onboardingSesiones.${sesion}`;
+    // Hay entornos con onboardingSesiones en null: Mongo no deja crear campos
+    // dentro de null, asi que primero se deja como objeto vacio.
+    await models.workspaces.updateOne(
+      { _id: workspaceId, onboardingSesiones: { $type: "null" } },
+      { $set: { onboardingSesiones: {} } }
+    );
     await models.workspaces.updateOne(
       { _id: workspaceId },
       {
         $set: {
-          [`onboardingSesiones.${sesion}`]: {
-            agendada: true,
-            estado: "agendada",
-            fecha: datos.fecha,
-            appointmentId: datos.appointmentId,
-            agendadoEn: new Date(),
-            origen: datos.origen,
-            avisadoEn: new Date(),
-          },
+          [`${ruta}.agendada`]: true,
+          [`${ruta}.fecha`]: datos.fecha,
+          [`${ruta}.appointmentId`]: datos.appointmentId,
+          [`${ruta}.agendadoEn`]: new Date(),
+          [`${ruta}.origen`]: datos.origen,
+          [`${ruta}.avisadoEn`]: new Date(),
         },
       }
+    );
+    // El estado lo decide el responsable si ya lo toco (bloqueada, cumplida,
+    // no aplica); solo si no, pasa a "agendada".
+    await models.workspaces.updateOne(
+      { _id: workspaceId, [`${ruta}.estado`]: { $nin: ["bloqueada", "cumplida", "no_aplica"] } },
+      { $set: { [`${ruta}.estado`]: "agendada" } }
     );
 
     // Tambien en la bitacora: el tablero tiene que poder contar la historia
@@ -190,6 +227,40 @@ class OnboardingBotService {
         nota: `Agendada ${datos.origen === "telegram" ? "por Telegram" : "desde el link del CRM"} para el ${fechaEcuador(datos.fecha)}`,
         origen: "sistema",
       })
+      .catch((error: any) => console.error("[Onboarding] bitácora:", error?.message || error));
+  }
+
+  /** La sesion vuelve a pendiente (se cancelo). No toca motivo ni nota del responsable. */
+  async desmarcar(workspaceId: Types.ObjectId, sesion: SesionOnboarding, nota: string): Promise<void> {
+    const ruta = `onboardingSesiones.${sesion}`;
+    // Si el responsable ya la marco cumplida o "no aplica", eso manda.
+    const r = await models.workspaces.updateOne(
+      { _id: workspaceId, [`${ruta}.estado`]: { $nin: ["cumplida", "no_aplica"] } },
+      {
+        $set: { [`${ruta}.agendada`]: false },
+        $unset: { [`${ruta}.fecha`]: 1, [`${ruta}.appointmentId`]: 1, [`${ruta}.agendadoEn`]: 1 },
+      }
+    );
+    if (!r.modifiedCount) return;
+    // "bloqueada" (con su motivo) la puso el responsable: se conserva.
+    await models.workspaces.updateOne(
+      { _id: workspaceId, [`${ruta}.estado`]: { $in: ["agendada", "pendiente", null] } },
+      { $set: { [`${ruta}.estado`]: "pendiente" } }
+    );
+    await models.onboardingEventos
+      .create({ workspaceId, paso: sesion, estado: "pendiente", nota, origen: "sistema" })
+      .catch((error: any) => console.error("[Onboarding] bitácora:", error?.message || error));
+  }
+
+  /** La sesion se movio: nueva fecha, mismo estado. */
+  async moverFecha(workspaceId: Types.ObjectId, sesion: SesionOnboarding, fecha: Date, nota: string): Promise<void> {
+    const ruta = `onboardingSesiones.${sesion}`;
+    await models.workspaces.updateOne(
+      { _id: workspaceId },
+      { $set: { [`${ruta}.fecha`]: fecha, [`${ruta}.actualizadoEn`]: new Date() } }
+    );
+    await models.onboardingEventos
+      .create({ workspaceId, paso: sesion, estado: "agendada", nota, origen: "sistema" })
       .catch((error: any) => console.error("[Onboarding] bitácora:", error?.message || error));
   }
 
@@ -250,6 +321,10 @@ class OnboardingBotService {
       descartes[motivo] = (descartes[motivo] || 0) + 1;
     };
     const contactos = new Map<string, any>();
+    // Canceladas primero: si el cliente reagendo por el link (cancela A, crea
+    // B), A se desmarca antes de mirar B y B se marca en esta misma pasada.
+    const esCancelada = (e: any) => ["cancelled", "canceled", "invalid"].includes(String(e.appointmentStatus || "").toLowerCase());
+    eventos.sort((a: any, b: any) => Number(esCancelada(b)) - Number(esCancelada(a)));
     for (const evento of eventos) {
       const sesion = SESION_POR_CALENDARIO[evento.calendarId];
       const inicio = evento.startTime ? new Date(evento.startTime) : null;
@@ -257,8 +332,37 @@ class OnboardingBotService {
         descartar("sin sesión o sin fecha");
         continue;
       }
-      if (["cancelled", "canceled", "noshow"].includes(String(evento.appointmentStatus || "").toLowerCase())) {
-        descartar("cita cancelada");
+      // Reuniones de guiones que agenda el bot: mismo calendario que la sesion
+      // de Estrategia de Ariana, pero no son la sesion de onboarding.
+      if (/·\s*Reunión de /i.test(String(evento.title || ""))) {
+        descartar("reunión del bot, no es sesión de onboarding");
+        continue;
+      }
+
+      // Si ya estaba marcada con esta misma cita, se sigue el CRM: cancelada
+      // la desmarca y un cambio de hora actualiza la fecha.
+      const marcada = (await models.workspaces
+        .findOne({ [`onboardingSesiones.${sesion}.appointmentId`]: evento.id })
+        .select(`_id onboardingSesiones.${sesion}`)
+        .lean()) as any;
+      const estadoCita = String(evento.appointmentStatus || "").toLowerCase();
+      if (["cancelled", "canceled", "noshow", "invalid"].includes(estadoCita)) {
+        if (marcada && estadoCita !== "noshow") {
+          await this.desmarcar(marcada._id, sesion, "Cancelada en el CRM");
+          descartar("cancelada en el CRM: se desmarcó");
+        } else {
+          descartar("cita cancelada");
+        }
+        continue;
+      }
+      if (marcada) {
+        const guardada = marcada.onboardingSesiones?.[sesion]?.fecha;
+        if (guardada && Math.abs(new Date(guardada).getTime() - inicio.getTime()) > 60_000) {
+          await this.moverFecha(marcada._id, sesion, inicio, `Movida en el CRM al ${fechaEcuador(inicio)}`);
+          descartar("movida en el CRM: se actualizó la fecha");
+        } else {
+          descartar("ya estaba marcada");
+        }
         continue;
       }
 
@@ -277,8 +381,9 @@ class OnboardingBotService {
       const workspaceId = resuelto.id;
 
       const workspace = await models.workspaces.findById(workspaceId).select("name onboardingSesiones").lean();
-      if (workspace?.onboardingSesiones?.[sesion]?.agendada) {
-        descartar("ya estaba marcada");
+      const guardada = workspace?.onboardingSesiones?.[sesion];
+      if (guardada?.agendada || guardada?.estado === "cumplida" || guardada?.estado === "no_aplica") {
+        descartar("ya estaba marcada o resuelta");
         continue;
       }
 

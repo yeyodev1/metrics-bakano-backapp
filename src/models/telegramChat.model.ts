@@ -47,6 +47,26 @@ export interface ITelegramChat extends Document {
    * Borrador de correcciones de guiones: se van anotando en la conversacion y
    * se envian todas juntas, porque la revision del cliente se recibe una vez.
    */
+  /** Reuniones que el bot agendo (guiones/atencion): sin esto no se podrian mover ni cancelar. */
+  citas?: {
+    appointmentId: string;
+    tipo: "reunion";
+    tema: string;
+    calendarId?: string;
+    inicio: Date;
+    agendadaEn?: Date;
+    workspaceId?: Types.ObjectId;
+    userId?: Types.ObjectId;
+  }[];
+  /** Cambio de cita propuesto y esperando que el cliente lo confirme. */
+  cambioPendiente?: {
+    accion: "cancelar" | "reprogramar";
+    ref: string;
+    inicio?: Date;
+    motivo?: string;
+    resumen: string;
+    creadoEn: Date;
+  };
   revisionGuiones?: {
     planningId: Types.ObjectId;
     correcciones: { itemId: string; numero: number; tema: string; texto: string; categoria?: string }[];
@@ -87,6 +107,26 @@ const TelegramChatSchema = new Schema<ITelegramChat>(
     },
     ultimoAnimo: { estado: String, motivo: String, en: Date },
     ultimaAlerta: { estado: String, en: Date },
+    citas: {
+      type: [
+        {
+          _id: false,
+          appointmentId: String,
+          tipo: String,
+          tema: String,
+          calendarId: String,
+          inicio: Date,
+          agendadaEn: Date,
+          workspaceId: { type: Schema.Types.ObjectId, ref: "Workspace" },
+          userId: { type: Schema.Types.ObjectId, ref: "User" },
+        },
+      ],
+      default: undefined,
+    },
+    cambioPendiente: {
+      type: { accion: String, ref: String, inicio: Date, motivo: String, resumen: String, creadoEn: Date },
+      default: undefined,
+    },
     revisionGuiones: {
       type: {
         planningId: { type: Schema.Types.ObjectId, ref: "VideoPlanning" },

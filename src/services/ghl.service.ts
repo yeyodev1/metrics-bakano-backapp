@@ -176,6 +176,45 @@ export class GhlService {
     return id;
   }
 
+  /** Una cita por id. null si no existe o el CRM no responde. */
+  async getAppointment(eventId: string): Promise<any | null> {
+    try {
+      const response = await axios.get(`${GHL_API_BASE}/calendars/events/appointments/${eventId}`, {
+        headers: this.getHeaders(),
+        timeout: 15_000,
+      });
+      return response.data?.event || response.data?.appointment || null;
+    } catch (error: any) {
+      console.error("[GHL] cita:", error.response?.data || error.message);
+      return null;
+    }
+  }
+
+  /**
+   * Cancela o mueve una cita. Cancelar es marcarla "cancelled" (nunca DELETE):
+   * la cita queda con su historial en el CRM. Mover recalcula el fin con la
+   * duracion del calendario y deja que el CRM valide que el horario este libre.
+   */
+  async updateAppointment(eventId: string, cambio: { cancelar: true } | { startTime: Date }): Promise<void> {
+    let body: Record<string, unknown>;
+    if ("cancelar" in cambio) {
+      body = { appointmentStatus: "cancelled", toNotify: true };
+    } else {
+      const actual = await this.getAppointment(eventId);
+      if (!actual?.calendarId) throw new Error("Cita no encontrada en el CRM");
+      const calendario = await this.getCalendar(actual.calendarId);
+      const minutos =
+        calendario?.slotDurationUnit === "hours" ? (calendario.slotDuration || 1) * 60 : calendario?.slotDuration || 30;
+      body = {
+        startTime: cambio.startTime.toISOString(),
+        endTime: new Date(cambio.startTime.getTime() + minutos * 60_000).toISOString(),
+        appointmentStatus: "confirmed",
+        toNotify: true,
+      };
+    }
+    await axios.put(`${GHL_API_BASE}/calendars/events/appointments/${eventId}`, body, { headers: this.getHeaders(), timeout: 15_000 });
+  }
+
   /**
    * Fetches all appointments for the location across all calendars within a given timeframe.
    */

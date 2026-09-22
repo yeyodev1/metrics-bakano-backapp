@@ -7,11 +7,22 @@ import { EQUIPO_ATENCION, equipoAtencionService, type TemaAtencion } from "./equ
 import { atencionClienteService, diaEcuador, fechaEcuador, horarioCorto } from "./atencionCliente.service";
 import { onboardingBotService } from "./onboardingBot.service";
 import { perfilClienteService } from "./perfilCliente.service";
+import { onboardingDatosService } from "./onboardingDatos.service";
+import { citasClienteService } from "./citasCliente.service";
 import { revisionGuionesService, type RevisionPendiente } from "./revisionGuiones.service";
 import { SESIONES_ONBOARDING, type SesionOnboarding } from "./onboardingSesiones.service";
 import { telegramAgentService } from "./telegramAgent.service";
 import { escaparHtml, telegramService, type InlineButton, type TelegramUpdate } from "./telegram.service";
 
+/**
+ * "quiero mover la grabación", "cancela mi sesión", "moverla al jueves"...
+ * Verbo de cambio + algo que sea una cita (o el pronombre "-la"), para no
+ * atrapar "cancelaron mi pedido".
+ */
+const VERBO_CAMBIO = /\b(mover|muev[eao]|reprogram\w*|cancel\w*|pospon\w*|posterg\w*|cambi\w*|pasar)\b/i;
+const OBJETO_CITA =
+  /\b(cita|sesi[oó]n|reuni[oó]n|grabaci[oó]n|producci[oó]n|fecha|hora|d[ií]a|lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bado|domingo|semana)\b|\b(mover|cancelar|reprogramar|posponer|postergar|pasar)la\b/i;
+const pideCambioCita = (texto: string) => VERBO_CAMBIO.test(texto) && OBJETO_CITA.test(texto) || /\b(mover|cancelar|reprogramar|posponer|postergar)la\b/i.test(texto);
 const CORREO_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const CODIGO_MINUTOS = 10;
 const CODIGO_MAX_INTENTOS = 5;
@@ -147,13 +158,23 @@ export class TelegramBotService {
           chat.tema = undefined;
           await chat.save();
         }
+        // Mover o cancelar una cita lo resuelve la IA con el calendario, no se
+        // reenvia suelto al equipo aunque haya un tema elegido.
+        if (chat.tema && chat.workspaceId && pideCambioCita(texto)) {
+          const tema = chat.tema;
+          chat.tema = undefined;
+          await chat.save();
+          if (await telegramAgentService.responder(chat, texto)) return;
+          // La IA no respondio: el pedido no se pierde, va a quien atiende el tema.
+          return this.enviarSolicitud(chat, tema, texto);
+        }
         // Eligio un tema en el menu: su mensaje va directo a esa persona.
         if (chat.tema && chat.workspaceId) return this.enviarSolicitud(chat, chat.tema, texto);
         if (chat.workspaceId && (await telegramAgentService.responder(chat, texto))) return;
         return this.mostrarMenu(
           chat,
           undefined,
-          "Te leo! 😊 Para pasarle tu mensaje a la persona correcta, elige primero el tema:"
+          "Uy, se me trabó la respuesta 😅 Escríbemelo de nuevo en un ratito, o elige el tema abajo y se lo paso directo a la persona:"
         );
     }
   }
@@ -208,7 +229,8 @@ export class TelegramBotService {
     await telegramService.sendMessage(
       chat.chatId,
       `Perfecto! 📬 Si <b>${escaparHtml(correo)}</b> tiene cuenta en metrics.bakano.ec, te acabo de enviar un código de 6 dígitos.\n\n` +
-        `Escríbelo aquí 👇 (vence en ${CODIGO_MINUTOS} minutos). Te equivocaste de correo? Solo escribe el correcto.`
+        `Escríbelo aquí 👇 (vence en ${CODIGO_MINUTOS} minutos). Te equivocaste de correo? Solo escribe el correcto.\n\n` +
+        "Si en unos minutos no te llega, revisa el spam. Si tampoco está, ese correo todavía no tiene un <b>entorno creado</b> en metrics.bakano.ec: pídele a tu asesor de Bakano que lo cree o escríbenos a soporte@bakano.ec. Sin entorno no puedo conectarte."
     );
   }
 
@@ -276,7 +298,15 @@ export class TelegramBotService {
     }
     if (data === "menu:agendar") return this.elegirTemaReunion(chat);
     if (data === "menu:onboarding") return this.mostrarOnboarding(chat);
+    if (data === "cita:si" || data === "cita:no") return this.responderCambioCita(chat, data === "cita:si");
+    if (data === "citas:cambiar") {
+      chat.tema = undefined;
+      await chat.save();
+      if (await telegramAgentService.responder(chat, "Quiero mover o cancelar una de mis citas")) return;
+      return this.mostrarMenu(chat);
+    }
     if (data === "rev:lista") return this.mostrarGuionesParaRevisar(chat);
+    if (data.startsWith("onbl:")) return this.enviarLinkOnboarding(chat, data.slice(5) as SesionOnboarding);
     if (data.startsWith("onb:")) return this.mostrarHorariosOnboarding(chat, data.slice(4) as SesionOnboarding);
     if (data.startsWith("onbs:")) {
       const [, sesion, segundos] = data.split(":");
@@ -414,12 +444,29 @@ export class TelegramBotService {
   // ── Onboarding ─────────────────────────────────────────────────────────────
   /** En que paso va el cliente, con botones para agendar lo que falte. */
   private async mostrarOnboarding(chat: ITelegramChat): Promise<void> {
-    const estado = await onboardingBotService.estado(chat.workspaceId!);
+    const [estado, pendientes] = await Promise.all([
+      onboardingBotService.estado(chat.workspaceId!),
+      onboardingDatosService.pendientes(chat.workspaceId!).catch(() => null),
+    ]);
     const lineas = estado.sesiones.map((s) =>
-      s.agendada
-        ? `✅ ${s.emoji} ${s.etiqueta} · con ${escaparHtml(s.responsable)}\n     ${s.fecha ? fechaEcuador(s.fecha) : "agendada"}`
-        : `⬜ ${s.emoji} ${s.etiqueta} · con ${escaparHtml(s.responsable)}`
+      s.estado === "cumplida" || s.estado === "no_aplica"
+        ? `✅ ${s.emoji} ${s.etiqueta} · ${s.estado === "cumplida" ? "hecha" : "no aplica"}`
+        : s.agendada
+          ? `✅ ${s.emoji} ${s.etiqueta} · con ${escaparHtml(s.responsable)}\n     ${s.fecha ? fechaEcuador(s.fecha) : "agendada"}`
+          : `⬜ ${s.emoji} ${s.etiqueta} · con ${escaparHtml(s.responsable)}`
     );
+    // Lo que falta de parte del cliente: envios y datos de su marca.
+    const faltaEnviar = (pendientes?.entregables || []).filter((e) => e.estado === "pendiente");
+    const faltaContar = pendientes?.datosMarcaFaltantes || [];
+    const deTuParte =
+      faltaEnviar.length || faltaContar.length
+        ? "\n\n📦 <b>De tu parte falta</b>\n" +
+          faltaEnviar.map((e) => `• ${escaparHtml(e.etiqueta)} → ${escaparHtml(e.enviarA)}`).join("\n") +
+          (faltaContar.length
+            ? `${faltaEnviar.length ? "\n" : ""}• Contarme sobre tu negocio (${faltaContar.length} ${faltaContar.length === 1 ? "dato" : "datos"}). Escríbeme <i>te cuento de mi negocio</i> y lo dejo en el sistema`
+            : "") +
+          "\n\nSi ya enviaste algo, dímelo y le aviso al equipo para que lo revise."
+        : "";
     const produccion = estado.produccion.agendada
       ? `✅ 🎬 Producción · ${fechaEcuador(estado.produccion.agendada)}`
       : estado.completo
@@ -427,7 +474,7 @@ export class TelegramBotService {
         : "⬜ 🎬 Producción · después de tus sesiones";
 
     const botones: InlineButton[][] = estado.sesiones
-      .filter((s) => !s.agendada)
+      .filter((s) => !s.agendada && s.estado !== "cumplida" && s.estado !== "no_aplica")
       .map((s) => [{ text: `📅 Agendar ${s.etiqueta}`, callback_data: `onb:${s.sesion}` }]);
     if (estado.completo && estado.produccion.puedeAgendar) {
       botones.push([{ text: "🎬 Agendar mi producción", callback_data: "ag:produccion" }]);
@@ -441,7 +488,8 @@ export class TelegramBotService {
         `${lineas.join("\n")}\n${produccion}\n\n` +
         (siguiente
           ? `Lo que sigue es <b>${siguiente.etiqueta}</b> con <b>${escaparHtml(siguiente.responsable)}</b>.\n${siguiente.resumen}\n\nPara esa sesión necesitas:\n${siguiente.requisitos.map((r) => `• ${r}`).join("\n")}`
-          : "Ya tienes todas tus sesiones agendadas 🎉 cualquier duda me escribes."),
+          : "Ya tienes todas tus sesiones listas 🎉 cualquier duda me escribes.") +
+        deTuParte,
       botones
     );
   }
@@ -456,7 +504,8 @@ export class TelegramBotService {
       await telegramService.sendMessage(
         chat.chatId,
         `${intro}${def.emoji} No pude ver los horarios de <b>${escaparHtml(def.responsable.nombre)}</b> ahora mismo 😅\n\n` +
-          `Puedes agendar desde aquí: ${def.link}\n\nO cuéntame qué día te queda mejor y se lo paso.`
+          `Puedes agendar desde aquí: ${def.link}\n\nO cuéntame qué día te queda mejor y se lo paso. ` +
+          `Si quieres agilizarlo, también puedes escribirle a ${def.responsable.email}`
       );
       chat.tema = "atencion";
       await chat.save();
@@ -464,7 +513,7 @@ export class TelegramBotService {
     }
 
     const botones = this.botonesHorarios(horarios, (h) => `onbs:${sesion}:${Math.floor(h.getTime() / 1000)}`);
-    botones.push([{ text: "🔗 Prefiero el link", callback_data: `onb:${sesion}` }, { text: "📋 Menú", callback_data: "menu:ver" }]);
+    botones.push([{ text: "🔗 Prefiero el link", callback_data: `onbl:${sesion}` }, { text: "📋 Menú", callback_data: "menu:ver" }]);
 
     await telegramService.sendMessage(
       chat.chatId,
@@ -472,6 +521,57 @@ export class TelegramBotService {
         `${def.resumen}\n\nAntes de la sesión ten listo:\n${def.requisitos.map((r) => `• ${r}`).join("\n")}\n\n` +
         "Elige el horario que te quede mejor 👇",
       botones
+    );
+  }
+
+  /** Boton de confirmacion de un cambio de cita propuesto por la IA. */
+  private async responderCambioCita(chat: ITelegramChat, confirma: boolean): Promise<void> {
+    if (!confirma) {
+      await citasClienteService.descartar(chat);
+      await telegramService.sendMessage(chat.chatId, "Listo, no cambié nada 👌 tu cita sigue igual.", [
+        [{ text: "📋 Ver menú", callback_data: "menu:ver" }],
+      ]);
+      return;
+    }
+    await telegramService.sendMessage(chat.chatId, "⏳ Un segundito, lo estoy cambiando en el calendario...");
+    const r = await citasClienteService.confirmar(chat);
+    let texto: string;
+    if (r.ok) {
+      texto =
+        r.accion === "cancelada"
+          ? `Listo, quedó cancelada ✅\n\n${escaparHtml(r.cita)} del ${r.antes}. Ya le avisé a <b>${escaparHtml(r.con)}</b>.`
+          : `Listo, quedó movida ✅\n\n${escaparHtml(r.cita)}\n📅 Ahora: <b>${r.ahora}</b> (hora Ecuador)\n👤 Con <b>${escaparHtml(r.con)}</b>, ya le avisé.`;
+    } else if (r.motivo === "sin_cambio_pendiente" || r.motivo === "cambio_vencido") {
+      texto = "Ese cambio ya no está vigente 😅 cuéntame de nuevo qué quieres mover o cancelar y lo armamos.";
+    } else if (r.motivo === "en_curso") {
+      texto = "Ya lo estoy procesando, dame un segundito 🙏";
+    } else if (r.motivo === "fuera_de_plazo") {
+      texto =
+        "Ya faltan menos de 48 horas para esa cita, así que no puedo cambiarla desde aquí." +
+        (r.correos?.length ? ` Escríbele directo a ${escaparHtml(r.correos.join(" o "))} y lo coordinan.` : "");
+    } else if (r.motivo === "horario_no_disponible") {
+      texto = "Uy, ese horario ya se ocupó 😕 dime y te muestro otros.";
+    } else {
+      texto =
+        "No pude hacer el cambio desde aquí 😕" +
+        (r.correos?.length ? ` Escríbele a ${escaparHtml(r.correos.join(" o "))} y lo resuelven.` : " Cuéntame y se lo paso al equipo.");
+    }
+    await telegramService.sendMessage(chat.chatId, texto, [[{ text: "📋 Ver menú", callback_data: "menu:ver" }]]);
+    // Queda en la memoria de la IA: si el cliente sigue escribiendo, sabe que ya se hizo.
+    await models.telegramChats.updateOne(
+      { _id: chat._id },
+      { $push: { historial: { $each: [{ rol: "bot", texto: texto.replace(/<[^>]+>/g, "").slice(0, 2000), en: new Date() }], $slice: -20 } } }
+    );
+  }
+
+  private async enviarLinkOnboarding(chat: ITelegramChat, sesion: SesionOnboarding): Promise<void> {
+    if (!(sesion in SESIONES_ONBOARDING)) return this.mostrarOnboarding(chat);
+    const def = SESIONES_ONBOARDING[sesion];
+    await telegramService.sendMessage(
+      chat.chatId,
+      `${def.emoji} Dale, agenda tu sesión de <b>${def.etiqueta}</b> con <b>${escaparHtml(def.responsable.nombre)}</b> aquí:\n${def.link}\n\n` +
+        "Apenas la agendes me entero y la marco en tu onboarding 🙌",
+      [[{ text: "📋 Volver al menú", callback_data: "menu:ver" }]]
     );
   }
 
@@ -485,7 +585,11 @@ export class TelegramBotService {
 
     if (!r.ok) {
       if (r.motivo === "ya_agendada") return this.mostrarOnboarding(chat);
-      if (r.motivo === "ocupado") {
+      if (r.motivo === "en_curso") {
+        await telegramService.sendMessage(chat.chatId, "Ya estoy agendando, dame un segundito 🙏");
+        return;
+      }
+      if (r.motivo === "ocupado" || r.motivo === "pasado") {
         return this.mostrarHorariosOnboarding(chat, sesion, "Uy, ese horario lo tomaron justo ahora 😕");
       }
       const def = SESIONES_ONBOARDING[sesion];
@@ -499,7 +603,7 @@ export class TelegramBotService {
     const def = SESIONES_ONBOARDING[sesion];
     await telegramService.sendMessage(
       chat.chatId,
-      `Listo, quedó agendada 🎉\n\n${def.emoji} <b>${def.etiqueta}</b>\n📅 <b>${r.cuando}</b> (hora Ecuador)\n👤 Con <b>${escaparHtml(r.responsable)}</b>\n\n` +
+      `Listo, quedó agendada 🎉\n\n${def.emoji} <b>${def.etiqueta}</b>\n📅 <b>${r.cuando}</b> (hora Ecuador)\n👤 Con <b>${escaparHtml(r.responsable)}</b> (${def.responsable.email})\n\n` +
         `Ya le avisé. Recuerda tener listo:\n${def.requisitos.map((x) => `• ${x}`).join("\n")}`
     );
     return this.mostrarOnboarding(chat);
@@ -517,8 +621,13 @@ export class TelegramBotService {
       await telegramService.sendMessage(
         chat.chatId,
         `${intro}🎬 Ya tienes una producción agendada para el <b>${fechaEcuador(estado.proxima!)}</b>.\n\n` +
-          "Agendamos una producción cada 2 meses, así que no puedo reservar otra por ahora. " +
-          `Si necesitas moverla o tienes otro tema de producción, cuéntame aquí y se lo paso a <b>${nombres}</b> 📩`
+          "Agendamos una producción cada 2 meses, así que no puedo reservar otra por ahora.\n\n" +
+          "Si necesitas moverla o cancelarla, toca abajo (se puede hasta 48 horas antes). " +
+          `Para otro tema de producción, cuéntame aquí y se lo paso a <b>${nombres}</b> 📩`,
+        [
+          [{ text: "🔄 Mover o cancelar", callback_data: "citas:cambiar" }],
+          [{ text: "📋 Volver al menú", callback_data: "menu:ver" }],
+        ]
       );
       return;
     }
@@ -659,7 +768,8 @@ export class TelegramBotService {
       await chat.save();
       await telegramService.sendMessage(
         chat.chatId,
-        "Tu cuenta todavía no tiene entornos activos 😕 Escríbenos a soporte@bakano.ec y lo resolvemos contigo."
+        "Para que todo funcione (tu onboarding, tus sesiones, tus guiones y tus métricas) necesitas un <b>entorno creado</b> en metrics.bakano.ec, y tu cuenta todavía no tiene uno activo 😕\n\n" +
+          "Pídele a tu asesor de Bakano que lo cree o escríbenos a soporte@bakano.ec. Cuando esté listo, escríbeme /start y seguimos."
       );
       return;
     }
