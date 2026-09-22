@@ -323,6 +323,12 @@ export class TelegramBotService {
     if (data === "menu:onboarding") return this.mostrarOnboarding(chat);
     if (data === "cita:si" || data === "cita:no") return this.responderCambioCita(chat, data === "cita:si");
     if (data === "citas:ver") return this.mostrarCitas(chat);
+    if (data === "datos:contar") {
+      chat.tema = undefined;
+      await chat.save();
+      if (await telegramAgentService.responder(chat, "Quiero contarte de mi negocio para que lo dejes en el sistema")) return;
+      return this.mostrarMenu(chat);
+    }
     // cc:m:<ref> mueve · cc:c:<ref> cancela · cs:<epoch>:<ref> elige horario
     if (data.startsWith("cc:m:")) return this.mostrarHorariosParaMover(chat, data.slice(5));
     if (data.startsWith("cc:c:")) return this.pedirConfirmacionCita(chat, { accion: "cancelar", ref: data.slice(5) });
@@ -479,59 +485,75 @@ export class TelegramBotService {
 
   // ── Onboarding ─────────────────────────────────────────────────────────────
   /** En que paso va el cliente, con botones para agendar lo que falte. */
+  /**
+   * El onboarding en una pantalla: en qué paso va, UNA acción principal y
+   * botones que llevan directo a subir lo que falta. Antes era una lista larga
+   * con links pegados en el texto y el cliente no sabía por dónde empezar.
+   */
   private async mostrarOnboarding(chat: ITelegramChat): Promise<void> {
     const [estado, pendientes] = await Promise.all([
       onboardingBotService.estado(chat.workspaceId!),
       onboardingDatosService.pendientes(chat.workspaceId!).catch(() => null),
     ]);
+
+    const hecha = (s: { agendada: boolean; estado?: string }) => s.estado === "cumplida" || s.estado === "no_aplica";
+    const listas = estado.sesiones.filter(hecha).length;
     const lineas = estado.sesiones.map((s) =>
-      s.estado === "cumplida" || s.estado === "no_aplica"
-        ? `✅ ${s.emoji} ${s.etiqueta} · ${s.estado === "cumplida" ? "hecha" : "no aplica"}`
+      hecha(s)
+        ? `✅ ${s.emoji} ${s.etiqueta}`
         : s.agendada
-          ? `✅ ${s.emoji} ${s.etiqueta} · con ${escaparHtml(s.responsable)}\n     ${s.fecha ? fechaEcuador(s.fecha) : "agendada"}`
-          : `⬜ ${s.emoji} ${s.etiqueta} · con ${escaparHtml(s.responsable)}`
+          ? `🗓️ ${s.emoji} ${s.etiqueta} · ${s.fecha ? fechaEcuador(s.fecha) : "agendada"}`
+          : `⬜ ${s.emoji} ${s.etiqueta}`
     );
-    // Lo que falta de parte del cliente: envios y datos de su marca.
+    lineas.push(
+      estado.produccion.agendada
+        ? `🗓️ 🎬 Tu primera producción · ${fechaEcuador(estado.produccion.agendada)}`
+        : "⬜ 🎬 Tu primera producción"
+    );
+
+    // Una sola cosa por hacer ahora. El resto queda en los botones de abajo.
+    const siguiente = estado.sesiones.find((s) => s.sesion === estado.siguiente);
+    const agendada = estado.sesiones.find((s) => s.agendada && !hecha(s));
+    const ahora = siguiente
+      ? `👉 <b>Ahora:</b> agenda tu sesión de <b>${siguiente.etiqueta}</b> con <b>${escaparHtml(siguiente.responsable)}</b>.\n` +
+        `${siguiente.resumen}\n\nTen listo:\n${siguiente.requisitos.map((r) => `• ${r}`).join("\n")}`
+      : agendada
+        ? `👉 <b>Ahora:</b> tu sesión de <b>${agendada.etiqueta}</b> es el <b>${agendada.fecha ? fechaEcuador(agendada.fecha) : "día agendado"}</b>. ` +
+          `Cuando ${escaparHtml(agendada.responsable)} la dé por cerrada, te aviso y seguimos.`
+        : estado.produccion.agendada
+          ? "👉 <b>Ahora:</b> a preparar tu producción. Cualquier duda me escribes 💛"
+          : "👉 <b>Ahora:</b> agenda tu primera producción y arrancamos 🎬";
+
     const faltaEnviar = (pendientes?.entregables || []).filter((e) => e.estado === "pendiente");
     const faltaContar = pendientes?.datosMarcaFaltantes || [];
-    const deTuParte =
-      faltaEnviar.length || faltaContar.length
-        ? "\n\n📦 <b>De tu parte falta</b>\n" +
-          faltaEnviar
-            .map((e) =>
-              e.link
-                ? `• ${escaparHtml(e.etiqueta)}\n     ${e.link}`
-                : `• ${escaparHtml(e.etiqueta)} (se hace en Meta, invitando a ${escaparHtml(e.invitarA || "")})`
-            )
-            .join("\n") +
-          (faltaContar.length
-            ? `${faltaEnviar.length ? "\n" : ""}• Contarme sobre tu negocio (${faltaContar.length} ${faltaContar.length === 1 ? "dato" : "datos"}). Escríbeme <i>te cuento de mi negocio</i> y lo dejo en el sistema`
-            : "") +
-          "\n\nSi ya subiste algo, dímelo y le aviso al equipo para que lo revise."
-        : "";
-    const produccion = estado.produccion.agendada
-      ? `✅ 🎬 Producción · ${fechaEcuador(estado.produccion.agendada)}`
-      : estado.completo
-        ? "⬜ 🎬 Producción · agéndala cuando quieras"
-        : "⬜ 🎬 Producción · después de tus sesiones";
 
-    const botones: InlineButton[][] = estado.sesiones
-      .filter((s) => !s.agendada && s.estado !== "cumplida" && s.estado !== "no_aplica")
-      .map((s) => [{ text: `📅 Agendar ${s.etiqueta}`, callback_data: `onb:${s.sesion}` }]);
-    if (estado.completo && estado.produccion.puedeAgendar) {
-      botones.push([{ text: "🎬 Agendar mi producción", callback_data: "ag:produccion" }]);
+    const botones: InlineButton[][] = [];
+    if (siguiente) botones.push([{ text: `📅 Agendar ${siguiente.etiqueta}`, callback_data: `onb:${siguiente.sesion}` }]);
+    else if (estado.produccion.puedeAgendar) botones.push([{ text: "🎬 Agendar mi producción", callback_data: "ag:produccion" }]);
+
+    // Un botón por cosa pendiente, que abre la pantalla exacta donde se sube.
+    const ETIQUETA_CORTA: Record<string, string> = {
+      archivosMarca: "📤 Subir mis logos",
+      facturacion: "💵 Cargar mi facturación",
+      catalogo: "🏷️ Subir mi catálogo",
+    };
+    for (const e of faltaEnviar) {
+      if (e.link) botones.push([{ text: ETIQUETA_CORTA[e.clave] || `📤 ${e.etiqueta}`, url: e.link }]);
     }
+    if (faltaContar.length) botones.push([{ text: `✍️ Contarte de mi negocio (${faltaContar.length})`, callback_data: "datos:contar" }]);
     botones.push([{ text: "📋 Volver al menú", callback_data: "menu:ver" }]);
 
-    const siguiente = estado.sesiones.find((s) => s.sesion === estado.siguiente);
+    const invitacionMeta = faltaEnviar.find((e) => e.clave === "invitacionMeta");
     await telegramService.sendMessage(
       chat.chatId,
-      "🚀 <b>Así va tu onboarding</b>\n\n" +
-        `${lineas.join("\n")}\n${produccion}\n\n` +
-        (siguiente
-          ? `Lo que sigue es <b>${siguiente.etiqueta}</b> con <b>${escaparHtml(siguiente.responsable)}</b>.\n${siguiente.resumen}\n\nPara esa sesión necesitas:\n${siguiente.requisitos.map((r) => `• ${r}`).join("\n")}`
-          : "Ya tienes todas tus sesiones listas 🎉 cualquier duda me escribes.") +
-        deTuParte,
+      `🚀 <b>Tu onboarding</b> · ${listas} de ${estado.sesiones.length} sesiones listas\n\n` +
+        `${lineas.join("\n")}\n\n${ahora}` +
+        (invitacionMeta
+          ? `\n\n📣 Falta además invitar a <b>${escaparHtml(invitacionMeta.invitarA || "")}</b> a tu portafolio de Meta con permisos de administración. Eso se hace dentro de Meta Business y lo vemos en la sesión con Joel Jimenez.`
+          : "") +
+        (faltaEnviar.some((e) => e.link) || faltaContar.length
+          ? "\n\nCon los botones de abajo subes lo que falta. Si ya lo subiste, dímelo y le aviso al equipo para que lo revise."
+          : ""),
       botones
     );
   }

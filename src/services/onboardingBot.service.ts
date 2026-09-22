@@ -7,6 +7,7 @@ import { slackService } from "./slack.service";
 import { resendService } from "./resend.service";
 import { notificationService } from "./notification.service";
 import { atencionClienteService, fechaEcuador } from "./atencionCliente.service";
+import { telegramService, type InlineButton } from "./telegram.service";
 import {
   CORREOS_SEGUIMIENTO_ONBOARDING,
   ORDEN_SESIONES,
@@ -276,7 +277,10 @@ class OnboardingBotService {
     const def = SESIONES_ONBOARDING[sesion];
     const cuando = fechaEcuador(fecha);
     const titulo = `${def.emoji} ${entorno} agendó su sesión de ${def.etiqueta} · ${cuando}`;
-    const cuerpo = `${cliente} agendó ${origen === "telegram" ? "por Telegram" : "desde el link del CRM"} su sesión de ${def.etiqueta} con ${def.responsable.nombre} para el ${cuando} (hora Ecuador).`;
+    const cuerpo =
+      `${cliente} agendó ${origen === "telegram" ? "por Telegram" : "desde el link del CRM"} su sesión de ${def.etiqueta} con ${def.responsable.nombre} para el ${cuando} (hora Ecuador).\n\n` +
+      `Cuando la termines, marca la cita como "Showed" en el CRM: con eso el bot da la sesión por cumplida y lleva al cliente al siguiente paso solo. ` +
+      `Si el cliente no llegó, márcala como "No Show" y el bot le ofrece reagendarla.`;
     const correos = [...new Set([def.responsable.email, ...CORREOS_SEGUIMIENTO_ONBOARDING])];
 
     const internos = await models.users.find({ email: { $in: correos }, isActive: true }).select("_id").lean();
@@ -301,8 +305,14 @@ class OnboardingBotService {
    * Reconoce las citas que el cliente agendo por el link del CRM y las marca.
    * Sin esto el bot diria "te falta agendar" a alguien que ya agendo.
    */
-  async sincronizarDesdeCrm(): Promise<{ revisadas: number; marcadas: number; avisadas: number; omitido?: string }> {
-    if (!ghlService.isConfigured()) return { revisadas: 0, marcadas: 0, avisadas: 0, omitido: "GHL sin configurar" };
+  async sincronizarDesdeCrm(): Promise<{
+    revisadas: number;
+    marcadas: number;
+    cumplidas: number;
+    avisadas: number;
+    omitido?: string;
+  }> {
+    if (!ghlService.isConfigured()) return { revisadas: 0, marcadas: 0, cumplidas: 0, avisadas: 0, omitido: "GHL sin configurar" };
 
     const desde = new Date(Date.now() - VENTANA_SYNC_DIAS.atras * 86_400_000);
     const hasta = new Date(Date.now() + VENTANA_SYNC_DIAS.adelante * 86_400_000);
@@ -313,6 +323,7 @@ class OnboardingBotService {
     );
 
     let marcadas = 0;
+    let cumplidas = 0;
     let avisadas = 0;
     // Por que se descarta cada cita: sin esto el cron dice "0 marcadas" y no
     // hay forma de saber si fue por el contacto, por el correo o por el entorno.
@@ -346,10 +357,30 @@ class OnboardingBotService {
         .select(`_id onboardingSesiones.${sesion}`)
         .lean()) as any;
       const estadoCita = String(evento.appointmentStatus || "").toLowerCase();
+
+      // El responsable marca la cita como "asistió" en el CRM: ahí es cuando
+      // la sesión queda cumplida y el bot empuja al cliente al siguiente paso.
+      if (estadoCita === "showed") {
+        const workspaceId = marcada?._id || (await this.entornoDelEvento(evento, contactos, sesion));
+        if (!workspaceId) {
+          descartar("asistió pero sin entorno");
+          continue;
+        }
+        if (await this.marcarCumplida(workspaceId, sesion)) {
+          cumplidas++;
+          descartar("marcada como cumplida desde el CRM");
+        } else {
+          descartar("ya estaba cumplida");
+        }
+        continue;
+      }
+
       if (["cancelled", "canceled", "noshow", "invalid"].includes(estadoCita)) {
-        if (marcada && estadoCita !== "noshow") {
-          await this.desmarcar(marcada._id, sesion, "Cancelada en el CRM");
-          descartar("cancelada en el CRM: se desmarcó");
+        if (marcada) {
+          const motivo = estadoCita === "noshow" ? "El cliente no asistió (marcado en el CRM)" : "Cancelada en el CRM";
+          await this.desmarcar(marcada._id, sesion, motivo);
+          if (estadoCita === "noshow") await this.avisarReagendar(marcada._id, sesion);
+          descartar(estadoCita === "noshow" ? "no asistió: vuelve a pendiente" : "cancelada en el CRM: se desmarcó");
         } else {
           descartar("cita cancelada");
         }
@@ -407,7 +438,92 @@ class OnboardingBotService {
     if (Object.keys(descartes).length) {
       console.log("[Onboarding] citas descartadas:", JSON.stringify(descartes));
     }
-    return { revisadas: eventos.length, marcadas, avisadas };
+    return { revisadas: eventos.length, marcadas, cumplidas, avisadas };
+  }
+
+  /** El entorno de una cita del CRM, resolviendo el contacto si hace falta. */
+  private async entornoDelEvento(evento: any, contactos: Map<string, any>, sesion: SesionOnboarding): Promise<Types.ObjectId | null> {
+    if (!contactos.has(evento.contactId)) contactos.set(evento.contactId, await ghlService.getContact(evento.contactId));
+    const contacto = contactos.get(evento.contactId);
+    const correo = String(contacto?.email || "").toLowerCase();
+    if (!correo) return null;
+    const resuelto = await this.entornoDeLaCita(correo, contacto, evento.title);
+    return resuelto.id ?? null;
+  }
+
+  /**
+   * La sesion se dio: el responsable marco "asistió" en el CRM. Queda cumplida
+   * (aunque el cliente la hubiera agendado por el link y no por el bot) y al
+   * cliente se le avisa por Telegram con el siguiente paso, que es justo lo
+   * que antes se quedaba esperando a que alguien lo escribiera a mano.
+   */
+  async marcarCumplida(workspaceId: Types.ObjectId, sesion: SesionOnboarding, nota = "Marcada como asistida en el CRM"): Promise<boolean> {
+    const ruta = `onboardingSesiones.${sesion}`;
+    const r = await models.workspaces.updateOne(
+      { _id: workspaceId, [`${ruta}.estado`]: { $nin: ["cumplida", "no_aplica"] } },
+      { $set: { [`${ruta}.agendada`]: true, [`${ruta}.estado`]: "cumplida", [`${ruta}.actualizadoEn`]: new Date() } }
+    );
+    if (!r.modifiedCount) return false;
+
+    await models.onboardingEventos
+      .create({ workspaceId, paso: sesion, estado: "cumplida", nota, origen: "sistema" })
+      .catch((error: any) => console.error("[Onboarding] bitácora:", error?.message || error));
+    await this.avisarAvanceAlCliente(workspaceId, sesion).catch((error: any) =>
+      console.error("[Onboarding] aviso de avance:", error?.message || error)
+    );
+    return true;
+  }
+
+  /**
+   * "Ya cerramos esta sesión, lo que sigue es X": va a los chats de Telegram
+   * de ese entorno con el botón para agendar lo siguiente.
+   */
+  private async avisarAvanceAlCliente(workspaceId: Types.ObjectId, sesion: SesionOnboarding): Promise<void> {
+    const chats = await models.telegramChats.find({ workspaceId, estado: "listo" }).select("chatId").lean();
+    if (!chats.length) return;
+
+    const def = SESIONES_ONBOARDING[sesion];
+    const estado = await this.estado(workspaceId);
+    const siguiente = estado.siguiente ? SESIONES_ONBOARDING[estado.siguiente] : null;
+
+    const texto = siguiente
+      ? `Listo, cerramos tu sesión de <b>${def.etiqueta}</b> con ${def.responsable.nombre} ✅\n\n` +
+        `Lo que sigue es <b>${siguiente.etiqueta}</b> con <b>${siguiente.responsable.nombre}</b>.\n${siguiente.resumen}\n\n` +
+        `Te la agendo ahora?`
+      : estado.produccion.puedeAgendar
+        ? `Listo, cerramos tu sesión de <b>${def.etiqueta}</b> con ${def.responsable.nombre} ✅\n\n` +
+          "Con eso terminas tus sesiones 🎉 lo que sigue es tu <b>primera producción</b>: la grabación de tu avatar y de tus productos.\n\nLa agendamos?"
+        : `Listo, cerramos tu sesión de <b>${def.etiqueta}</b> con ${def.responsable.nombre} ✅\n\nCualquier cosa me escribes.`;
+
+    const botones: InlineButton[][] = siguiente
+      ? [[{ text: `📅 Agendar ${siguiente.etiqueta}`, callback_data: `onb:${estado.siguiente}` }], [{ text: "🚀 Ver mi onboarding", callback_data: "menu:onboarding" }]]
+      : estado.produccion.puedeAgendar
+        ? [[{ text: "🎬 Agendar mi producción", callback_data: "ag:produccion" }], [{ text: "🚀 Ver mi onboarding", callback_data: "menu:onboarding" }]]
+        : [[{ text: "🚀 Ver mi onboarding", callback_data: "menu:onboarding" }]];
+
+    for (const chat of chats) {
+      await telegramService.sendMessage(chat.chatId, texto, botones).catch((error: any) => {
+        console.error("[Onboarding] no se pudo avisar al cliente:", error?.message || error);
+      });
+    }
+  }
+
+  /** La sesion no se dio: se le ofrece agendarla de nuevo, sin reproches. */
+  private async avisarReagendar(workspaceId: Types.ObjectId, sesion: SesionOnboarding): Promise<void> {
+    const chats = await models.telegramChats.find({ workspaceId, estado: "listo" }).select("chatId").lean();
+    const def = SESIONES_ONBOARDING[sesion];
+    for (const chat of chats) {
+      await telegramService
+        .sendMessage(
+          chat.chatId,
+          `Vi que no pudimos hacer tu sesión de <b>${def.etiqueta}</b> con ${def.responsable.nombre} 😅\n\nLa dejamos para otro día? Te muestro horarios.`,
+          [
+            [{ text: `📅 Agendar ${def.etiqueta}`, callback_data: `onb:${sesion}` }],
+            [{ text: "📋 Volver al menú", callback_data: "menu:ver" }],
+          ]
+        )
+        .catch((error: any) => console.error("[Onboarding] aviso de reagendar:", error?.message || error));
+    }
   }
 
   /**
@@ -422,26 +538,37 @@ class OnboardingBotService {
     titulo?: string
   ): Promise<{ id?: Types.ObjectId; motivo?: string }> {
     const usuario = await models.users.findOne({ email: correo }).select("workspaceId workspaces isInternal").lean();
-    const porUsuario = (usuario?.workspaceId || usuario?.workspaces?.[0]?.workspaceId) as Types.ObjectId | undefined;
-    if (porUsuario && !usuario?.isInternal) return { id: porUsuario };
+    // Un correo puede estar en VARIOS entornos (agencias, socios, pruebas).
+    // Antes se tomaba el primero del array y la sesion se marcaba en el
+    // entorno equivocado, sin que nadie se enterara.
+    const suyos = [
+      ...new Set(
+        [usuario?.workspaceId, ...(usuario?.workspaces || []).map((w: any) => w.workspaceId)]
+          .filter(Boolean)
+          .map((id: any) => String(id))
+      ),
+    ];
+    if (!usuario?.isInternal && suyos.length === 1) return { id: new Types.ObjectId(suyos[0]) };
 
     for (const texto of [contacto?.companyName, titulo].filter(Boolean) as string[]) {
-      const id = await this.entornoPorNombre(texto);
+      // Si el correo ya tiene entornos, el nombre solo desempata entre ESOS.
+      const id = await this.entornoPorNombre(texto, suyos.length ? new Set(suyos) : undefined);
       if (id) return { id };
     }
-    if (porUsuario) return { id: porUsuario };
 
     return {
       motivo: usuario?.isInternal
         ? "cita del equipo, sin cliente identificable"
-        : usuario
-          ? "usuario sin entorno asignado"
-          : "contacto sin usuario ni empresa reconocible",
+        : suyos.length > 1
+          ? `el correo está en ${suyos.length} entornos y la cita no dice cuál (falta la empresa en el contacto del CRM)`
+          : usuario
+            ? "usuario sin entorno asignado"
+            : "contacto sin usuario ni empresa reconocible",
     };
   }
 
   /** Empareja "MEMOS" o "Flash CarWash" con el entorno que les corresponde. */
-  private async entornoPorNombre(texto: string): Promise<Types.ObjectId | undefined> {
+  private async entornoPorNombre(texto: string, permitidos?: Set<string>): Promise<Types.ObjectId | undefined> {
     const objetivo = normalizar(texto);
     if (objetivo.length < 4) return undefined;
     if (!this.entornosCache || Date.now() - this.entornosCache.en > 10 * 60_000) {
@@ -451,9 +578,15 @@ class OnboardingBotService {
         lista: lista.map((w) => ({ id: w._id as Types.ObjectId, n: normalizar(w.name) })),
       };
     }
-    // Igualdad, o el nombre del entorno dentro del texto ("Flash CarWash" → "FLASH CAR").
-    const match = this.entornosCache.lista.find((w) => w.n && (w.n === objetivo || (w.n.length >= 5 && objetivo.includes(w.n))));
-    return match?.id;
+    const candidatos = permitidos
+      ? this.entornosCache.lista.filter((w) => permitidos.has(String(w.id)))
+      : this.entornosCache.lista;
+    // Primero igualdad exacta: si no, "Diego Reyes" se llevaba las citas de
+    // "pruebas de diego reyes" solo por estar contenido en el texto.
+    const exacto = candidatos.find((w) => w.n && w.n === objetivo);
+    if (exacto) return exacto.id;
+    // Si no, el nombre del entorno dentro del texto ("Flash CarWash" → "FLASH CAR").
+    return candidatos.find((w) => w.n && w.n.length >= 5 && objetivo.includes(w.n))?.id;
   }
 
   /**
