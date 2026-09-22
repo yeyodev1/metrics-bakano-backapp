@@ -1,6 +1,7 @@
 import { Types } from "mongoose";
 import models from "../models";
 import type { NotificationType } from "../models/notification.model";
+import { usuarioBloqueado } from "../utils/contactosBloqueados";
 
 interface CreateOpts {
   workspaceId?: Types.ObjectId | string;
@@ -15,6 +16,8 @@ export class NotificationService {
     body: string,
     opts: CreateOpts = {}
   ) {
+    // Contactos bloqueados por direccion: no reciben nada, venga de donde venga.
+    if (await usuarioBloqueado(userId)) return null;
     const doc = new models.notifications({
       userId: new Types.ObjectId(userId.toString()),
       type,
@@ -58,9 +61,11 @@ export class NotificationService {
       .select("_id")
       .lean();
 
-    if (!users.length) return;
+    const permitidos = [];
+    for (const u of users) if (!(await usuarioBloqueado(u._id))) permitidos.push(u);
+    if (!permitidos.length) return;
 
-    const docs = users.map((u) => ({
+    const docs = permitidos.map((u) => ({
       userId: u._id,
       type,
       title,

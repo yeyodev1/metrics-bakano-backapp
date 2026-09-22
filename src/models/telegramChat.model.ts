@@ -43,6 +43,15 @@ export interface ITelegramChat extends Document {
   ultimoAnimo?: { estado: string; motivo?: string; en: Date };
   /** Ultima alerta a la project manager: evita repetirla mas de una vez al dia. */
   ultimaAlerta?: { estado: string; en: Date };
+  /**
+   * Borrador de correcciones de guiones: se van anotando en la conversacion y
+   * se envian todas juntas, porque la revision del cliente se recibe una vez.
+   */
+  revisionGuiones?: {
+    planningId: Types.ObjectId;
+    correcciones: { itemId: string; numero: number; tema: string; texto: string; categoria?: string }[];
+    actualizadoEn?: Date;
+  };
   vinculadoEn?: Date;
 
   createdAt: Date;
@@ -78,6 +87,16 @@ const TelegramChatSchema = new Schema<ITelegramChat>(
     },
     ultimoAnimo: { estado: String, motivo: String, en: Date },
     ultimaAlerta: { estado: String, en: Date },
+    revisionGuiones: {
+      type: {
+        planningId: { type: Schema.Types.ObjectId, ref: "VideoPlanning" },
+        correcciones: [
+          { _id: false, itemId: String, numero: Number, tema: String, texto: String, categoria: String },
+        ],
+        actualizadoEn: Date,
+      },
+      default: undefined,
+    },
     vinculadoEn: { type: Date },
   },
   {

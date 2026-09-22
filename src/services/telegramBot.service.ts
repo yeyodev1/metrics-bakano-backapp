@@ -7,6 +7,7 @@ import { EQUIPO_ATENCION, equipoAtencionService, type TemaAtencion } from "./equ
 import { atencionClienteService, diaEcuador, fechaEcuador, horarioCorto } from "./atencionCliente.service";
 import { onboardingBotService } from "./onboardingBot.service";
 import { perfilClienteService } from "./perfilCliente.service";
+import { revisionGuionesService, type RevisionPendiente } from "./revisionGuiones.service";
 import { SESIONES_ONBOARDING, type SesionOnboarding } from "./onboardingSesiones.service";
 import { telegramAgentService } from "./telegramAgent.service";
 import { escaparHtml, telegramService, type InlineButton, type TelegramUpdate } from "./telegram.service";
@@ -140,6 +141,12 @@ export class TelegramBotService {
       case "eligiendo_entorno":
         return this.pedirEntorno(chat);
       case "listo":
+        // Guiones con revision abierta: lo que escribe son correcciones, y esas
+        // las junta la IA en el borrador en vez de reenviarlas sueltas.
+        if (chat.tema === "guiones" && chat.workspaceId && (await revisionGuionesService.pendiente(chat.workspaceId))) {
+          chat.tema = undefined;
+          await chat.save();
+        }
         // Eligio un tema en el menu: su mensaje va directo a esa persona.
         if (chat.tema && chat.workspaceId) return this.enviarSolicitud(chat, chat.tema, texto);
         if (chat.workspaceId && (await telegramAgentService.responder(chat, texto))) return;
@@ -269,6 +276,7 @@ export class TelegramBotService {
     }
     if (data === "menu:agendar") return this.elegirTemaReunion(chat);
     if (data === "menu:onboarding") return this.mostrarOnboarding(chat);
+    if (data === "rev:lista") return this.mostrarGuionesParaRevisar(chat);
     if (data.startsWith("onb:")) return this.mostrarHorariosOnboarding(chat, data.slice(4) as SesionOnboarding);
     if (data.startsWith("onbs:")) {
       const [, sesion, segundos] = data.split(":");
@@ -287,6 +295,10 @@ export class TelegramBotService {
   }
 
   private async elegirTema(chat: ITelegramChat, tema: TemaAtencion): Promise<void> {
+    if (tema === "guiones") {
+      const revision = await revisionGuionesService.pendiente(chat.workspaceId!);
+      if (revision && !revision.produccion?.ventanaCerrada) return this.invitarARevisar(chat, revision);
+    }
     chat.tema = tema;
     await chat.save();
 
@@ -307,6 +319,49 @@ export class TelegramBotService {
         [{ text: tema === "produccion" ? "🎬 Agendar mi producción" : "📅 Agendar una reunión", callback_data: `ag:${tema}` }],
         [{ text: "📋 Volver al menú", callback_data: "menu:ver" }],
       ]
+    );
+  }
+
+  // ── Revision de guiones ────────────────────────────────────────────────────
+  /** Hay revision abierta: se invita a corregir conversando, no a mandar un mensaje suelto. */
+  private async invitarARevisar(chat: ITelegramChat, revision: RevisionPendiente): Promise<void> {
+    chat.tema = undefined;
+    await chat.save();
+    const pendientes = revision.guiones.filter((g) => g.aprobacion !== "APROBADO").length;
+    const plazo = revision.produccion
+      ? ` Tu producción es el ${fechaEcuador(revision.produccion.fecha)} y puedes pedir cambios hasta el <b>${fechaEcuador(revision.produccion.correccionesHasta)}</b>.`
+      : "";
+    await telegramService.sendMessage(
+      chat.chatId,
+      `📝 Tienes <b>${pendientes} guiones</b> esperando tu revisión.${plazo}\n\n` +
+        "Escríbeme con tus palabras qué quieres cambiar, por ejemplo:\n" +
+        "<i>en el guion 3 cambia el gancho, que empiece con una pregunta sobre precios</i>\n\n" +
+        `Voy anotando cada corrección y al final te muestro el resumen para enviarlo todo junto a <b>${escaparHtml(equipoAtencionService.nombres("guiones"))}</b>.`,
+      [
+        [{ text: "📋 Ver mis guiones", callback_data: "rev:lista" }],
+        [{ text: "📋 Volver al menú", callback_data: "menu:ver" }],
+      ]
+    );
+  }
+
+  private async mostrarGuionesParaRevisar(chat: ITelegramChat): Promise<void> {
+    const r = await revisionGuionesService.resumen(chat);
+    if (!r) {
+      await telegramService.sendMessage(chat.chatId, "No tienes guiones esperando revisión ahora mismo 🙂");
+      return this.mostrarMenu(chat);
+    }
+    const anotados = new Set(r.correcciones.map((c) => c.numero));
+    const lineas = r.revision.guiones.map((g) => {
+      const marca = anotados.has(g.numero) ? "✏️" : g.aprobacion === "APROBADO" ? "✅" : "⏳";
+      return `${marca} #${String(g.numero).padStart(2, "0")} ${escaparHtml(g.tema)}`;
+    });
+    await telegramService.sendMessage(
+      chat.chatId,
+      `📝 <b>Tus guiones</b>\n\n${lineas.join("\n")}\n\n` +
+        "✏️ ya tiene corrección anotada · ⏳ por revisar\n\n" +
+        "Dime el número y qué cambiarías. Si quieres leer uno primero, escríbeme <i>muéstrame el 3</i>." +
+        (r.plazo.cerrado ? "\n\n⚠️ El plazo para pedir cambios ya cerró." : ""),
+      [[{ text: "📋 Volver al menú", callback_data: "menu:ver" }]]
     );
   }
 

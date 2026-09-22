@@ -1,4 +1,5 @@
 import axios from "axios";
+import { correoBloqueado } from "../utils/contactosBloqueados";
 
 const API = "https://slack.com/api";
 
@@ -31,6 +32,8 @@ class SlackService {
   }
 
   async idPorCorreo(email: string): Promise<string | null> {
+    // Contactos bloqueados por direccion: nunca se les menciona.
+    if (await correoBloqueado(email)) return null;
     if (this.ids.has(email)) return this.ids.get(email)!;
     try {
       const { data } = await axios.get(`${API}/users.lookupByEmail`, { params: { email }, headers: this.headers, timeout: 10_000 });
@@ -64,7 +67,7 @@ class SlackService {
     if (!this.configurado()) return false;
     const ids = await this.menciones(aviso.correos);
     const quienes = ids.map((id) => `<@${id}>`).join(" ");
-    const detalle = aviso.detalle ? `\n>${this.escapar(aviso.detalle.slice(0, 1500)).replace(/\n/g, "\n>")}` : "";
+    const detalle = aviso.detalle ? `\n>${this.escapar(aviso.detalle.slice(0, 2800)).replace(/\n/g, "\n>")}` : "";
     await this.publicar(this.canalEquipo()!, `${aviso.titulo} ${quienes}`.trim(), [
       { type: "section", text: { type: "mrkdwn", text: `*${this.escapar(aviso.titulo)}*${detalle}` } },
       {
