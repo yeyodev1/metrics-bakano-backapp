@@ -195,7 +195,9 @@ const ResourceSchema = new Schema(
     tipo: { type: String, required: true },
     categoria: {
       type: String,
-      enum: ["logo", "linea_grafica", "otro"],
+      // "catalogo" faltaba y el controlador si lo aceptaba: subir el catalogo
+      // reventaba al guardar por validacion del enum.
+      enum: ["logo", "linea_grafica", "catalogo", "otro"],
       required: true,
     },
     uploadedBy: {

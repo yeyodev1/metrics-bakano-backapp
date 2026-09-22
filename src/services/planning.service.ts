@@ -1,6 +1,7 @@
 import { Types } from "mongoose";
 import models from "../models";
 import { IPlanning } from "../models/planning.model";
+import { ghlService } from "./ghl.service";
 
 export class PlanningService {
   async createEntry(data: {
@@ -65,6 +66,13 @@ export class PlanningService {
     });
   }
 
+  /**
+   * Mover una produccion que vino del CRM tambien la mueve EN el CRM.
+   *
+   * Antes solo se guardaba en Mongo y el siguiente sync (cron cada 30 min o la
+   * carga de la semana) la devolvia a la fecha del CRM: el equipo la movia y
+   * "regresaba sola" a la fecha anterior, una y otra vez.
+   */
   async updateEntry(
     entryId: string,
     data: {
@@ -77,6 +85,31 @@ export class PlanningService {
     if (!Types.ObjectId.isValid(entryId)) throw new Error("INVALID_ID");
 
     const updateData: any = {};
+    if (data.date !== undefined) {
+      const actual = await models.planning.findById(entryId).select("date endsAt source crm").lean();
+      if (!actual) throw new Error("NOT_FOUND");
+      const nueva = new Date(data.date as string);
+      if (Number.isNaN(nueva.getTime())) throw new Error("FECHA_INVALIDA");
+      const mueve = Math.abs(nueva.getTime() - new Date(actual.date).getTime()) > 60_000;
+
+      if (mueve && actual.source === "crm" && actual.crm?.appointmentId) {
+        try {
+          await ghlService.updateAppointment(actual.crm.appointmentId, { startTime: nueva, forzar: true });
+        } catch (error: any) {
+          console.error("[Planificador] no se pudo mover la cita en el CRM:", error.response?.data || error.message);
+          throw Object.assign(
+            new Error(
+              "Moví la fecha en Metrics pero el CRM la rechazó, así que no la guardo: en la próxima sincronización volvería a la fecha anterior. Revisa la cita en el CRM e inténtalo de nuevo."
+            ),
+            { status: 502 }
+          );
+        }
+        updateData["crm.syncedAt"] = new Date();
+        // La duracion se conserva: el CRM ya recalculo su fin con el calendario.
+        const duracion = actual.endsAt ? new Date(actual.endsAt).getTime() - new Date(actual.date).getTime() : 0;
+        if (duracion > 0) updateData.endsAt = new Date(nueva.getTime() + duracion);
+      }
+    }
     if (data.title !== undefined) updateData.title = data.title;
     if (data.date !== undefined) updateData.date = new Date(data.date as string);
     if (data.notes !== undefined) updateData.notes = data.notes;

@@ -16,31 +16,49 @@ import { onboardingBotService } from "./onboardingBot.service";
 
 export type Entregable = "archivosMarca" | "facturacion" | "catalogo" | "invitacionMeta";
 
+/** metrics.bakano.ec, salvo que APP_URL diga otra cosa (igual que los correos). */
+const APP_URL = process.env.APP_URL || "https://metrics.bakano.ec";
+
+/** El link exacto donde el cliente sube o carga cada cosa, con su entorno. */
+export function linkEntregable(clave: Entregable, workspaceId: Types.ObjectId | string): string | undefined {
+  const ruta = ENTREGABLES[clave]?.ruta;
+  return ruta ? `${APP_URL}/app/workspaces/${workspaceId}${ruta}` : undefined;
+}
+
 const DENISSE = { nombre: "Denisse Quimi", email: "dquimi@bakano.ec" };
 const JOEL = { nombre: "Joel Jimenez", email: "jjimenez@bakano.ec" };
 
-export const ENTREGABLES: Record<Entregable, { etiqueta: string; que: string; a: string; responsable: { nombre: string; email: string } }> = {
+/**
+ * Todo lo que el cliente entrega va POR LA PLATAFORMA, no por correo: cada
+ * entregable tiene su pantalla en metrics.bakano.ec y el bot manda el link de
+ * SU entorno. La unica excepcion es la invitacion al portafolio de Meta, que
+ * se hace dentro de Meta Business.
+ */
+export const ENTREGABLES: Record<
+  Entregable,
+  { etiqueta: string; que: string; ruta?: string; a?: string; responsable: { nombre: string; email: string } }
+> = {
   archivosMarca: {
-    etiqueta: "Archivos e identidad de marca",
-    que: "Logos en PNG, JPEG y vector (editable o .ai) y la identidad de marca",
-    a: "dquimi@bakano.ec",
+    etiqueta: "Logos e identidad de marca",
+    que: "Sube tus logos en PNG (con fondo transparente) y tu línea gráfica: colores, tipografías y ejemplos de piezas",
+    ruta: "/resources",
     responsable: DENISSE,
   },
   facturacion: {
     etiqueta: "Facturación de los últimos 6 meses",
-    que: "Datos de facturación de al menos los últimos 6 meses",
-    a: "dquimi@bakano.ec",
+    que: "Carga tu facturación en la plataforma, incluidos los meses anteriores: con eso medimos el ROAS real",
+    ruta: "/billing",
     responsable: DENISSE,
   },
   catalogo: {
     etiqueta: "Catálogo y precios",
-    que: "Catálogo de productos o servicios con sus precios",
-    a: "dquimi@bakano.ec",
+    que: "Sube tu catálogo de productos o servicios con precios (PNG, JPG, WEBP o PDF), o escríbelo ahí mismo",
+    ruta: "/resources",
     responsable: DENISSE,
   },
   invitacionMeta: {
     etiqueta: "Invitación al portafolio de Meta",
-    que: "Invitación al portafolio comercial de Meta con permisos de ADMINISTRACIÓN",
+    que: "Invitación al portafolio comercial de Meta con permisos de ADMINISTRACIÓN (eso se hace dentro de Meta Business)",
     a: "agenciademi@gmail.com",
     responsable: JOEL,
   },
@@ -81,9 +99,12 @@ class OnboardingDatosService {
         clave: k,
         etiqueta: ENTREGABLES[k].etiqueta,
         que: ENTREGABLES[k].que,
-        enviarA: ENTREGABLES[k].a,
+        // El link es de ESTE entorno: se lo puedes pasar tal cual.
+        link: linkEntregable(k, workspaceId),
+        invitarA: ENTREGABLES[k].a,
         estado: entregas[k]?.estado || "pendiente",
       })),
+      perfilDeMarca: `${APP_URL}/app/workspaces/${workspaceId}/brand-profile`,
       datosMarcaFaltantes: Object.keys(CAMPOS_MARCA)
         .filter((c) => !String(marca[c] ?? "").trim())
         .map((c) => ({ campo: c, que: CAMPOS_MARCA[c] })),
@@ -146,8 +167,9 @@ class OnboardingDatosService {
     );
 
     const cliente = await atencionClienteService.datosCliente(chat);
-    const titulo = `📦 ${cliente.entorno} dice que ya envió: ${def.etiqueta}`;
-    const detalle = `${cliente.nombre} lo declaró por Telegram. Debió llegar a ${def.a}. Verifica que esté completo.${nota ? `\nNota del cliente: ${nota}` : ""}`;
+    const donde = linkEntregable(clave as Entregable, chat.workspaceId!) || def.a;
+    const titulo = `📦 ${cliente.entorno} dice que ya cargó: ${def.etiqueta}`;
+    const detalle = `${cliente.nombre} lo declaró por Telegram. Revisa que esté completo en ${donde}.${nota ? `\nNota del cliente: ${nota}` : ""}`;
     const internos = await models.users.find({ email: def.responsable.email, isActive: true }).select("_id").lean();
     await Promise.allSettled([
       slackService.avisarEquipo({ titulo, detalle, correos: [def.responsable.email] }),
@@ -166,7 +188,7 @@ class OnboardingDatosService {
         encabezado: titulo,
       }),
     ]);
-    return { ok: true as const, etiqueta: def.etiqueta, verificara: def.responsable.nombre };
+    return { ok: true as const, etiqueta: def.etiqueta, verificara: def.responsable.nombre, donde };
   }
 }
 

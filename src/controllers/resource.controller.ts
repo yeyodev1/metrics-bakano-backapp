@@ -10,16 +10,25 @@ export const uploadResource = async (req: AuthRequest, res: Response, next: Next
     const file = req.file;
 
     if (!file) {
-      return res.status(400).send({ error: "No file provided" });
+      return res.status(400).send({ message: "No llegó ningún archivo.", error: "No file provided" });
     }
 
     if (!["logo", "linea_grafica", "catalogo", "otro"].includes(categoria)) {
-      return res.status(400).send({ error: "Invalid categoria. Use: logo, linea_grafica, catalogo, or otro" });
+      const invalida = "Categoría inválida. Usa: logo, linea_grafica, catalogo u otro.";
+      return res.status(400).send({ message: invalida, error: invalida });
+    }
+
+    // Los logos van a los videos y a las piezas: se necesitan en PNG (fondo
+    // transparente). Un JPG con fondo blanco o un PDF no sirven.
+    if (categoria === "logo" && file.mimetype !== "image/png") {
+      const soloPng =
+        "El logo tiene que ser un archivo PNG. Si lo tienes en otro formato (.ai, .jpg, .pdf), expórtalo a PNG con fondo transparente y súbelo de nuevo.";
+      return res.status(400).send({ message: soloPng, error: soloPng });
     }
 
     const workspace = await WorkspaceModel.findById(workspaceId);
     if (!workspace) {
-      return res.status(404).send({ error: "Workspace not found" });
+      return res.status(404).send({ message: "Entorno no encontrado.", error: "Workspace not found" });
     }
 
     const isPdf = file.mimetype === "application/pdf";
@@ -61,7 +70,13 @@ export const uploadResource = async (req: AuthRequest, res: Response, next: Next
     res.status(201).send({ message: "Resource uploaded", resource: saved });
   } catch (error) {
     console.error("Error in uploadResource:", error);
-    res.status(500).send({ error: "Internal server error" });
+    // Validación de Mongo (categoría fuera del enum, campo faltante): es del
+    // pedido, no del servidor, y el cliente merece saber qué pasó.
+    if ((error as any)?.name === "ValidationError") {
+      const detalle = (error as any).message || "El archivo no se pudo guardar.";
+      return res.status(400).send({ message: detalle, error: detalle });
+    }
+    res.status(500).send({ message: "No pude guardar el archivo. Inténtalo de nuevo.", error: "Internal server error" });
   }
 };
 
@@ -71,7 +86,7 @@ export const getResources = async (req: AuthRequest, res: Response, next: NextFu
 
     const workspace = await WorkspaceModel.findById(workspaceId).select("resources");
     if (!workspace) {
-      return res.status(404).send({ error: "Workspace not found" });
+      return res.status(404).send({ message: "Entorno no encontrado.", error: "Workspace not found" });
     }
 
     res.status(200).send({ resources: workspace.resources || [] });
@@ -87,7 +102,7 @@ export const deleteResource = async (req: AuthRequest, res: Response, next: Next
 
     const workspace = await WorkspaceModel.findById(workspaceId);
     if (!workspace) {
-      return res.status(404).send({ error: "Workspace not found" });
+      return res.status(404).send({ message: "Entorno no encontrado.", error: "Workspace not found" });
     }
 
     const resource = (workspace.resources || []).find(

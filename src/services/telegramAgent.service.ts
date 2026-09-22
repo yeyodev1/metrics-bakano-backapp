@@ -232,7 +232,13 @@ ${
     ? `Lo que le falta ahora mismo (dato real, no hace falta llamar verPendientesOnboarding salvo que registres algo):
 - Sesiones sin agendar: ${pendientes.sesionesPendientes.map((x) => `${x.etiqueta} con ${x.con} (${x.sesion})`).join("; ") || "ninguna"}
 - Datos de marca que faltan: ${pendientes.datosMarcaFaltantes.map((x) => `${x.campo} (${x.que})`).join("; ") || "ninguno"}
-- Envíos pendientes: ${pendientes.entregables.filter((x) => x.estado === "pendiente").map((x) => `${x.clave} (${x.etiqueta}, a ${x.enviarA})`).join("; ") || "ninguno"}
+- Le falta cargar en la plataforma: ${
+        pendientes.entregables
+          .filter((x) => x.estado === "pendiente")
+          .map((x) => `${x.clave} → ${x.etiqueta}: ${x.link || `se hace en Meta, invitando a ${x.invitarA}`}`)
+          .join("; ") || "nada"
+      }
+- Su perfil de marca: ${pendientes.perfilDeMarca}
 `
     : ""
 }
@@ -271,7 +277,9 @@ Arrancar el onboarding (tú tomas la iniciativa):
 - Si el cliente es nuevo o está en onboarding, apenas termines de responder lo que preguntó, usa verPendientesOnboarding y sigue con lo que falta. No esperes a que él lo pida.
 - Una cosa a la vez, en este orden: agendar la sesión que le toca, luego los datos de su marca que falten y luego los envíos (archivos de marca, facturación, catálogo, invitación a Meta).
 - Datos de marca: pregúntale de forma natural, uno por mensaje (por ejemplo "cuéntame, a quién le vendes?"). Cuando responda algo concreto, guárdalo con registrarDatoMarca usando sus palabras, y confírmale en pocas palabras que quedó en el sistema. Si responde algo vago, pídele un poco más de detalle antes de guardar.
-- Envíos: dile qué enviar y a qué correo. Cuando te diga que ya lo mandó, regístralo con registrarEntregable: así el responsable lo verifica. No lo marques si solo dice que lo va a mandar.
+- Todo lo que entrega va POR LA PLATAFORMA, nunca por correo: pásale el link de SU entorno (el de arriba, ya trae su id) y dile en una línea qué sube ahí. La única excepción es la invitación al portafolio de Meta, que se hace dentro de Meta Business.
+- Los logos tienen que ser PNG con fondo transparente. Si te dice que los tiene en .ai, .psd o .jpg, pídele que los exporte a PNG antes de subirlos; la plataforma no acepta otro formato para el logo.
+- Cuando te diga que ya lo subió, regístralo con registrarEntregable: así el responsable lo verifica. No lo marques si solo dice que lo va a hacer.
 - Si el cliente está apurado o pregunta otra cosa, atiéndelo primero y retoma lo pendiente después, sin presionar.
 - Si es un cliente en marcha, no le ofrezcas sesiones del onboarding ni le pidas envíos. Solo si faltan datos de su marca, pídele uno al final de la conversación y sin insistir.
 - Si es alguien del equipo de Bakano, no le pidas datos: solo dile qué falta.
