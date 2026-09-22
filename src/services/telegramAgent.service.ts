@@ -4,10 +4,14 @@ import type { ITelegramChat } from "../models/telegramChat.model";
 import { EQUIPO_ATENCION, equipoAtencionService, type TemaAtencion } from "./equipoAtencion.service";
 import { atencionClienteService, fechaEcuador, type DatosCliente } from "./atencionCliente.service";
 import { onboardingBotService } from "./onboardingBot.service";
+import { CATEGORIAS_GUION, revisionGuionesService } from "./revisionGuiones.service";
 import { perfilClienteService, type PerfilCliente } from "./perfilCliente.service";
 import { SESIONES_ONBOARDING, type SesionOnboarding } from "./onboardingSesiones.service";
 import { horasDeCorreccion } from "./videoPlanning.service";
 import { escaparHtml, telegramService } from "./telegram.service";
+import { notificationService } from "./notification.service";
+import { resendService } from "./resend.service";
+import { slackService } from "./slack.service";
 
 /**
  * La IA que conversa con el cliente por Telegram.
@@ -27,7 +31,19 @@ import { escaparHtml, telegramService } from "./telegram.service";
 
 const modelo = () => process.env.AI_MODEL || "google/gemini-3.8-flash";
 // Vercel corta la funcion a los 60 s y Telegram reintenta si no respondemos.
-const LIMITE_MS = 35_000;
+// Enviar una revision encadena varias herramientas: con 35 s no alcanzaba.
+const LIMITE_MS = Number(process.env.AI_LIMITE_MS) || 50_000;
+const LIMITE_CLASIFICACION_MS = 30_000;
+
+/**
+ * Razonamiento del modelo. Medido el 2026-09-22 con el flujo completo de
+ * correcciones: "low" no acelero (20-30 s por turno vs 10-19 s por defecto),
+ * asi que por defecto va como viene el modelo. AI_THINKING_LEVEL lo cambia.
+ */
+function opcionesModelo(): Record<string, unknown> {
+  const nivel = process.env.AI_THINKING_LEVEL || "default";
+  return nivel === "default" ? {} : { providerOptions: { google: { thinkingConfig: { thinkingLevel: nivel } } } };
+}
 const MAX_HISTORIAL = 20;
 const ALERTA_CADA_MS = 24 * 3_600_000;
 
@@ -47,6 +63,8 @@ function cargarAi(): Promise<AiSdk> {
 
 const clasificacionSchema = z.object({
   estado: z.enum(["en_peligro", "molesto", "feliz", "neutral"]),
+  /** De qué se queja: define a qué responsable se escala. */
+  tema: z.enum(TEMAS).catch("atencion"),
   motivo: z.string().default(""),
   frase: z.string().default(""),
   recomendacion: z.string().default(""),
@@ -77,6 +95,7 @@ class TelegramAgentService {
           tools: this.herramientas(chat, texto),
           stopWhen: isStepCount(6),
           abortSignal: AbortSignal.timeout(LIMITE_MS),
+          ...opcionesModelo(),
         }),
         this.clasificar(historial, texto).catch((error) => {
           console.error("[Telegram IA] clasificación:", error?.message || error);
@@ -145,6 +164,14 @@ Cómo hablas:
 Quién atiende a este cliente:
 ${equipo}
 
+Revisión y corrección de guiones:
+- Cuando el cliente quiera revisar o corregir sus guiones, usa verGuionesParaRevisar y muéstrale la lista corta (número y tema). Si pide ver uno, usa verGuion y resúmelo en pocas líneas.
+- Una corrección clara dice qué parte cambiar (gancho, cuerpo, CTA, un dato, el tono) y qué quiere en su lugar. Si te dice algo vago como "no me gusta", "cámbialo" o "mejóralo", pregúntale qué exactamente y cómo lo quiere antes de anotar nada. Nunca inventes la corrección por él.
+- Apenas una corrección esté clara, anótala con anotarCorreccion usando sus palabras, con la categoría que mejor le quede, y confírmale en una línea. Pregunta si quiere corregir algún otro.
+- Las correcciones se envían todas juntas y una sola vez. Antes de enviar usa verBorradorRevision, muéstrale el resumen y pregúntale qué hacemos con los guiones que no corrigió (normalmente se aprueban). Llama enviarRevisionGuiones solo cuando el cliente confirme de forma explícita, y con aprobarResto en true solo si aceptó aprobar los demás.
+- Si el plazo de correcciones ya cerró, explícale que ya no se pueden pedir cambios a los guiones y ofrece pasarle el mensaje a ${equipoAtencionService.nombres("guiones")}.
+- Al enviar, confírmale que le llegó a ${equipoAtencionService.nombres("guiones")} y al equipo, y hasta cuándo se corrigen.
+
 Onboarding (arranque del cliente):
 - Son tres sesiones técnicas, en este orden: Conexión de cuentas Meta con Joel Jimenez, Configuración de CRM y Metrics con David Robles, y Estrategia y guiones con Ariana Vera. Después viene la primera producción.
 - Tú no resuelves la configuración técnica por chat: cada tema se ve en su sesión. Tu trabajo es decirle en qué paso va, qué necesita tener listo y agendarle la sesión que le toca.
@@ -168,7 +195,8 @@ Reglas:
 - Si el cliente está molesto, reconoce cómo se siente, discúlpate sin excusas y ofrece una solución concreta.
 - No prometas descuentos, reembolsos, cambios de contrato ni fechas que el equipo no confirmó.
 - Solo hablas de la cuenta de ${cliente.entorno}. Si pregunta algo ajeno a Bakano, redirígelo con buena onda.
-- Si una herramienta falla, discúlpate y ofrece pasar el mensaje al equipo.`;
+- Si una herramienta falla, discúlpate y ofrece pasar el mensaje al equipo.
+- Nunca menciones, recomiendes ni ofrezcas contactar a Luis Reyes, ni agendar con él. No es un canal de atención. Si el cliente lo pide, dile con buena onda que su equipo es quien lo atiende y ofrece a la persona que corresponda.`;
   }
 
   private herramientas(chat: ITelegramChat, textoCliente: string) {
@@ -253,6 +281,80 @@ Reglas:
             horarios: horarios.slice(0, 12).map((h) => ({ inicio: h.toISOString(), texto: fechaEcuador(h) })),
           };
         },
+      },
+
+      verGuionesParaRevisar: {
+        description:
+          "Guiones que el cliente tiene por revisar (planificación lista y sin respuesta), con el plazo para pedir correcciones y lo que ya anotó en su borrador.",
+        inputSchema: z.object({}),
+        execute: async () => {
+          const r = await revisionGuionesService.resumen(chat);
+          if (!r) return { hayGuionesPorRevisar: false, nota: "No hay guiones esperando su revisión: o ya la envió o todavía no está lista." };
+          const enBorrador = new Map(r.correcciones.map((c) => [c.numero, c.texto]));
+          return {
+            hayGuionesPorRevisar: true,
+            produccion: r.plazo.produccion ?? null,
+            puedePedirCorrecciones: !r.plazo.cerrado,
+            correccionesHasta: r.plazo.hasta ?? null,
+            guiones: r.revision.guiones.map((g) => ({
+              numero: g.numero,
+              tema: g.tema,
+              estado: g.aprobacion,
+              extracto: g.texto.slice(0, 220),
+              correccionAnotada: enBorrador.get(g.numero) ?? null,
+            })),
+          };
+        },
+      },
+
+      verGuion: {
+        description: "Texto completo de un guion (gancho, cuerpo y CTA) para comentarlo con el cliente.",
+        inputSchema: z.object({ numero: z.number().int() }),
+        execute: async ({ numero }: { numero: number }) => {
+          const r = await revisionGuionesService.pendiente(chat.workspaceId!);
+          const g = r?.guiones.find((x) => x.numero === numero);
+          return g ? { numero: g.numero, tema: g.tema, texto: g.texto || "Este guion todavía no tiene texto." } : { error: `No encontré el guion #${numero}.` };
+        },
+      },
+
+      anotarCorreccion: {
+        description:
+          "Anota en el borrador una corrección CLARA para un guion: qué parte cambiar y qué quiere en su lugar. Rechaza correcciones vagas; si pasa, pregúntale al cliente el detalle.",
+        inputSchema: z.object({
+          numero: z.number().int().describe("Número del guion"),
+          correccion: z.string().describe("La corrección con las palabras del cliente: qué cambiar y cómo lo quiere"),
+          categoria: z.enum(CATEGORIAS_GUION).describe("gancho_debil, tono_incorrecto, estructura, informacion_incorrecta, ortografia u otro"),
+        }),
+        execute: async ({ numero, correccion, categoria }: { numero: number; correccion: string; categoria: string }) =>
+          revisionGuionesService.anotar(chat, numero, correccion, categoria),
+      },
+
+      quitarCorreccion: {
+        description: "Quita del borrador la corrección de un guion, si el cliente se arrepiente.",
+        inputSchema: z.object({ numero: z.number().int() }),
+        execute: async ({ numero }: { numero: number }) => revisionGuionesService.quitar(chat, numero),
+      },
+
+      verBorradorRevision: {
+        description: "Resumen de lo que se enviaría: correcciones anotadas y guiones que quedarían sin corrección.",
+        inputSchema: z.object({}),
+        execute: async () => {
+          const r = await revisionGuionesService.resumen(chat);
+          if (!r) return { nota: "No hay guiones esperando su revisión." };
+          return {
+            correcciones: r.correcciones.map((c) => ({ guion: `#${c.numero} ${c.tema}`, correccion: c.texto, categoria: c.categoria })),
+            sinCorreccion: r.sinCorreccion.map((g) => `#${g.numero} ${g.tema}`),
+            puedePedirCorrecciones: !r.plazo.cerrado,
+            correccionesHasta: r.plazo.hasta ?? null,
+          };
+        },
+      },
+
+      enviarRevisionGuiones: {
+        description:
+          "Envía la revisión completa al equipo (una sola vez). Solo tras confirmación explícita del cliente. aprobarResto=true aprueba los guiones que no corrigió; úsalo solo si el cliente lo aceptó.",
+        inputSchema: z.object({ aprobarResto: z.boolean() }),
+        execute: async ({ aprobarResto }: { aprobarResto: boolean }) => revisionGuionesService.enviar(chat, aprobarResto),
       },
 
       verOnboarding: {
@@ -391,13 +493,15 @@ Reglas:
     const { text } = await generateText({
       model: modelo(),
       system: `Clasificas el ánimo de un cliente de una agencia de marketing según su último mensaje y el contexto. Responde SOLO un JSON válido, sin texto extra:
-{"estado":"en_peligro|molesto|feliz|neutral","motivo":"...","frase":"frase exacta del cliente que lo muestra","recomendacion":"acción concreta para la project manager"}
+{"estado":"en_peligro|molesto|feliz|neutral","tema":"produccion|guiones|atencion","motivo":"...","frase":"frase exacta del cliente que lo muestra","recomendacion":"acción concreta para el equipo"}
+tema: produccion si habla de grabaciones o fechas de producción; guiones si habla de guiones, contenido o videos; atencion para pagos, resultados, contrato o cualquier otra cosa.
 en_peligro: quiere cancelar o pausar, no ve resultados, siente que pierde dinero, compara con otra agencia, amenaza con irse.
 molesto: queja, frustración, reclamo por demoras o errores, tono duro.
 feliz: satisfacción clara, agradecimiento entusiasta, buenos resultados.
 neutral: todo lo demás. Ante la duda, neutral.`,
       prompt: `${contexto ? `Contexto:\n${contexto}\n\n` : ""}Último mensaje del cliente: ${texto}`,
-      abortSignal: AbortSignal.timeout(LIMITE_MS),
+      abortSignal: AbortSignal.timeout(LIMITE_CLASIFICACION_MS),
+      ...opcionesModelo(),
     });
     const json = text.match(/\{[\s\S]*\}/)?.[0];
     if (!json) return null;
@@ -418,22 +522,45 @@ neutral: todo lo demás. Ante la duda, neutral.`,
       const urgente = c.estado === "en_peligro";
       const titulo = urgente ? `🔴 URGENTE · ${cliente.entorno} podría irse` : `🟠 ${cliente.entorno} está molesto`;
       const frase = c.frase || texto.slice(0, 300);
-      await atencionClienteService.avisarEquipo(chat, "atencion", cliente, {
-        tipo: "cliente_en_riesgo",
-        titulo,
-        cuerpo: `${cliente.nombre}: “${frase.slice(0, 240)}” · ${c.recomendacion}`,
-        mensaje: [
-          `${urgente ? "🔴 Cliente en peligro" : "🟠 Cliente molesto"} (detectado por la IA en Telegram)`,
-          "",
-          `Frase: “${frase}”`,
-          `Motivo: ${c.motivo}`,
-          `Recomendación: ${c.recomendacion}`,
-          "",
-          `Mensaje completo: “${texto.slice(0, 1000)}”`,
-        ].join("\n"),
-        asunto: `${titulo} (Telegram)`,
-        encabezado: titulo,
-      });
+      const tema = c.tema;
+      const mensaje = [
+        `${urgente ? "🔴 Cliente en peligro" : "🟠 Cliente molesto"} (detectado por la IA en Telegram)`,
+        `Tema: ${EQUIPO_ATENCION[tema].etiqueta} · responsable: ${equipoAtencionService.nombres(tema)}`,
+        "",
+        `Frase: “${frase}”`,
+        `Motivo: ${c.motivo}`,
+        `Recomendación: ${c.recomendacion}`,
+        "",
+        `Mensaje completo: “${texto.slice(0, 1000)}”`,
+      ].join("\n");
+
+      // Queja fuerte: va directo al responsable del tema y a los superadmins,
+      // todos en el mismo aviso. Los contactos bloqueados los filtra cada canal.
+      const [responsables, superadmins] = await Promise.all([
+        equipoAtencionService.usuarios(tema),
+        models.users.find({ role: "superadmin", isActive: true }).select("_id email").lean(),
+      ]);
+      const correos = [...new Set([...equipoAtencionService.correos(tema), ...superadmins.map((u) => u.email).filter(Boolean)])];
+      const ids = [...new Map([...responsables, ...superadmins].map((u) => [String(u._id), u._id])).values()];
+      await Promise.allSettled([
+        ...ids.map((id) =>
+          notificationService.create(id as any, "cliente_en_riesgo", titulo, `${cliente.nombre}: “${frase.slice(0, 240)}” · ${c.recomendacion}`, {
+            workspaceId: chat.workspaceId!,
+          })
+        ),
+        resendService.sendSolicitudClienteEmail({
+          to: correos,
+          tema: urgente ? "cliente en peligro" : "cliente molesto",
+          workspaceName: cliente.entorno,
+          clienteNombre: cliente.nombre,
+          clienteEmail: cliente.email,
+          telegramUsername: chat.telegramUsername,
+          mensaje,
+          asunto: `${titulo} (Telegram)`,
+          encabezado: titulo,
+        }),
+        slackService.avisarEquipo({ titulo, detalle: mensaje, correos }),
+      ]);
       await models.telegramChats.updateOne({ _id: chat._id }, { $set: { ultimaAlerta: { estado: c.estado, en: new Date() } } });
     } catch (error: any) {
       console.error("[Telegram IA] alerta:", error?.message || error);

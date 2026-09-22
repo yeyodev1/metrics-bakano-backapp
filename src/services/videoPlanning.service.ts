@@ -11,6 +11,8 @@ import { metaService } from "./meta.service";
 import { getTodayEcuador } from "./tumesero.service";
 import { PlanningService } from "./planning.service";
 import { fechaEcuador } from "./crmProductionSync.service";
+import { slackService } from "./slack.service";
+import { equipoAtencionService } from "./equipoAtencion.service";
 import { extractLeadActions } from "../utils/metaActions";
 import cloudinary from "../config/cloudinary";
 
@@ -235,7 +237,7 @@ export interface InfoProduccion {
  * videos. Aqui se calcula el limite de correcciones (48 h antes por defecto)
  * que el cliente ve en pantalla y que el backend hace cumplir.
  */
-async function infoProduccion(planningEntryId: Types.ObjectId | string): Promise<InfoProduccion | null> {
+export async function infoProduccion(planningEntryId: Types.ObjectId | string): Promise<InfoProduccion | null> {
   const entry = await models.planning.findById(planningEntryId).select("date title cumplida").lean();
   if (!entry) return null;
   const horas = horasDeCorreccion();
@@ -561,7 +563,7 @@ export class VideoPlanningService {
   // ── CLIENT APPROVAL (POST) ─────────────────────────────────────────────────
   async submitClientApproval(
     planningId: string,
-    approvals: { itemId: string; clienteAprobacion: ClienteAprobacion; motivoRechazo?: string }[],
+    approvals: { itemId: string; clienteAprobacion: ClienteAprobacion; motivoRechazo?: string; motivoCategoria?: string }[],
     userId: string
   ): Promise<IVideoPlanning> {
     if (!Types.ObjectId.isValid(planningId)) throw new Error("INVALID_ID");
@@ -594,6 +596,11 @@ export class VideoPlanningService {
         if (approval.motivoRechazo !== undefined) {
           item.motivoRechazo = approval.motivoRechazo;
         }
+        // Categoria del rechazo (gancho debil, tono, dato incorrecto...): la
+        // pone el bot al clasificar la correccion; sin ella se infiere del texto.
+        if (approval.motivoCategoria !== undefined) {
+          item.motivoCategoria = approval.motivoCategoria;
+        }
         // Banderas: el veredicto del cliente sobre el guion queda en el log.
         reviewEventService
           .recordClientApproval({
@@ -602,6 +609,7 @@ export class VideoPlanningService {
             prevClienteAprobacion,
             actorId: userId,
             motivo: approval.motivoRechazo,
+            motivoCategoria: approval.motivoCategoria,
           })
           .catch(() => {});
       }
@@ -624,6 +632,20 @@ export class VideoPlanningService {
       this.notificarGuionesRechazados(planning as unknown as IVideoPlanning, rechazados as unknown as IVideoItem[], userId, produccion).catch(
         (err: any) => console.warn("[VideoPlanningService] aviso de guiones rechazados falló:", err.message)
       );
+    } else {
+      // Todo aprobado: contenido se entera sin tener que entrar a mirar.
+      models.workspaces
+        .findById(planning.workspaceId)
+        .select("name")
+        .lean()
+        .then((ws) =>
+          slackService.avisarEquipo({
+            titulo: `✅ ${ws?.name || "Cliente"} aprobó sus ${planning.items.length} guiones`,
+            detalle: produccion ? `Producción: ${fechaEcuador(produccion.fecha)}` : undefined,
+            correos: equipoAtencionService.correos("guiones"),
+          })
+        )
+        .catch((err: any) => console.warn("[VideoPlanningService] Slack de aprobación falló:", err.message));
     }
 
     return planning.toObject() as IVideoPlanning;
@@ -717,6 +739,21 @@ export class VideoPlanningService {
       rechazados: rechazados.map((r) => ({ numero: r.numero, tema: r.tema, motivo: r.motivoRechazo })),
       totalGuiones: planning.items.length,
     });
+
+    // Slack: donde el equipo trabaja, con contenido y los autores etiquetados.
+    // Se menciona solo a quienes corrigen, no a todo el equipo del entorno.
+    const autores = autoresIds.length
+      ? await models.users.find({ _id: { $in: autoresIds } }).select("email").lean()
+      : [];
+    await slackService
+      .avisarEquipo({
+        titulo: `🚨 ${nombre} pidió correcciones en ${rechazados.length} guion${rechazados.length === 1 ? "" : "es"} · ${plazo}`,
+        detalle: rechazados
+          .map((r) => `#${String(r.numero).padStart(2, "0")} ${r.tema}\n→ ${r.motivoRechazo || "sin detalle"}`)
+          .join("\n\n"),
+        correos: [...equipoAtencionService.correos("guiones"), ...autores.map((a) => a.email).filter(Boolean)],
+      })
+      .catch((err: any) => console.warn("[VideoPlanningService] Slack de rechazo falló:", err.message));
   }
 
   /**

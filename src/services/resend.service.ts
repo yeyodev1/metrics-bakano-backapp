@@ -1,4 +1,5 @@
 import { Resend } from "resend";
+import { sinBloqueados } from "../utils/contactosBloqueados";
 
 const MARCA = "Bakano Metrics";
 // Logo blanco con punto rosado: vive en public/ del front para tener URL fija.
@@ -25,8 +26,31 @@ interface WelcomeEmailParams {
 
 export class ResendService {
   // Lazy getter — read env at call time, not at module import time
-  private get client(): Resend {
-    return new Resend(process.env.RESEND_API_KEY);
+  /**
+   * Todos los correos salen por aqui: antes de enviar se sacan los contactos
+   * bloqueados por direccion (to, cc y bcc). Si no queda nadie, no se envia.
+   */
+  private get client() {
+    const resend = new Resend(process.env.RESEND_API_KEY);
+    type Envio = Parameters<Resend["emails"]["send"]>[0];
+    return {
+      emails: {
+        send: async (params: Envio): Promise<Awaited<ReturnType<Resend["emails"]["send"]>>> => {
+          const p = params as any;
+          const to = await sinBloqueados(p.to as string | string[]);
+          if (!to || (Array.isArray(to) && !to.length)) {
+            console.warn(`[Resend] correo "${p.subject}" no enviado: solo tenía destinatarios bloqueados`);
+            return { data: null, error: null } as any;
+          }
+          return resend.emails.send({
+            ...p,
+            to,
+            ...(p.cc ? { cc: await sinBloqueados(p.cc) } : {}),
+            ...(p.bcc ? { bcc: await sinBloqueados(p.bcc) } : {}),
+          });
+        },
+      },
+    };
   }
 
   private get from(): string {
