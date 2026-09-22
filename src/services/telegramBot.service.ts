@@ -88,6 +88,7 @@ export class TelegramBotService {
       await telegramService.answerCallbackQuery(cq.id).catch(() => undefined);
       if (!chat || chat.type !== "private" || !cq.data) return;
       const doc = await this.cargarChat(chat.id, cq.from);
+      if (!(await this.esNuevo(doc, update.update_id))) return;
       await this.onBoton(doc, cq.data);
       return;
     }
@@ -97,7 +98,23 @@ export class TelegramBotService {
     if (!msg || msg.chat.type !== "private" || !msg.from || typeof msg.text !== "string") return;
 
     const doc = await this.cargarChat(msg.chat.id, msg.from);
+    if (!(await this.esNuevo(doc, update.update_id))) return;
     await this.onTexto(doc, msg.text.trim());
+  }
+
+  /**
+   * Telegram reenvia el mismo update si tardamos en responder (la IA puede
+   * tomarse casi un minuto). Sin esto, el cliente veia la respuesta dos veces
+   * o dos menus seguidos, y una cita se podia procesar dos veces.
+   */
+  private async esNuevo(chat: ITelegramChat, updateId?: number): Promise<boolean> {
+    if (!updateId) return true;
+    const r = await models.telegramChats.updateOne(
+      { _id: chat._id, updatesVistos: { $ne: updateId } },
+      { $push: { updatesVistos: { $each: [updateId], $slice: -40 } } }
+    );
+    if (!r.modifiedCount) console.log(`[Telegram] update ${updateId} repetido: se ignora`);
+    return Boolean(r.modifiedCount);
   }
 
   private async cargarChat(
@@ -171,11 +188,17 @@ export class TelegramBotService {
         // Eligio un tema en el menu: su mensaje va directo a esa persona.
         if (chat.tema && chat.workspaceId) return this.enviarSolicitud(chat, chat.tema, texto);
         if (chat.workspaceId && (await telegramAgentService.responder(chat, texto))) return;
-        return this.mostrarMenu(
-          chat,
-          undefined,
-          "Uy, se me trabó la respuesta 😅 Escríbemelo de nuevo en un ratito, o elige el tema abajo y se lo paso directo a la persona:"
+        // La IA no pudo: mensaje corto y humano, no el menú completo otra vez.
+        await telegramService.sendMessage(
+          chat.chatId,
+          "Uy, se me trabó eso 😅 dame un minuto y escríbemelo otra vez.\n\nSi es algo urgente, toca el botón y se lo paso a una persona del equipo ahora mismo.",
+          [
+            [{ text: "💬 Pasarlo a una persona", callback_data: "menu:atencion" }],
+            [{ text: "🗓️ Mis citas", callback_data: "citas:ver" }],
+            [{ text: "📋 Ver menú", callback_data: "menu:ver" }],
+          ]
         );
+        return;
     }
   }
 
@@ -299,6 +322,19 @@ export class TelegramBotService {
     if (data === "menu:agendar") return this.elegirTemaReunion(chat);
     if (data === "menu:onboarding") return this.mostrarOnboarding(chat);
     if (data === "cita:si" || data === "cita:no") return this.responderCambioCita(chat, data === "cita:si");
+    if (data === "citas:ver") return this.mostrarCitas(chat);
+    // cc:m:<ref> mueve · cc:c:<ref> cancela · cs:<epoch>:<ref> elige horario
+    if (data.startsWith("cc:m:")) return this.mostrarHorariosParaMover(chat, data.slice(5));
+    if (data.startsWith("cc:c:")) return this.pedirConfirmacionCita(chat, { accion: "cancelar", ref: data.slice(5) });
+    if (data.startsWith("cs:")) {
+      const resto = data.slice(3);
+      const corte = resto.indexOf(":");
+      return this.pedirConfirmacionCita(chat, {
+        accion: "reprogramar",
+        ref: resto.slice(corte + 1),
+        inicio: new Date(Number(resto.slice(0, corte)) * 1000),
+      });
+    }
     if (data === "citas:cambiar") {
       chat.tema = undefined;
       await chat.save();
@@ -524,7 +560,115 @@ export class TelegramBotService {
     );
   }
 
-  /** Boton de confirmacion de un cambio de cita propuesto por la IA. */
+  /**
+   * Citas del cliente con botones para moverlas o cancelarlas. Es el mismo
+   * servicio que usa la IA, pero sin depender de ella: si el modelo esta
+   * lento o caido, el cliente igual puede cambiar su cita.
+   */
+  private async mostrarCitas(chat: ITelegramChat): Promise<void> {
+    const citas = await citasClienteService.listar(chat);
+    if (!citas.length) {
+      await telegramService.sendMessage(
+        chat.chatId,
+        "No tienes citas agendadas por ahora 🗓️\n\nCuando agendes tu producción, una sesión o una reunión, van a aparecer aquí y las vas a poder mover o cancelar.",
+        [
+          [{ text: "🚀 Cómo va mi onboarding", callback_data: "menu:onboarding" }],
+          [{ text: "📋 Volver al menú", callback_data: "menu:ver" }],
+        ]
+      );
+      return;
+    }
+
+    const lineas: string[] = [];
+    const botones: InlineButton[][] = [];
+    for (const cita of citas) {
+      const editable = citasClienteService.editable(cita);
+      lineas.push(
+        `🗓️ <b>${escaparHtml(cita.etiqueta)}</b>\n     ${fechaEcuador(cita.inicio)}\n     con ${escaparHtml(cita.con)}` +
+          (editable ? "" : "\n     ⏰ faltan menos de 48 h: esta ya se coordina directo")
+      );
+      if (editable) {
+        botones.push([
+          { text: `🔄 Mover ${cita.etiqueta.toLowerCase().slice(0, 18)}`, callback_data: `cc:m:${cita.ref}` },
+          { text: "✖️ Cancelar", callback_data: `cc:c:${cita.ref}` },
+        ]);
+      }
+    }
+    botones.push([{ text: "📋 Volver al menú", callback_data: "menu:ver" }]);
+    await telegramService.sendMessage(
+      chat.chatId,
+      `Estas son tus citas 👇\n\n${lineas.join("\n\n")}\n\nPuedes moverlas o cancelarlas hasta 48 horas antes.`,
+      botones
+    );
+  }
+
+  private async mostrarHorariosParaMover(chat: ITelegramChat, ref: string): Promise<void> {
+    const { cita, horarios, motivo } = await citasClienteService.horariosParaMover(chat, ref);
+    if (!cita) return this.mostrarCitas(chat);
+    if (motivo === "fuera_de_plazo") {
+      await telegramService.sendMessage(
+        chat.chatId,
+        `Faltan menos de 48 horas para tu ${escaparHtml(cita.etiqueta.toLowerCase())}, así que esa ya la coordinas directo con <b>${escaparHtml(cita.con)}</b> 🙏\n\n` +
+          `Escríbele a ${escaparHtml(cita.correos.join(" o "))} y lo resuelven al toque.`,
+        [[{ text: "📋 Volver al menú", callback_data: "menu:ver" }]]
+      );
+      return;
+    }
+    if (!horarios.length) {
+      await telegramService.sendMessage(
+        chat.chatId,
+        `No me aparecen horarios libres para mover tu ${escaparHtml(cita.etiqueta.toLowerCase())} 😕\n\n` +
+          `Cuéntame qué día te queda bien y se lo paso a <b>${escaparHtml(cita.con)}</b>.`,
+        [[{ text: "🗓️ Ver mis citas", callback_data: "citas:ver" }], [{ text: "📋 Volver al menú", callback_data: "menu:ver" }]]
+      );
+      return;
+    }
+    const botones = this.botonesHorarios(horarios, (h) => `cs:${Math.floor(h.getTime() / 1000)}:${ref}`);
+    botones.push([{ text: "🗓️ Ver mis citas", callback_data: "citas:ver" }]);
+    await telegramService.sendMessage(
+      chat.chatId,
+      `Tu <b>${escaparHtml(cita.etiqueta.toLowerCase())}</b> está para el <b>${fechaEcuador(cita.inicio)}</b>.\n\nElige la nueva fecha 👇`,
+      botones
+    );
+  }
+
+  /** Antes de tocar el calendario, el cliente confirma qué se va a hacer. */
+  private async pedirConfirmacionCita(
+    chat: ITelegramChat,
+    cambio: { accion: "cancelar" | "reprogramar"; ref: string; inicio?: Date }
+  ): Promise<void> {
+    const r = await citasClienteService.proponer(chat, {
+      accion: cambio.accion,
+      ref: cambio.ref,
+      inicio: cambio.inicio?.toISOString(),
+    });
+    if (!r.ok) {
+      const correos = "correos" in r && r.correos?.length ? ` Escríbele a ${escaparHtml(r.correos.join(" o "))}.` : "";
+      const texto =
+        r.motivo === "fuera_de_plazo"
+          ? `Faltan menos de 48 horas para esa cita, así que esa ya la coordinas directo con tu equipo 🙏${correos}`
+          : r.motivo === "horario_no_disponible"
+            ? "Uy, ese horario se ocupó justo ahora 😕 elige otro."
+            : "No pude preparar ese cambio 😕 cuéntame qué necesitas y se lo paso a tu equipo.";
+      await telegramService.sendMessage(chat.chatId, texto, [
+        [{ text: "🗓️ Ver mis citas", callback_data: "citas:ver" }],
+        [{ text: "📋 Volver al menú", callback_data: "menu:ver" }],
+      ]);
+      return;
+    }
+    await telegramService.sendMessage(
+      chat.chatId,
+      `Ojo, esto es lo que voy a hacer 👇\n\n<b>${escaparHtml(r.resumen)}</b> (hora Ecuador).\n\nLo confirmo?`,
+      [
+        [
+          { text: "✅ Sí, hazlo", callback_data: "cita:si" },
+          { text: "✖️ No, déjalo así", callback_data: "cita:no" },
+        ],
+      ]
+    );
+  }
+
+  /** Boton de confirmacion de un cambio de cita (propuesto por la IA o por el menú). */
   private async responderCambioCita(chat: ITelegramChat, confirma: boolean): Promise<void> {
     if (!confirma) {
       await citasClienteService.descartar(chat);
@@ -823,15 +967,19 @@ export class TelegramBotService {
       nombreEntorno ?? (await models.workspaces.findById(chat.workspaceId).select("name").lean())?.name ?? "tu entorno";
     await telegramService.sendMessage(
       chat.chatId,
-      `${saludo ? `${saludo}\n\n` : ""}Estamos hablando de <b>${escaparHtml(nombre)}</b> 💛 En qué te ayudo hoy?\n\n` +
-        "✍️ Escríbeme lo que necesites con tus palabras, por ejemplo <i>cómo van mis guiones?</i> o <i>quiero mover la grabación</i>.\n\n" +
-        "💬 Prefieres hablar directo con nosotros? Toca <b>Agendar una reunión</b> y lo dejo en el calendario del equipo.",
+      `${saludo ? `${saludo}\n\n` : ""}Estás en <b>${escaparHtml(nombre)}</b> 💛\n\n` +
+        "Escríbeme como le escribirías a una persona. Por ejemplo:\n" +
+        "· <i>cómo van mis guiones?</i>\n" +
+        "· <i>quiero mover mi grabación al jueves</i>\n" +
+        "· <i>cómo va mi facturación este mes?</i>\n\n" +
+        "O toca una opción 👇",
       [
-        [{ text: "🚀 Mi onboarding", callback_data: "menu:onboarding" }],
-        [{ text: "🎬 Producciones", callback_data: "menu:produccion" }],
-        [{ text: "📝 Revisión de guiones", callback_data: "menu:guiones" }],
-        [{ text: "🤝 Atención al cliente", callback_data: "menu:atencion" }],
+        [{ text: "🗓️ Mis citas (mover o cancelar)", callback_data: "citas:ver" }],
+        [{ text: "🚀 Cómo va mi onboarding", callback_data: "menu:onboarding" }],
+        [{ text: "🎬 Mis producciones", callback_data: "menu:produccion" }],
+        [{ text: "📝 Revisar mis guiones", callback_data: "menu:guiones" }],
         [{ text: "📅 Agendar una reunión", callback_data: "menu:agendar" }],
+        [{ text: "💬 Escribirle a mi equipo", callback_data: "menu:atencion" }],
         [{ text: "🔄 Cambiar de entorno", callback_data: "menu:entorno" }],
       ]
     );

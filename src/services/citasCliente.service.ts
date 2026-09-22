@@ -243,7 +243,7 @@ class CitasClienteService {
   async proponer(
     chat: ITelegramChat,
     cambio: { accion: "cancelar" | "reprogramar"; ref: string; inicio?: string; motivo?: string }
-  ): Promise<{ ok: true; resumen: string } | ResultadoCambio> {
+  ): Promise<{ ok: true; resumen: string } | { ok: false; motivo: string; con?: string; correos?: string[] }> {
     const cita = (await this.listar(chat)).find((c) => c.ref === cambio.ref);
     if (!cita) return { ok: false, motivo: "no_encontrada" };
     if (!this.editable(cita)) return { ok: false, motivo: "fuera_de_plazo", con: cita.con, correos: cita.correos };

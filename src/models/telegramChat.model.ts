@@ -58,6 +58,8 @@ export interface ITelegramChat extends Document {
     workspaceId?: Types.ObjectId;
     userId?: Types.ObjectId;
   }[];
+  /** update_id de Telegram ya procesados: sus reintentos no se repiten. */
+  updatesVistos?: number[];
   /** Cambio de cita propuesto y esperando que el cliente lo confirme. */
   cambioPendiente?: {
     accion: "cancelar" | "reprogramar";
@@ -123,6 +125,7 @@ const TelegramChatSchema = new Schema<ITelegramChat>(
       ],
       default: undefined,
     },
+    updatesVistos: { type: [Number], default: undefined },
     cambioPendiente: {
       type: { accion: String, ref: String, inicio: Date, motivo: String, resumen: String, creadoEn: Date },
       default: undefined,

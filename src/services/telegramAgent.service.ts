@@ -61,8 +61,25 @@ type Mensaje = { role: "user" | "assistant"; content: string };
 type AiSdk = typeof import("ai");
 
 let aiSdk: Promise<AiSdk> | null = null;
+/**
+ * `import()` a secas lo compila TypeScript a `require()` (module commonjs) y
+ * en el runtime de Vercel eso revienta con "require() of ES Module": la IA
+ * quedaba muerta y el bot respondia siempre con el menu. El Function lo
+ * esconde del compilador, asi que sigue siendo un import dinamico de verdad.
+ */
+const importarEsm = new Function("modulo", "return import(modulo)") as (modulo: string) => Promise<any>;
+async function traerAi(): Promise<AiSdk> {
+  try {
+    // El require literal es ademas lo que hace que Vercel empaquete "ai" en
+    // la funcion: si solo quedara el import escondido, no lo rastrearia.
+    return require("ai") as AiSdk;
+  } catch (error: any) {
+    if (error?.code !== "ERR_REQUIRE_ESM" && !/ES Module/i.test(String(error?.message))) throw error;
+    return (await importarEsm("ai")) as AiSdk;
+  }
+}
 function cargarAi(): Promise<AiSdk> {
-  aiSdk ??= import("ai").catch((error) => {
+  aiSdk ??= traerAi().catch((error) => {
     aiSdk = null;
     throw error;
   });
