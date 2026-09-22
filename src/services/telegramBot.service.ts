@@ -497,11 +497,17 @@ export class TelegramBotService {
     const deTuParte =
       faltaEnviar.length || faltaContar.length
         ? "\n\n📦 <b>De tu parte falta</b>\n" +
-          faltaEnviar.map((e) => `• ${escaparHtml(e.etiqueta)} → ${escaparHtml(e.enviarA)}`).join("\n") +
+          faltaEnviar
+            .map((e) =>
+              e.link
+                ? `• ${escaparHtml(e.etiqueta)}\n     ${e.link}`
+                : `• ${escaparHtml(e.etiqueta)} (se hace en Meta, invitando a ${escaparHtml(e.invitarA || "")})`
+            )
+            .join("\n") +
           (faltaContar.length
             ? `${faltaEnviar.length ? "\n" : ""}• Contarme sobre tu negocio (${faltaContar.length} ${faltaContar.length === 1 ? "dato" : "datos"}). Escríbeme <i>te cuento de mi negocio</i> y lo dejo en el sistema`
             : "") +
-          "\n\nSi ya enviaste algo, dímelo y le aviso al equipo para que lo revise."
+          "\n\nSi ya subiste algo, dímelo y le aviso al equipo para que lo revise."
         : "";
     const produccion = estado.produccion.agendada
       ? `✅ 🎬 Producción · ${fechaEcuador(estado.produccion.agendada)}`

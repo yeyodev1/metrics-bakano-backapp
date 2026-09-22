@@ -195,7 +195,7 @@ export class GhlService {
    * la cita queda con su historial en el CRM. Mover recalcula el fin con la
    * duracion del calendario y deja que el CRM valide que el horario este libre.
    */
-  async updateAppointment(eventId: string, cambio: { cancelar: true } | { startTime: Date }): Promise<void> {
+  async updateAppointment(eventId: string, cambio: { cancelar: true } | { startTime: Date; forzar?: boolean }): Promise<void> {
     let body: Record<string, unknown>;
     if ("cancelar" in cambio) {
       body = { appointmentStatus: "cancelled", toNotify: true };
@@ -210,6 +210,10 @@ export class GhlService {
         endTime: new Date(cambio.startTime.getTime() + minutos * 60_000).toISOString(),
         appointmentStatus: "confirmed",
         toNotify: true,
+        // El equipo mueve desde el Planificador a la hora que haga falta,
+        // aunque el calendario ya no muestre ese hueco como libre. Al cliente
+        // nunca se le ofrece un horario ocupado, asi que ahi va sin forzar.
+        ...(cambio.forzar ? { ignoreFreeSlotValidation: true } : {}),
       };
     }
     await axios.put(`${GHL_API_BASE}/calendars/events/appointments/${eventId}`, body, { headers: this.getHeaders(), timeout: 15_000 });

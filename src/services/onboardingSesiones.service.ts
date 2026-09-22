@@ -102,12 +102,16 @@ export const SESIONES_ONBOARDING: Record<SesionOnboarding, DefinicionSesion> = {
 export const PROCESO_ONBOARDING = {
   envios: [
     {
-      que: "Archivos de la marca: logos en PNG, JPEG y vector (editable o .ai), identidad de marca, datos de facturación de al menos los últimos 6 meses, y el catálogo con precios de tus productos",
-      a: "dquimi@bakano.ec",
+      que: "Logos en PNG (fondo transparente) y tu línea gráfica, y el catálogo con precios",
+      donde: "en metrics.bakano.ec, sección Recursos de marca de tu entorno",
+    },
+    {
+      que: "Tu facturación de los últimos 6 meses",
+      donde: "en metrics.bakano.ec, sección Facturación & ROAS de tu entorno",
     },
     {
       que: "Invitación al portafolio comercial de Meta con permisos de ADMINISTRACIÓN",
-      a: "agenciademi@gmail.com",
+      donde: "dentro de Meta Business, invitando a agenciademi@gmail.com",
     },
   ],
   etapas: [
@@ -145,7 +149,7 @@ export const PROCESO_ONBOARDING = {
 
 /** El proceso en texto corto, para el system prompt de la IA. */
 export function procesoOnboardingEnTexto(): string {
-  const envios = PROCESO_ONBOARDING.envios.map((e) => `- ${e.que} → a ${e.a}`).join("\n");
+  const envios = PROCESO_ONBOARDING.envios.map((e) => `- ${e.que} → ${e.donde}`).join("\n");
   const etapas = PROCESO_ONBOARDING.etapas
     .map((e) => `Etapa ${e.numero} · ${e.nombre}:\n${e.pasos.map((p) => `  - ${p}`).join("\n")}`)
     .join("\n");

@@ -1,5 +1,14 @@
 import multer from "multer";
 
+/**
+ * Un archivo rechazado es culpa de la peticion, no del servidor: sin `status`
+ * terminaba en 500 y disparaba alerta a Slack, y el cliente veia "Internal
+ * Server Error" en vez de por que no se acepto su archivo.
+ */
+function rechazo(mensaje: string): Error {
+  return Object.assign(new Error(mensaje), { status: 400 });
+}
+
 const storage = multer.memoryStorage();
 
 export const upload = multer({
@@ -9,7 +18,7 @@ export const upload = multer({
     if (file.mimetype.startsWith("image/")) {
       cb(null, true);
     } else {
-      cb(new Error("Only image files are allowed."));
+      cb(rechazo("Solo se permiten imágenes (PNG, JPG o WEBP)."));
     }
   },
 });
@@ -21,7 +30,7 @@ export const uploadMedia = multer({
     if (file.mimetype.startsWith("video/") || file.mimetype.startsWith("image/")) {
       cb(null, true);
     } else {
-      cb(new Error("Solo se permiten videos e imágenes"));
+      cb(rechazo("Solo se permiten videos e imágenes."));
     }
   },
 });
@@ -35,11 +44,18 @@ export const uploadDocument = multer({
       "image/jpeg",
       "image/png",
       "image/webp",
+      // El catálogo se puede escribir a mano desde la plataforma y se envía
+      // como .txt: el servidor lo rechazaba y esa opción nunca funcionó.
+      "text/plain",
     ];
     if (allowed.includes(file.mimetype)) {
       cb(null, true);
     } else {
-      cb(new Error("Solo se permiten PDF e imágenes"));
+      cb(
+        rechazo(
+          "Solo se permiten PDF, PNG, JPG o WEBP. Si tienes el archivo en .ai, .psd o .eps, expórtalo antes de subirlo (los logos van en PNG)."
+        )
+      );
     }
   },
 });
