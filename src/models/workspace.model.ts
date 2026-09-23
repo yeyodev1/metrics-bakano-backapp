@@ -158,6 +158,17 @@ export interface IWorkspace extends Document {
    * El cliente los "declara" por el bot; el responsable los verifica.
    */
   onboardingEntregables?: Record<string, { estado: "pendiente" | "declarado" | "verificado"; declaradoEn?: Date; nota?: string }>;
+  /**
+   * Seguimiento de la pauta: que anuncios estaban activos la ultima vez, para
+   * saber si llevamos semanas con lo mismo, y cuando se aviso por ultima vez.
+   */
+  publicidad?: {
+    snapshotIds?: string[];
+    snapshotDesde?: Date;
+    avisoMismosEn?: Date;
+    ultimoResumenEn?: Date;
+    avisoSinDatosEn?: Date;
+  };
   preNegotiatedContract?: any; // Stores predefined contract parameters
   contractData?: any; // Stores the final contract form and signature
   teamInfo?: {
@@ -337,6 +348,16 @@ const WorkspaceSchema = new Schema<IWorkspace>(
     },
     onboardingEntregables: {
       type: Schema.Types.Mixed,
+      default: undefined,
+    },
+    publicidad: {
+      type: {
+        snapshotIds: [String],
+        snapshotDesde: Date,
+        avisoMismosEn: Date,
+        ultimoResumenEn: Date,
+        avisoSinDatosEn: Date,
+      },
       default: undefined,
     },
     preNegotiatedContract: {
