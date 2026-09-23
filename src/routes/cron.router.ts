@@ -22,8 +22,15 @@ cronRouter.get("/onboarding-sync", async (req: Request, res: Response) => {
     ]);
     console.log(
       `[Cron] Onboarding — citas revisadas: ${sync.revisadas}, marcadas: ${sync.marcadas}, ` +
-        `cumplidas desde el CRM: ${sync.cumplidas}, bienvenidas: ${bienvenidas.enviadas}`
+        `cumplidas desde el CRM: ${sync.cumplidas}, bienvenidas: ${bienvenidas.enviadas}, ` +
+        `sin entorno: ${sync.sinResolver.length}`
     );
+    // El cron corre cada 30 min; el digest de las que no se pudieron asociar
+    // sale UNA vez al día (13:10 UTC = 08:10 en Ecuador) para no ser ruido.
+    const ahora = new Date();
+    if (ahora.getUTCHours() === 13 && ahora.getUTCMinutes() < 30 && sync.sinResolver.length) {
+      await onboardingBotService.avisarSesionesSinEntorno(sync.sinResolver);
+    }
     res.json({ ok: true, sync, bienvenidas });
   } catch (err: any) {
     console.error("[Cron] Onboarding sync falló:", err.message);

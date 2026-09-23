@@ -310,9 +310,12 @@ class OnboardingBotService {
     marcadas: number;
     cumplidas: number;
     avisadas: number;
+    /** Citas futuras que no se pudieron asociar a ningún entorno. */
+    sinResolver: { titulo: string; cuando: string; sesion: string; motivo: string }[];
     omitido?: string;
   }> {
-    if (!ghlService.isConfigured()) return { revisadas: 0, marcadas: 0, cumplidas: 0, avisadas: 0, omitido: "GHL sin configurar" };
+    if (!ghlService.isConfigured())
+      return { revisadas: 0, marcadas: 0, cumplidas: 0, avisadas: 0, sinResolver: [], omitido: "GHL sin configurar" };
 
     const desde = new Date(Date.now() - VENTANA_SYNC_DIAS.atras * 86_400_000);
     const hasta = new Date(Date.now() + VENTANA_SYNC_DIAS.adelante * 86_400_000);
@@ -325,6 +328,7 @@ class OnboardingBotService {
     let marcadas = 0;
     let cumplidas = 0;
     let avisadas = 0;
+    const sinResolver: { titulo: string; cuando: string; sesion: string; motivo: string }[] = [];
     // Por que se descarta cada cita: sin esto el cron dice "0 marcadas" y no
     // hay forma de saber si fue por el contacto, por el correo o por el entorno.
     const descartes: Record<string, number> = {};
@@ -407,6 +411,16 @@ class OnboardingBotService {
       const resuelto = await this.entornoDeLaCita(correo, contactos.get(evento.contactId), evento.title);
       if (!resuelto.id) {
         descartar(resuelto.motivo || "sin entorno");
+        // Solo importan las que están por venir: una sesión futura que el bot
+        // no sabe de quién es, es una sesión que nadie va a ver reflejada.
+        if (inicio.getTime() > Date.now()) {
+          sinResolver.push({
+            titulo: evento.title || "(sin título)",
+            cuando: fechaEcuador(inicio),
+            sesion: SESIONES_ONBOARDING[sesion].etiqueta,
+            motivo: resuelto.motivo || "sin entorno",
+          });
+        }
         continue;
       }
       const workspaceId = resuelto.id;
@@ -438,7 +452,7 @@ class OnboardingBotService {
     if (Object.keys(descartes).length) {
       console.log("[Onboarding] citas descartadas:", JSON.stringify(descartes));
     }
-    return { revisadas: eventos.length, marcadas, cumplidas, avisadas };
+    return { revisadas: eventos.length, marcadas, cumplidas, avisadas, sinResolver };
   }
 
   /** El entorno de una cita del CRM, resolviendo el contacto si hace falta. */
@@ -508,6 +522,31 @@ class OnboardingBotService {
     }
   }
 
+  /**
+   * Digest para el equipo con las sesiones futuras que el bot no pudo asociar
+   * a un entorno. Sin esto el cliente ve "te falta agendar" aunque ya agendó,
+   * y nadie se entera de que en el CRM la cita quedó sin identificar.
+   */
+  async avisarSesionesSinEntorno(sinResolver: { titulo: string; cuando: string; sesion: string; motivo: string }[]): Promise<boolean> {
+    if (!sinResolver.length) return false;
+    const detalle = [
+      `Hay ${sinResolver.length} ${sinResolver.length === 1 ? "sesión agendada" : "sesiones agendadas"} en el CRM que no puedo asociar a ningún entorno:`,
+      "",
+      ...sinResolver.map((s) => `• ${s.cuando} · ${s.sesion} · "${s.titulo}"\n   ${s.motivo}`),
+      "",
+      "Cómo se arregla: pon el nombre del entorno (tal como está en metrics.bakano.ec) al inicio del título de la cita, " +
+        "o crea el entorno y el usuario del cliente en la plataforma. Mientras tanto, el bot le sigue diciendo al cliente que le falta agendar.",
+    ].join("\n");
+
+    const correos = [...new Set([...CORREOS_SEGUIMIENTO_ONBOARDING, "dreyes@bakano.ec"])];
+    return slackService
+      .avisarEquipo({ titulo: "🗂️ Sesiones de onboarding sin entorno en el CRM", detalle, correos })
+      .catch((error: any) => {
+        console.error("[Onboarding] Slack sin entorno:", error?.message || error);
+        return false;
+      });
+  }
+
   /** La sesion no se dio: se le ofrece agendarla de nuevo, sin reproches. */
   private async avisarReagendar(workspaceId: Types.ObjectId, sesion: SesionOnboarding): Promise<void> {
     const chats = await models.telegramChats.find({ workspaceId, estado: "listo" }).select("chatId").lean();
@@ -537,7 +576,13 @@ class OnboardingBotService {
     contacto: any,
     titulo?: string
   ): Promise<{ id?: Types.ObjectId; motivo?: string }> {
-    const usuario = await models.users.findOne({ email: correo }).select("workspaceId workspaces isInternal").lean();
+    // Un correo de Bakano nunca es el cliente: en los calendarios de soporte
+    // el contacto es el propio responsable (David, Joel…), y de quien es la
+    // sesion se saca del titulo ("Depil - CRM MEET") o de la empresa.
+    const esDelEquipo = /@bakano\.ec$/i.test(correo);
+    const usuario = esDelEquipo
+      ? null
+      : await models.users.findOne({ email: correo }).select("workspaceId workspaces isInternal").lean();
     // Un correo puede estar en VARIOS entornos (agencias, socios, pruebas).
     // Antes se tomaba el primero del array y la sesion se marcaba en el
     // entorno equivocado, sin que nadie se enterara.
@@ -550,27 +595,60 @@ class OnboardingBotService {
     ];
     if (!usuario?.isInternal && suyos.length === 1) return { id: new Types.ObjectId(suyos[0]) };
 
-    for (const texto of [contacto?.companyName, titulo].filter(Boolean) as string[]) {
+    for (const texto of this.nombresCandidatos(contacto, titulo, esDelEquipo)) {
       // Si el correo ya tiene entornos, el nombre solo desempata entre ESOS.
       const id = await this.entornoPorNombre(texto, suyos.length ? new Set(suyos) : undefined);
       if (id) return { id };
     }
 
     return {
-      motivo: usuario?.isInternal
-        ? "cita del equipo, sin cliente identificable"
+      motivo: esDelEquipo || usuario?.isInternal
+        ? "cita en el calendario del equipo y el título no dice de qué cliente es"
         : suyos.length > 1
           ? `el correo está en ${suyos.length} entornos y la cita no dice cuál (falta la empresa en el contacto del CRM)`
           : usuario
-            ? "usuario sin entorno asignado"
-            : "contacto sin usuario ni empresa reconocible",
+            ? "el usuario existe en Metrics pero no está asignado a ningún entorno"
+            : "el correo no existe en Metrics y la empresa del contacto no coincide con ningún entorno",
     };
   }
 
-  /** Empareja "MEMOS" o "Flash CarWash" con el entorno que les corresponde. */
+  /**
+   * Nombres que pueden identificar al cliente, del mas fiable al menos.
+   *
+   * Los titulos del CRM vienen como "Empresa / Persona - Meta Sessions" o
+   * "Depil - CRM MEET": el nombre util es lo que va antes de la barra o del
+   * guion, no el titulo entero (que ademas trae el nombre de la sesion).
+   */
+  private nombresCandidatos(contacto: any, titulo?: string, esDelEquipo = false): string[] {
+    const t = (titulo || "").trim();
+    const candidatos = [
+      // La empresa del responsable ("david s.a") no dice de que cliente es.
+      esDelEquipo ? "" : contacto?.companyName,
+      t.split("/")[0],
+      t.split(" - ")[0],
+      t,
+    ];
+    return [...new Set(candidatos.map((x) => String(x || "").trim()).filter((x) => x.length >= 4))];
+  }
+
+  /**
+   * Empareja "MEMOS", "DOX SA" o "Saori - CRM MEET" con su entorno.
+   *
+   * Cuatro pasadas, de la mas segura a la mas floja, y cada una exige que la
+   * coincidencia sea UNICA: si dos entornos encajan, se prefiere no marcar
+   * nada antes que marcar el equivocado (eso ya paso una vez).
+   */
   private async entornoPorNombre(texto: string, permitidos?: Set<string>): Promise<Types.ObjectId | undefined> {
     const objetivo = normalizar(texto);
-    if (objetivo.length < 4) return undefined;
+    if (objetivo.length < 3) return undefined;
+    // Palabras del texto original: normalizar junta todo ("DOX SA" → "doxsa").
+    const palabras = new Set(
+      texto
+        .split(/[^\p{L}\p{N}]+/u)
+        .map((p) => normalizar(p))
+        .filter((p) => p.length >= 3)
+    );
+
     if (!this.entornosCache || Date.now() - this.entornosCache.en > 10 * 60_000) {
       const lista = await models.workspaces.find({ isActive: true }).select("_id name").lean();
       this.entornosCache = {
@@ -581,12 +659,18 @@ class OnboardingBotService {
     const candidatos = permitidos
       ? this.entornosCache.lista.filter((w) => permitidos.has(String(w.id)))
       : this.entornosCache.lista;
-    // Primero igualdad exacta: si no, "Diego Reyes" se llevaba las citas de
-    // "pruebas de diego reyes" solo por estar contenido en el texto.
-    const exacto = candidatos.find((w) => w.n && w.n === objetivo);
-    if (exacto) return exacto.id;
-    // Si no, el nombre del entorno dentro del texto ("Flash CarWash" → "FLASH CAR").
-    return candidatos.find((w) => w.n && w.n.length >= 5 && objetivo.includes(w.n))?.id;
+
+    const unico = (encontrados: { id: Types.ObjectId }[]) => (encontrados.length === 1 ? encontrados[0]!.id : undefined);
+    return (
+      // 1. Igual: "Megaprinter" → "Megaprinter".
+      unico(candidatos.filter((w) => w.n && w.n === objetivo)) ??
+      // 2. El entorno es una palabra del texto: "DOX SA" → "DOX".
+      unico(candidatos.filter((w) => w.n.length >= 3 && palabras.has(w.n))) ??
+      // 3. El entorno dentro del texto: "Flash CarWash" → "FLASH CAR".
+      unico(candidatos.filter((w) => w.n.length >= 5 && objetivo.includes(w.n))) ??
+      // 4. El texto dentro del entorno: "Saori" → "Saori Sushi".
+      unico(candidatos.filter((w) => objetivo.length >= 5 && w.n.includes(objetivo)))
+    );
   }
 
   /**
