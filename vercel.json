@@ -53,6 +53,10 @@
       "schedule": "10 14 * * *"
     },
     {
+      "path": "/api/cron/produccion-planificacion",
+      "schedule": "40 13 * * *"
+    },
+    {
       "path": "/api/cron/onboarding-sync",
       "schedule": "10,40 * * * *"
     }

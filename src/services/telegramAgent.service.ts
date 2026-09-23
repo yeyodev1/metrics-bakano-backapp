@@ -139,7 +139,9 @@ class TelegramAgentService {
     let respuesta = "";
     let cliente: DatosCliente | null = null;
     // Lo que paso en este turno: si se propuso un cambio de cita, van botones.
-    const turno = { inicio: new Date(), propuesta: false };
+    // Que herramientas uso: con eso se arman los botones de la respuesta. El
+    // cliente venia teniendo que escribir "dime los horarios" a mano.
+    const turno = { inicio: new Date(), propuesta: false, usadas: new Set<string>() };
     try {
       const { generateText, isStepCount } = await cargarAi();
       const [datos, perfil] = await Promise.all([
@@ -161,7 +163,7 @@ class TelegramAgentService {
         model: modelo(),
         system: this.instrucciones(datos, perfil, pendientes),
         messages: [...historial, { role: "user", content: texto }],
-        tools: this.herramientas(chat, texto, turno),
+        tools: this.registrarUso(this.herramientas(chat, texto, turno), turno.usadas),
         stopWhen: isStepCount(6),
         // Tiempo por paso en los logs: sin esto un corte a los 50 s no dice
         // si fue el modelo pensando o una herramienta lenta.
@@ -204,7 +206,7 @@ class TelegramAgentService {
                 { text: "✖️ No", callback_data: "cita:no" },
               ],
             ]
-          : [[{ text: "📋 Ver menú", callback_data: "menu:ver" }]]
+          : this.botonesDelTurno(turno.usadas)
       );
       const ahora = new Date();
       await models.telegramChats.updateOne(
@@ -251,6 +253,53 @@ class TelegramAgentService {
       }
     }
     return Boolean(respuesta);
+  }
+
+  /** Envuelve cada herramienta para saber cuales se usaron en este turno. */
+  private registrarUso(herramientas: Record<string, any>, usadas: Set<string>): Record<string, any> {
+    for (const [nombre, def] of Object.entries(herramientas)) {
+      const original = def.execute;
+      def.execute = async (args: any, opciones: any) => {
+        usadas.add(nombre);
+        return original(args, opciones);
+      };
+    }
+    return herramientas;
+  }
+
+  /**
+   * Botones segun de que se hablo. Una respuesta de la IA sin botones deja al
+   * cliente escribiendo "dime los horarios" a mano, que es justo lo que el
+   * menu evita.
+   */
+  private botonesDelTurno(usadas: Set<string>): { text: string; callback_data?: string; url?: string }[][] {
+    const uso = (...nombres: string[]) => nombres.some((n) => usadas.has(n));
+    const botones: { text: string; callback_data?: string; url?: string }[][] = [];
+
+    if (uso("verMisCitas", "verHorariosParaMover", "reprogramarCita", "cancelarCita", "avisarCambioSobreLaHora")) {
+      botones.push([{ text: "🗓️ Ver mis citas", callback_data: "citas:ver" }]);
+    }
+    if (uso("verHorariosProduccion", "agendarProduccion", "verProducciones")) {
+      botones.push([{ text: "🎬 Mis producciones", callback_data: "menu:produccion" }]);
+    }
+    if (uso("verGuionesParaRevisar", "verGuiones", "verGuion", "anotarCorreccion", "verBorradorRevision", "enviarRevisionGuiones")) {
+      botones.push([{ text: "📝 Revisar mis guiones", callback_data: "menu:guiones" }]);
+    }
+    if (uso("verOnboarding", "verPendientesOnboarding", "registrarDatoMarca", "registrarEntregable", "pedirAyudaConDato", "verHorariosOnboarding", "agendarSesionOnboarding")) {
+      botones.push([{ text: "🚀 Cómo va mi onboarding", callback_data: "menu:onboarding" }]);
+    }
+    if (uso("verFacturacionPendiente", "registrarFacturacion", "verMetricas")) {
+      botones.push([{ text: "💵 Mi facturación del día", callback_data: "fact:ver" }]);
+    }
+    if (uso("verHorariosLibres", "agendarReunion")) {
+      botones.push([{ text: "📅 Agendar una reunión", callback_data: "menu:agendar" }]);
+    }
+    if (uso("pasarMensajeAlEquipo")) {
+      botones.push([{ text: "💬 Escribirle a mi equipo", callback_data: "menu:atencion" }]);
+    }
+    botones.push([{ text: "📋 Ver menú", callback_data: "menu:ver" }]);
+    // Telegram amontona todo si son muchos: el menu completo esta a un toque.
+    return botones.slice(-4);
   }
 
   private instrucciones(
@@ -378,6 +427,8 @@ Producciones (grabaciones):
 - Si todavía no puede agendar, explica la regla con naturalidad y dile desde qué fecha puede.
 - El cliente es UNO SOLO: nunca le agendes dos cosas a la misma hora, aunque sean con personas distintas del equipo. Los horarios que te devuelven las herramientas ya vienen filtrados; si aun así te sale "ya_tiene_esa_hora", dile qué cita tiene a esa hora y con quién, y ofrécele otro horario o mover la que ya tiene.
 - Mover una producción no cambia la regla: la nueva fecha también tiene que respetar los 2 meses desde la última grabación.
+- NO HAY PRODUCCIÓN SIN PLANIFICACIÓN. Dilo siempre que se hable de grabar: los guiones de lo que vamos a grabar tienen que estar escritos y aprobados por él ANTES de la grabación. Si su planificación está vacía, dile que ya avisaste a su equipo de contenido y a Genesis Benalcazar para que los preparen, y pásale el link de su planificación.
+- Y para que lo que grabemos llegue a sus clientes hace falta el CRM: si todavía no hizo su sesión de Configuración de CRM y Metrics con David Robles, dile que la agende. Sin eso, los videos no tienen a dónde llevar a la gente.
 
 Mover o cancelar citas (producción, sesiones del onboarding y reuniones):
 - Usa verMisCitas para ver sus citas. Solo puedes tocar las que salen ahí.
@@ -703,7 +754,18 @@ Reglas:
             };
           const r = await atencionClienteService.reservarProduccion(chat, fecha);
           return r.ok
-            ? { ok: true, cuando: r.cuando, con: equipoAtencionService.nombres("produccion"), correos: equipoAtencionService.correos("produccion") }
+            ? {
+                ok: true,
+                cuando: r.cuando,
+                con: equipoAtencionService.nombres("produccion"),
+                correos: equipoAtencionService.correos("produccion"),
+                guionesEnSuPlanificacion: r.planificacion?.guiones ?? 0,
+                siguiente:
+                  (r.planificacion?.guiones
+                    ? "Dile cuántos guiones tiene ya en su planificación y que los revise antes de grabar."
+                    : "Dile claro que toda producción necesita su planificación con guiones antes de grabar, y que ya avisaste a su equipo de contenido y a Genesis para que los preparen.") +
+                  " Y recuérdale agendar su sesión de CRM con David Robles si todavía no la tiene.",
+              }
             : { ok: false, motivo: r.motivo };
         },
       },

@@ -6,6 +6,7 @@ import { resendService } from "./resend.service";
 import { EQUIPO_ATENCION, equipoAtencionService, type TemaAtencion } from "./equipoAtencion.service";
 import { atencionClienteService, diaEcuador, fechaEcuador, horarioCorto } from "./atencionCliente.service";
 import { onboardingBotService } from "./onboardingBot.service";
+import { produccionPlanificacionService } from "./produccionPlanificacion.service";
 import { perfilClienteService } from "./perfilCliente.service";
 import { onboardingDatosService } from "./onboardingDatos.service";
 import { citasClienteService } from "./citasCliente.service";
@@ -399,18 +400,59 @@ export class TelegramBotService {
         // Eligio un tema en el menu: su mensaje va directo a esa persona.
         if (chat.tema && chat.workspaceId) return this.enviarSolicitud(chat, chat.tema, texto);
         if (chat.workspaceId && (await telegramAgentService.responder(chat, texto))) return;
-        // La IA no pudo: mensaje corto y humano, no el menú completo otra vez.
-        await telegramService.sendMessage(
-          chat.chatId,
-          "Uy, se me trabó eso 😅 dame un minuto y escríbemelo otra vez.\n\nSi es algo urgente, toca el botón y se lo paso a una persona del equipo ahora mismo.",
-          [
-            [{ text: "💬 Pasarlo a una persona", callback_data: "menu:atencion" }],
-            [{ text: "🗓️ Mis citas", callback_data: "citas:ver" }],
-            [{ text: "📋 Ver menú", callback_data: "menu:ver" }],
-          ]
-        );
+        // La IA no pudo. Antes contestaba "se me trabó" y el cliente se quedaba
+        // igual que al principio: ahora se le lleva a la pantalla de lo que
+        // estaba pidiendo, que es lo que habría hecho una persona.
+        return this.atajoPorLoQuePidio(chat, texto);
         return;
     }
+  }
+
+  /**
+   * Cuando la IA no alcanza a contestar, el cliente no se queda en el aire: se
+   * lee lo que pidió y se le abre esa pantalla. Si no se entiende, se le
+   * ofrece pasarlo a una persona, que es lo único que nunca falla.
+   */
+  private async atajoPorLoQuePidio(chat: ITelegramChat, texto: string): Promise<void> {
+    const t = texto
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "");
+    const disculpa = "Uy, se me trabó eso 😅 pero no te dejo esperando";
+
+    if (/(cita|agend|reagend|reprogram|mover|cancel|horario)/.test(t)) {
+      await telegramService.sendMessage(chat.chatId, `${disculpa}. Te muestro tus citas 👇`);
+      return this.mostrarCitas(chat);
+    }
+    if (/(guion|libreto|script)/.test(t)) {
+      await telegramService.sendMessage(chat.chatId, `${disculpa}. Vamos a tus guiones 👇`);
+      return this.mostrarGuiones(chat);
+    }
+    if (/(produccion|grabacion|grabar|rodaje)/.test(t)) {
+      await telegramService.sendMessage(chat.chatId, `${disculpa}. Vamos a tu producción 👇`);
+      return this.mostrarProducciones(chat);
+    }
+    if (/(factur|venta|vendi|ingreso|monto)/.test(t)) {
+      await telegramService.sendMessage(chat.chatId, `${disculpa}. Vamos a tu facturación 👇`);
+      return this.mostrarFacturacion(chat);
+    }
+    if (/(onboarding|arranc|empez|comenz|inicio)/.test(t)) {
+      await telegramService.sendMessage(chat.chatId, `${disculpa}. Así va tu onboarding 👇`);
+      return this.mostrarOnboarding(chat);
+    }
+    if (/(hablar|habla|alguien|persona|humano|asesor|urgent|ayuda|contact|llam)/.test(t)) {
+      await telegramService.sendMessage(chat.chatId, `${disculpa}. Te paso con una persona ahora mismo 👇`);
+      return this.elegirTema(chat, "atencion");
+    }
+    await telegramService.sendMessage(
+      chat.chatId,
+      `${disculpa} 🙏\n\nDime con otras palabras qué necesitas, o toca una opción y lo resolvemos por aquí.`,
+      [
+        [{ text: "💬 Pasarlo a una persona", callback_data: "menu:atencion" }],
+        [{ text: "🗓️ Mis citas", callback_data: "citas:ver" }],
+        [{ text: "📋 Ver menú", callback_data: "menu:ver" }],
+      ]
+    );
   }
 
   private async recibirCorreo(chat: ITelegramChat, texto: string): Promise<void> {
@@ -1484,14 +1526,27 @@ export class TelegramBotService {
       return this.mostrarHorariosProduccion(chat, "Uy, no pude reservar ese horario 😕 puede que lo hayan tomado justo ahora.");
     }
 
+    // Producción y planificación van juntas: si no tiene guiones, se lo dice
+    // aquí mismo y el equipo de contenido ya quedó avisado.
+    const estadoOnb = await onboardingBotService.estado(chat.workspaceId!).catch(() => null);
+    const crmPendiente = Boolean(
+      estadoOnb?.sesiones.find((x) => x.sesion === "crm" && x.estado !== "cumplida" && x.estado !== "no_aplica" && !x.agendada)
+    );
+    const botones: InlineButton[][] = [
+      [{ text: "📋 Ver mi planificación", url: `${APP_URL}/app/workspaces/${chat.workspaceId}/planning` }],
+    ];
+    if (crmPendiente) botones.push([{ text: `📅 Agendar con ${SESIONES_ONBOARDING.crm.responsable.nombre.split(" ")[0]}`, callback_data: "onb:crm" }]);
+    botones.push([{ text: "🗓️ Ver mis citas", callback_data: "citas:ver" }], [{ text: "📋 Volver al menú", callback_data: "menu:ver" }]);
+
     await telegramService.sendMessage(
       chat.chatId,
       "Listo, tu producción quedó agendada 🎬\n\n" +
         `📅 <b>${reserva.cuando}</b> (hora Ecuador)\n` +
         `👥 Con <b>${escaparHtml(equipoAtencionService.nombres("produccion"))}</b>\n\n` +
-        "Ya está en su calendario y les avisé. Ten listos los productos que vamos a promocionar 💪"
+        "Ya está en su calendario y les avisé. Ten listos los productos que vamos a promocionar 💪" +
+        produccionPlanificacionService.textoParaElCliente(reserva.planificacion ?? null, chat.workspaceId!, crmPendiente),
+      botones
     );
-    return this.mostrarMenu(chat, undefined, "Te ayudo con algo más? 😊");
   }
 
   /** Sin calendario propio o sin horarios: se coordina por mensaje con quien atiende. */
