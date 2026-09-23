@@ -129,6 +129,31 @@ export class TelegramBotService {
     return Boolean(r.modifiedCount);
   }
 
+  /** El cliente va a mandar un archivo por el chat: se le dice exactamente cómo. */
+  private async pedirArchivo(chat: ITelegramChat, categoria: CategoriaRecurso): Promise<void> {
+    if (!["logo", "linea_grafica", "catalogo"].includes(categoria)) return this.mostrarMenu(chat);
+    await archivosClienteService.pedirArchivo(chat, categoria);
+
+    const instrucciones: Record<string, string> = {
+      logo:
+        "Dale, mándame tu logo por aquí 📎\n\n" +
+        "Importante: adjúntalo con el clip y elige <b>Archivo</b> (no Foto), y que sea <b>PNG con fondo transparente</b>. " +
+        "Si Telegram lo manda como foto, lo comprime y el logo pierde el fondo.\n\n" +
+        "Si tienes varias versiones, mándamelas una por una y las guardo todas.",
+      linea_grafica:
+        "Mándame tu línea gráfica por aquí 📎\n\n" +
+        "Puede ser tu manual de marca, la paleta de colores o ejemplos de piezas: PNG, JPG, WEBP o PDF.",
+      catalogo:
+        "Mándame tu catálogo por aquí 📎\n\n" +
+        "Puede ser un PDF o una foto de la lista de precios. Si prefieres, <b>escríbelo en un mensaje</b> " +
+        "(productos con sus precios) y yo lo guardo igual.",
+    };
+    await telegramService.sendMessage(chat.chatId, instrucciones[categoria]!, [
+      [{ text: "🚀 Ver mi onboarding", callback_data: "menu:onboarding" }],
+      [{ text: "📋 Volver al menú", callback_data: "menu:ver" }],
+    ]);
+  }
+
   /** Foto o archivo enviado al chat: se valida, se guarda y se confirma. */
   private async onArchivo(chat: ITelegramChat, msg: NonNullable<TelegramUpdate["message"]>): Promise<void> {
     if (chat.estado !== "listo" || !chat.workspaceId) {
@@ -144,7 +169,8 @@ export class TelegramBotService {
     const fileId = msg.document?.file_id || foto?.file_id;
     if (!fileId) return;
 
-    const categoria = archivosClienteService.categoriaPorTexto(msg.caption);
+    // Lo que dice el pie manda; si no dice nada, vale lo que el bot pidió.
+    const categoria = archivosClienteService.categoriaPorTexto(msg.caption) ?? archivosClienteService.esperando(chat);
     await telegramService.sendChatAction(chat.chatId, "typing").catch(() => undefined);
     const buffer = await telegramService.descargarArchivo(fileId);
     if (!buffer) {
@@ -181,6 +207,7 @@ export class TelegramBotService {
       return;
     }
 
+    await archivosClienteService.olvidarPedido(chat);
     if (r.preguntarCategoria) {
       await telegramService.sendMessage(
         chat.chatId,
@@ -266,6 +293,24 @@ export class TelegramBotService {
         }
         // Le pedimos un monto: lo que escriba se lee como facturación antes
         // que nada, si no se lo llevaría la IA y no quedaría registrado.
+        // Pidió el catálogo y lo está escribiendo en el mensaje.
+        const archivoEsperado = archivosClienteService.esperando(chat);
+        if (archivoEsperado === "catalogo" && chat.workspaceId && texto.trim().length >= 25) {
+          await archivosClienteService.olvidarPedido(chat);
+          const guardado = await archivosClienteService.guardarTexto(chat, texto.trim(), "catalogo");
+          await telegramService.sendMessage(
+            chat.chatId,
+            guardado.ok
+              ? "Listo, guardé tu catálogo en tu entorno ✅ ya le avisé al equipo para que lo revise."
+              : "No pude guardarlo 😕 inténtalo de nuevo o mándamelo como archivo.",
+            [
+              [{ text: "🚀 Ver mi onboarding", callback_data: "menu:onboarding" }],
+              [{ text: "📋 Volver al menú", callback_data: "menu:ver" }],
+            ]
+          );
+          return;
+        }
+
         const diaEsperado = facturacionChatService.esperando(chat);
         if (diaEsperado && chat.workspaceId) {
           const monto = parsearMonto(texto);
@@ -453,6 +498,7 @@ export class TelegramBotService {
     if (data === "cita:si" || data === "cita:no") return this.responderCambioCita(chat, data === "cita:si");
     if (data === "citas:ver") return this.mostrarCitas(chat);
     if (data === "fact:ver") return this.mostrarFacturacion(chat);
+    if (data.startsWith("sub:")) return this.pedirArchivo(chat, data.slice(4) as CategoriaRecurso);
     if (data === "fact:metricas") {
       chat.tema = undefined;
       await chat.save();
@@ -689,13 +735,16 @@ export class TelegramBotService {
     else if (estado.produccion.puedeAgendar) botones.push([{ text: "🎬 Agendar mi producción", callback_data: "ag:produccion" }]);
 
     // Un botón por cosa pendiente, que abre la pantalla exacta donde se sube.
-    const ETIQUETA_CORTA: Record<string, string> = {
-      archivosMarca: "📤 Subir mis logos",
-      facturacion: "💵 Cargar mi facturación",
-      catalogo: "🏷️ Subir mi catálogo",
+    // Todo se hace por el chat: el cliente ya está aquí y mandarlo a la web
+    // era justo donde se caía. La web queda como opción al final.
+    const ACCION_POR_CHAT: Record<string, { texto: string; data: string }> = {
+      archivosMarca: { texto: "📤 Mandarte mis logos", data: "sub:logo" },
+      facturacion: { texto: "💵 Registrar mi facturación", data: "fact:ver" },
+      catalogo: { texto: "🏷️ Mandarte mi catálogo", data: "sub:catalogo" },
     };
     for (const e of faltaEnviar) {
-      if (e.link) botones.push([{ text: ETIQUETA_CORTA[e.clave] || `📤 ${e.etiqueta}`, url: e.link }]);
+      const accion = ACCION_POR_CHAT[e.clave];
+      if (accion) botones.push([{ text: accion.texto, callback_data: accion.data }]);
     }
     if (faltaContar.length) botones.push([{ text: `✍️ Contarte de mi negocio (${faltaContar.length})`, callback_data: "datos:contar" }]);
     botones.push([{ text: "📋 Volver al menú", callback_data: "menu:ver" }]);
@@ -709,7 +758,7 @@ export class TelegramBotService {
           ? `\n\n📣 Falta además invitar a <b>${escaparHtml(invitacionMeta.invitarA || "")}</b> a tu portafolio de Meta con permisos de administración. Eso se hace dentro de Meta Business y lo vemos en la sesión con Joel Jimenez.`
           : "") +
         (faltaEnviar.some((e) => e.link) || faltaContar.length
-          ? "\n\nCon los botones de abajo subes lo que falta. Si ya lo subiste, dímelo y le aviso al equipo para que lo revise."
+          ? "\n\nTodo eso me lo puedes mandar por aquí mismo con los botones de abajo: yo lo subo a tu entorno. Si ya lo subiste tú, dímelo y le aviso al equipo."
           : ""),
       botones
     );

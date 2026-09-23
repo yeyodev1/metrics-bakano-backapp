@@ -18,6 +18,8 @@ import { onboardingDatosService } from "./onboardingDatos.service";
 export type CategoriaRecurso = "logo" | "linea_grafica" | "catalogo" | "otro";
 
 const TIPOS_PERMITIDOS = ["application/pdf", "image/png", "image/jpeg", "image/webp", "text/plain"];
+/** Lo que el bot pidió caduca: un archivo de mañana no es la respuesta de hoy. */
+export const ESPERA_ARCHIVO_MS = 2 * 60 * 60_000;
 const MAX_BYTES = 10 * 1024 * 1024;
 
 export const ETIQUETA_CATEGORIA: Record<CategoriaRecurso, string> = {
@@ -54,6 +56,40 @@ class ArchivosClienteService {
     if (/\blogo(s|tipo)?\b|isotipo|imagotipo/.test(t)) return "logo";
     if (/linea grafica|manual de marca|identidad|tipograf|colores|paleta/.test(t)) return "linea_grafica";
     return null;
+  }
+
+  /** El bot queda esperando ese tipo de archivo. */
+  async pedirArchivo(chat: ITelegramChat, categoria: CategoriaRecurso): Promise<void> {
+    const dato = { categoria, pedidoEn: new Date() };
+    await models.telegramChats.updateOne({ _id: chat._id }, { $set: { archivoEsperado: dato } });
+    chat.archivoEsperado = dato;
+  }
+
+  /** Qué archivo está esperando el bot, si el pedido sigue vigente. */
+  esperando(chat: ITelegramChat): CategoriaRecurso | null {
+    const e = chat.archivoEsperado;
+    if (!e?.categoria || !e.pedidoEn) return null;
+    if (Date.now() - new Date(e.pedidoEn).getTime() > ESPERA_ARCHIVO_MS) return null;
+    return e.categoria as CategoriaRecurso;
+  }
+
+  async olvidarPedido(chat: ITelegramChat): Promise<void> {
+    await models.telegramChats.updateOne({ _id: chat._id }, { $unset: { archivoEsperado: 1 } });
+    chat.archivoEsperado = undefined;
+  }
+
+  /** El catálogo escrito a mano en el chat se guarda como archivo de texto. */
+  async guardarTexto(chat: ITelegramChat, texto: string, categoria: CategoriaRecurso): Promise<ResultadoArchivo> {
+    return this.guardar(
+      chat,
+      {
+        buffer: Buffer.from(texto, "utf8"),
+        nombre: `${categoria}-${new Date().toISOString().slice(0, 10)}.txt`,
+        mime: "text/plain",
+        comprimido: false,
+      },
+      categoria
+    );
   }
 
   async guardar(
