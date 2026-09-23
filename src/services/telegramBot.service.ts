@@ -979,12 +979,17 @@ export class TelegramBotService {
 
     const hecha = (s: { agendada: boolean; estado?: string }) => s.estado === "cumplida" || s.estado === "no_aplica";
     const listas = estado.sesiones.filter(hecha).length;
+    // Una sesión cuya fecha ya pasó no se pinta como "la tienes agendada": en
+    // "Mis citas" ya no aparece (ahí solo van las futuras) y el cliente veía
+    // dos respuestas distintas a la misma pregunta.
     const lineas = estado.sesiones.map((s) =>
       hecha(s)
         ? `✅ ${s.emoji} ${s.etiqueta}`
-        : s.agendada
-          ? `🗓️ ${s.emoji} ${s.etiqueta} · ${s.fecha ? fechaEcuador(s.fecha) : "agendada"}`
-          : `⬜ ${s.emoji} ${s.etiqueta}`
+        : s.pasada
+          ? `⏳ ${s.emoji} ${s.etiqueta} · fue el ${s.fecha ? fechaEcuador(s.fecha) : "día agendado"}, esperando que ${escaparHtml(s.responsable)} la cierre`
+          : s.agendada
+            ? `🗓️ ${s.emoji} ${s.etiqueta} · ${s.fecha ? fechaEcuador(s.fecha) : "agendada"}`
+            : `⬜ ${s.emoji} ${s.etiqueta}`
     );
     lineas.push(
       estado.produccion.agendada
@@ -994,14 +999,18 @@ export class TelegramBotService {
 
     // Una sola cosa por hacer ahora. El resto queda en los botones de abajo.
     const siguiente = estado.sesiones.find((s) => s.sesion === estado.siguiente);
-    const agendada = estado.sesiones.find((s) => s.agendada && !hecha(s));
+    const agendada = estado.sesiones.find((s) => s.agendada && !hecha(s) && !s.pasada);
+    const pasada = estado.sesiones.find((s) => s.pasada && !hecha(s));
     const ahora = siguiente
       ? `👉 <b>Ahora:</b> agenda tu sesión de <b>${siguiente.etiqueta}</b> con <b>${escaparHtml(siguiente.responsable)}</b>.\n` +
         `${siguiente.resumen}\n\nTen listo:\n${siguiente.requisitos.map((r) => `• ${r}`).join("\n")}`
       : agendada
         ? `👉 <b>Ahora:</b> tu sesión de <b>${agendada.etiqueta}</b> es el <b>${agendada.fecha ? fechaEcuador(agendada.fecha) : "día agendado"}</b>. ` +
           `Cuando ${escaparHtml(agendada.responsable)} la dé por cerrada, te aviso y seguimos.`
-        : estado.produccion.agendada
+        : pasada
+          ? `👉 <b>Ahora:</b> tu sesión de <b>${pasada.etiqueta}</b> fue el <b>${pasada.fecha ? fechaEcuador(pasada.fecha) : "día agendado"}</b>, así que ya no aparece en tus citas. ` +
+            `Estoy esperando que <b>${escaparHtml(pasada.responsable)}</b> la dé por cerrada. Si al final no se hizo, la reagendamos ahora mismo 👇`
+          : estado.produccion.agendada
           ? "👉 <b>Ahora:</b> a preparar tu producción. Cualquier duda me escribes 💛"
           : "👉 <b>Ahora:</b> agenda tu primera producción y arrancamos 🎬";
 
@@ -1010,6 +1019,7 @@ export class TelegramBotService {
 
     const botones: InlineButton[][] = [];
     if (siguiente) botones.push([{ text: `📅 Agendar ${siguiente.etiqueta}`, callback_data: `onb:${siguiente.sesion}` }]);
+    else if (pasada) botones.push([{ text: `🔄 No se hizo, reagendar ${pasada.etiqueta}`, callback_data: `onb:${pasada.sesion}` }]);
     else if (estado.produccion.puedeAgendar) botones.push([{ text: "🎬 Agendar mi producción", callback_data: "ag:produccion" }]);
 
     // Un botón por cosa pendiente, que abre la pantalla exacta donde se sube.
@@ -1249,9 +1259,25 @@ export class TelegramBotService {
   private async mostrarCitas(chat: ITelegramChat): Promise<void> {
     const citas = await citasClienteService.listar(chat);
     if (!citas.length) {
+      // Aquí solo van las futuras. Si tiene una sesión cuya fecha ya pasó y
+      // nadie la cerró, se le dice: si no, en el onboarding la ve con fecha y
+      // aquí le decimos que no tiene nada, y son dos verdades distintas.
+      const estado = await onboardingBotService.estado(chat.workspaceId!).catch(() => null);
+      const pasadas = (estado?.sesiones || []).filter((s) => s.pasada && s.estado !== "cumplida" && s.estado !== "no_aplica");
+      const nota = pasadas.length
+        ? "\n\n" +
+          pasadas
+            .map(
+              (s) =>
+                `⏳ Tu sesión de <b>${escaparHtml(s.etiqueta)}</b> fue el ${s.fecha ? fechaEcuador(s.fecha) : "día agendado"}, por eso ya no sale aquí. ` +
+                `Estoy esperando que ${escaparHtml(s.responsable)} la dé por cerrada.`
+            )
+            .join("\n\n")
+        : "";
       await telegramService.sendMessage(
         chat.chatId,
-        "No tienes citas agendadas por ahora 🗓️\n\nCuando agendes tu producción, una sesión o una reunión, van a aparecer aquí y las vas a poder mover o cancelar.",
+        "No tienes citas agendadas por ahora 🗓️\n\nCuando agendes tu producción, una sesión o una reunión, van a aparecer aquí y las vas a poder mover o cancelar." +
+          nota,
         [
           [{ text: "🚀 Cómo va mi onboarding", callback_data: "menu:onboarding" }],
           [{ text: "📋 Volver al menú", callback_data: "menu:ver" }],

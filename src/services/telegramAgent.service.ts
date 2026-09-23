@@ -649,6 +649,9 @@ Reglas:
               etiqueta: s.etiqueta,
               responsable: s.responsable,
               agendada: s.agendada,
+              // Ya pasó la fecha y nadie la cerró: no digas que "la tiene
+              // agendada", porque en sus citas ya no aparece.
+              yaPaso: s.pasada,
               estado: s.estado,
               fecha: s.fecha ? fechaEcuador(s.fecha) : null,
               queSeVe: s.resumen,
