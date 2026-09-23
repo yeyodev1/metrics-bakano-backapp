@@ -346,7 +346,14 @@ export class GhlService {
         }
       });
 
-      return allEvents;
+      // Una cita cancelada no es una cita: se quedaba pintada en el calendario
+      // de Metrics aunque el cliente ya la hubiera cancelado desde Telegram.
+      const CANCELADAS = ["cancelled", "canceled", "invalid"];
+      const vivas = allEvents.filter((e: any) => !CANCELADAS.includes(String(e.appointmentStatus || "").toLowerCase()));
+      if (vivas.length !== allEvents.length) {
+        console.log(`[GHL] ${allEvents.length - vivas.length} cita(s) cancelada(s) fuera del calendario`);
+      }
+      return vivas;
     } catch (error: any) {
       console.error("Error fetching GHL appointments:", error.response?.data || error.message);
       // Fallback: return empty array so UI doesn't crash if locationId/token is wrong
