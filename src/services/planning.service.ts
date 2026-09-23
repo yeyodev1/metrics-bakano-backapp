@@ -25,8 +25,16 @@ export class PlanningService {
     return entry;
   }
 
-  async listEntries(workspaceId: string, startDate?: Date, endDate?: Date): Promise<IPlanning[]> {
+  /**
+   * Las canceladas no se borran (pueden tener guiones), pero tampoco se
+   * muestran: el cliente cancelaba desde Telegram y las seguia viendo aqui.
+   */
+  async listEntries(workspaceId: string, startDate?: Date, endDate?: Date, incluirCanceladas = false): Promise<IPlanning[]> {
     const query: any = { workspaceId: new Types.ObjectId(workspaceId) };
+    if (!incluirCanceladas) {
+      query.cancelada = { $ne: true };
+      query.title = { $not: /^CANCELADA/ };
+    }
 
     if (startDate || endDate) {
       query.date = {};
@@ -45,7 +53,7 @@ export class PlanningService {
    * ya resuelto. `workspaceIds` null = sin filtro de entorno.
    */
   async listEntriesAcross(workspaceIds: string[] | null, startDate: Date, endDate: Date) {
-    const query: any = { date: { $gte: startDate, $lte: endDate } };
+    const query: any = { date: { $gte: startDate, $lte: endDate }, cancelada: { $ne: true }, title: { $not: /^CANCELADA/ } };
     if (workspaceIds) {
       query.workspaceId = { $in: workspaceIds.filter((id) => Types.ObjectId.isValid(id)).map((id) => new Types.ObjectId(id)) };
     }
@@ -161,7 +169,8 @@ export class PlanningService {
     // Mes en hora Ecuador (UTC-5, sin horario de verano).
     const start = new Date(Date.UTC(year, month - 1, 1, 5, 0, 0));
     const end = new Date(Date.UTC(year, month, 1, 5, 0, 0));
-    const query: any = { date: { $gte: start, $lt: end } };
+    // Una produccion cancelada no cuenta como la del mes.
+    const query: any = { date: { $gte: start, $lt: end }, cancelada: { $ne: true }, title: { $not: /^CANCELADA/ } };
     if (workspaceIds) {
       query.workspaceId = {
         $in: workspaceIds.filter((id) => Types.ObjectId.isValid(id)).map((id) => new Types.ObjectId(id)),

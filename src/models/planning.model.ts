@@ -36,6 +36,13 @@ export interface IPlanning extends Document {
    * calendario mostraba la fecha, pero nadie sabia si ya se grabo.
    */
   cumplida: boolean;
+  /**
+   * La cita se cancelo en el CRM. No se borra (puede tener guiones cargados),
+   * pero deja de aparecer en el calendario: antes el cliente cancelaba desde
+   * Telegram y la seguia viendo en Metrics como si nada.
+   */
+  cancelada?: boolean;
+  canceladaEn?: Date;
   /** Ultimo aviso al equipo de que esta produccion sigue sin guiones. */
   avisoPlanificacionEn?: Date;
   cumplidaEn?: Date;
@@ -98,6 +105,8 @@ const PlanningSchema = new Schema<IPlanning>(
     },
     cumplida: { type: Boolean, default: false },
     avisoPlanificacionEn: { type: Date },
+    cancelada: { type: Boolean, default: false },
+    canceladaEn: { type: Date },
     cumplidaEn: { type: Date },
     cumplidaPorId: { type: Schema.Types.ObjectId, ref: "User" },
     cumplidaPorNombre: { type: String, trim: true },

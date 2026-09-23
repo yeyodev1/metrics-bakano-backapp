@@ -62,7 +62,8 @@ export async function listEntries(req: AuthRequest, res: Response, next: NextFun
     const entries = await planningService.listEntries(
       workspaceId,
       startDate ? new Date(startDate as string) : undefined,
-      endDate ? new Date(endDate as string) : undefined
+      endDate ? new Date(endDate as string) : undefined,
+      req.query.incluirCanceladas === "true"
     );
 
     res.status(HttpStatusCode.Ok).send({ message: "Planning entries retrieved successfully.", entries });
