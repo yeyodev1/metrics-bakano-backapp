@@ -391,7 +391,11 @@ class CrmProductionSyncService {
       const volvioDeCancelada = existente.crm?.status ? ESTADOS_CANCELADOS.has(existente.crm.status) : false;
       existente.date = cita.startsAt;
       existente.endsAt = cita.endsAt;
-      if (volvioDeCancelada) existente.title = existente.title.replace(/^CANCELADA · /, "");
+      if (volvioDeCancelada) {
+        existente.title = existente.title.replace(/^CANCELADA · /, "");
+        existente.cancelada = false;
+        existente.canceladaEn = undefined;
+      }
       existente.crm = {
         ...(existente.crm as any),
         appointmentId: cita.appointmentId,
@@ -472,6 +476,8 @@ class CrmProductionSyncService {
     if (conGuiones) {
       entry.crm = { ...(entry.crm as any), status: cita.status, syncedAt: new Date() };
       if (!/^CANCELADA · /.test(entry.title)) entry.title = `CANCELADA · ${entry.title}`;
+      entry.cancelada = true;
+      entry.canceladaEn = new Date();
       await entry.save();
       await this.avisar(entry, "cancelada", { conservada: true });
       return { accion: "cancelada", entry, workspaceId };

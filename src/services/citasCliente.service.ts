@@ -454,6 +454,8 @@ class CitasClienteService {
               "crm.status": "cancelled",
               "crm.syncedAt": new Date(),
               ...(entry && !/^CANCELADA · /.test(entry.title) ? { title: `CANCELADA · ${entry.title}` } : {}),
+              cancelada: true,
+              canceladaEn: new Date(),
             },
           }
         );
