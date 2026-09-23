@@ -5,7 +5,7 @@ import { EQUIPO_ATENCION, equipoAtencionService, type TemaAtencion } from "./equ
 import { atencionClienteService, fechaEcuador, type DatosCliente } from "./atencionCliente.service";
 import { onboardingBotService } from "./onboardingBot.service";
 import { citasClienteService } from "./citasCliente.service";
-import { CAMPOS_MARCA, ENTREGABLES, onboardingDatosService } from "./onboardingDatos.service";
+import { AYUDA_CAMPO_MARCA, CAMPOS_MARCA, ENTREGABLES, onboardingDatosService } from "./onboardingDatos.service";
 import { metricasClienteService } from "./metricasCliente.service";
 import { claveDia, contextoParaLaIa, facturacionChatService, comoPlata } from "./facturacionChat.service";
 import { publicidadClienteService } from "./publicidadCliente.service";
@@ -328,6 +328,8 @@ Onboarding (arranque del cliente):
 Arrancar el onboarding (tú tomas la iniciativa):
 - Si el cliente es nuevo o está en onboarding, apenas termines de responder lo que preguntó, usa verPendientesOnboarding y sigue con lo que falta. No esperes a que él lo pida.
 - Una cosa a la vez, en este orden: agendar la sesión que le toca, luego los datos de su marca que falten y luego los envíos (archivos de marca, facturación, catálogo, invitación a Meta).
+- Dónde captura la venta (trafficDirection y trafficLink): es el dato que define a dónde mandamos a la gente que ve sus videos. Explícaselo así y pregúntale si quiere que le escriban por WhatsApp o que le agenden una cita (GHL / Agenda). Después pídele el número de WhatsApp con código de país o el link de su agenda, y guárdalo con registrarDatoMarca.
+- Si te dice que no sabe, que no lo tiene o que no entiende: NO insistas. Usa pedirAyudaConDato y dile con tranquilidad que el equipo lo arma con él en esa sesión y que ya avisaste al responsable.
 - Datos de marca: pregúntale de forma natural, uno por mensaje (por ejemplo "cuéntame, a quién le vendes?"). Cuando responda algo concreto, guárdalo con registrarDatoMarca usando sus palabras, y confírmale en pocas palabras que quedó en el sistema. Si responde algo vago, pídele un poco más de detalle antes de guardar.
 - Todo lo que entrega va POR LA PLATAFORMA, nunca por correo: pásale el link de SU entorno (el de arriba, ya trae su id) y dile en una línea qué sube ahí. La única excepción es la invitación al portafolio de Meta, que se hace dentro de Meta Business.
 - Puede mandarte los archivos por aquí mismo: dile que los adjunte con el clip 📎 y, si es el logo, que lo envíe como Archivo (no como foto) en PNG, porque Telegram comprime las fotos y el logo pierde el fondo transparente. Tú los guardas solo en su entorno.
@@ -374,6 +376,7 @@ Producciones (grabaciones):
 - Cada cliente puede agendar una producción cada 2 meses, contados desde la última. Si ya tiene una agendada, no puede agendar otra.
 - Para agendar: usa verHorariosProduccion, ofrece 3 o 4 horarios y, cuando el cliente elija uno concreto, usa agendarProduccion con el valor "inicio" exacto. Confirma fecha, hora y que lo atienden ${equipoAtencionService.nombres("produccion")}.
 - Si todavía no puede agendar, explica la regla con naturalidad y dile desde qué fecha puede.
+- El cliente es UNO SOLO: nunca le agendes dos cosas a la misma hora, aunque sean con personas distintas del equipo. Los horarios que te devuelven las herramientas ya vienen filtrados; si aun así te sale "ya_tiene_esa_hora", dile qué cita tiene a esa hora y con quién, y ofrécele otro horario o mover la que ya tiene.
 - Mover una producción no cambia la regla: la nueva fecha también tiene que respetar los 2 meses desde la última grabación.
 
 Mover o cancelar citas (producción, sesiones del onboarding y reuniones):
@@ -496,10 +499,13 @@ Reglas:
                   : `Con ${equipoAtencionService.nombres(tema)} la reunión se coordina por mensaje: pregunta qué día y hora prefiere y usa pasarMensajeAlEquipo.`,
             };
           }
+          // El cliente es uno solo: no se le ofrecen horas que ya tiene ocupadas.
+          const libres = await citasClienteService.sinChoques(chat, horarios);
           return {
             agendable: true,
             con: equipoAtencionService.nombres(tema),
-            horarios: horarios.slice(0, 12).map((h) => ({ inicio: h.toISOString(), texto: fechaEcuador(h) })),
+            horariosQuitadosPorSuAgenda: libres.quitados,
+            horarios: libres.horarios.slice(0, 12).map((h) => ({ inicio: h.toISOString(), texto: fechaEcuador(h) })),
           };
         },
       },
@@ -614,15 +620,16 @@ Reglas:
         inputSchema: z.object({ sesion: z.enum(["meta", "crm", "estrategia"]) }),
         execute: async ({ sesion }: { sesion: SesionOnboarding }) => {
           const def = SESIONES_ONBOARDING[sesion];
-          const horarios = await onboardingBotService.horarios(sesion);
+          const crudos = await onboardingBotService.horarios(sesion);
+          const libres = crudos?.length ? await citasClienteService.sinChoques(chat, crudos) : { horarios: [], quitados: 0 };
           return {
             con: def.responsable.nombre,
             etiqueta: def.etiqueta,
             link: def.link,
-            horarios:
-              horarios === null || !horarios.length
-                ? `No pude ver los horarios: pásale el link ${def.link}`
-                : horarios.slice(0, 12).map((h) => ({ inicio: h.toISOString(), texto: fechaEcuador(h) })),
+            horariosQuitadosPorSuAgenda: libres.quitados,
+            horarios: !libres.horarios.length
+              ? `No pude ver los horarios: pásale el link ${def.link}`
+              : libres.horarios.slice(0, 12).map((h) => ({ inicio: h.toISOString(), texto: fechaEcuador(h) })),
           };
         },
       },
@@ -637,6 +644,14 @@ Reglas:
         execute: async ({ sesion, inicio }: { sesion: SesionOnboarding; inicio: string }) => {
           const fecha = new Date(inicio);
           if (Number.isNaN(fecha.getTime())) return { ok: false, motivo: "horario inválido" };
+          const choque = await citasClienteService.puedeA(chat, fecha);
+          if (!choque.ok)
+            return {
+              ok: false,
+              motivo: "ya_tiene_esa_hora",
+              yaTiene: choque.choca,
+              siguiente: "Dile que a esa hora ya tiene esa cita con nosotros y que no puede estar en las dos. Ofrécele otro horario o mover la que ya tiene.",
+            };
           const r = await onboardingBotService.agendar(chat, sesion, fecha);
           const def = SESIONES_ONBOARDING[sesion];
           return r.ok
@@ -650,7 +665,11 @@ Reglas:
           "Dice si el cliente puede agendar su producción (una cada 2 meses desde la última; con una ya agendada no puede otra) y los horarios libres de Karen Muñoz y Jean Ortega desde la fecha permitida.",
         inputSchema: z.object({}),
         execute: async () => {
-          const { estado, horarios } = await atencionClienteService.horariosProduccion(chat.workspaceId!);
+          const { estado, horarios: crudos } = await atencionClienteService.horariosProduccion(chat.workspaceId!);
+          const libres = crudos?.length
+            ? (await citasClienteService.sinChoques(chat, crudos, { duracionMs: 3 * 3_600_000 })).horarios
+            : crudos;
+          const horarios = libres;
           return {
             puedeAgendar: estado.puedeAgendar,
             yaTieneAgendada: estado.proxima ? fechaEcuador(estado.proxima) : null,
@@ -674,6 +693,14 @@ Reglas:
         execute: async ({ inicio }: { inicio: string }) => {
           const fecha = new Date(inicio);
           if (Number.isNaN(fecha.getTime())) return { ok: false, motivo: "horario inválido" };
+          const choque = await citasClienteService.puedeA(chat, fecha, { duracionMs: 3 * 3_600_000 });
+          if (!choque.ok)
+            return {
+              ok: false,
+              motivo: "ya_tiene_esa_hora",
+              yaTiene: choque.choca,
+              siguiente: "Dile que a esa hora ya tiene esa cita con nosotros y que no puede estar en las dos. Ofrécele otro horario o mover la que ya tiene.",
+            };
           const r = await atencionClienteService.reservarProduccion(chat, fecha);
           return r.ok
             ? { ok: true, cuando: r.cuando, con: equipoAtencionService.nombres("produccion"), correos: equipoAtencionService.correos("produccion") }
@@ -691,6 +718,14 @@ Reglas:
         execute: async ({ tema, inicio }: { tema: "guiones" | "atencion"; inicio: string }) => {
           const fecha = new Date(inicio);
           if (Number.isNaN(fecha.getTime())) return { ok: false, motivo: "horario inválido" };
+          const choque = await citasClienteService.puedeA(chat, fecha);
+          if (!choque.ok)
+            return {
+              ok: false,
+              motivo: "ya_tiene_esa_hora",
+              yaTiene: choque.choca,
+              siguiente: "Dile que a esa hora ya tiene esa cita con nosotros y que no puede estar en las dos. Ofrécele otro horario o mover la que ya tiene.",
+            };
           const r = await atencionClienteService.reservarReunion(chat, tema, fecha);
           return r.ok
             ? { ok: true, cuando: r.cuando, con: equipoAtencionService.nombres(tema), correos: equipoAtencionService.correos(tema) }
@@ -793,6 +828,18 @@ Reglas:
             ? { ...r, siguiente: "Dile que ya avisaste a todo el equipo de esa cita, que lo coordinan hoy con él, y recuérdale la regla de los 2 días y que revise su planificación." }
             : r;
         },
+      },
+
+      pedirAyudaConDato: {
+        description: `El cliente no sabe o no tiene un dato del perfil de marca. Lo deja pendiente y avisa al responsable para que lo resuelva con él. Campos: ${Object.keys(
+          AYUDA_CAMPO_MARCA
+        ).join(", ")}.`,
+        inputSchema: z.object({
+          campo: z.enum(Object.keys(AYUDA_CAMPO_MARCA) as [string, ...string[]]),
+          nota: z.string().nullish().describe("Lo que contó el cliente, con sus palabras"),
+        }),
+        execute: async ({ campo, nota }: { campo: string; nota?: string | null }) =>
+          onboardingDatosService.pedirAyudaConDato(chat, campo, nota ?? undefined),
       },
 
       confirmarCambioCita: {

@@ -19,6 +19,10 @@ import { ORDEN_SESIONES, SESIONES_ONBOARDING, type SesionOnboarding } from "./on
  *   los dos dias se le dice clarisimo, pero no lo deja atascado: si falta
  *   menos, igual se hace y se le avisa a TODOS los encargados de esa cita
  *   (DM, correo y notificacion) para que reacomoden su dia.
+ * - El cliente es UNO SOLO: aunque David y Joel esten libres a las 12, el no
+ *   puede estar en las dos. Los horarios que chocan con algo que ya tiene con
+ *   nosotros no se le ofrecen, y si igual llega uno por otro lado, se bloquea
+ *   al agendar diciendole que ya tiene esa hora ocupada.
  * - Cancelar nunca borra: la cita queda "cancelled" en el CRM, con historial.
  * - Solo se tocan citas que el sistema sabe que son de ESE entorno: la
  *   produccion por su Planning, las sesiones por onboardingSesiones y las
@@ -37,6 +41,13 @@ const ANTICIPACION_PRODUCCION_MS = 48 * 3_600_000;
 const VENTANA_MOVER_DIAS = 30;
 const MESES_ENTRE_PRODUCCIONES = Number(process.env.PRODUCCION_MESES_ENTRE) > 0 ? Number(process.env.PRODUCCION_MESES_ENTRE) : 2;
 const CANCELADAS = ["cancelled", "canceled", "invalid"];
+/**
+ * Cuanto ocupa una cita en la agenda del cliente cuando no sabemos su fin.
+ * Las sesiones y reuniones son de una hora; la produccion se lleva media
+ * manana, y por eso pesa mas: nadie sale de una grabacion a otra reunion.
+ */
+const DURACION_CITA_MS = 60 * 60_000;
+const DURACION_PRODUCCION_MS = 3 * 60 * 60_000;
 /** Un cambio propuesto y no confirmado caduca: nadie confirma "si" a algo de ayer. */
 const CAMBIO_VENCE_MS = 15 * 60_000;
 
@@ -137,6 +148,51 @@ class CitasClienteService {
     return citas.sort((a, b) => a.inicio.getTime() - b.inicio.getTime());
   }
 
+  /** Cuánto le ocupa la agenda al cliente esa cita. */
+  duracion(cita: CitaCliente): number {
+    return cita.tipo === "produccion" ? DURACION_PRODUCCION_MS : DURACION_CITA_MS;
+  }
+
+  /**
+   * Con qué cita suya choca ese horario. El cliente es uno solo: que el
+   * calendario de David esté libre a las 12 no sirve de nada si a esa hora ya
+   * tiene la sesión de Joel.
+   */
+  choqueCon(inicio: Date, agenda: CitaCliente[], duracionMs = DURACION_CITA_MS): CitaCliente | undefined {
+    const fin = inicio.getTime() + duracionMs;
+    return agenda.find((c) => {
+      const ci = c.inicio.getTime();
+      return ci < fin && inicio.getTime() < ci + this.duracion(c);
+    });
+  }
+
+  /**
+   * Saca de la lista los horarios en los que el cliente ya tiene algo con
+   * nosotros. Devuelve también cuántos se quitaron, para poder decírselo.
+   */
+  async sinChoques(
+    chat: ITelegramChat,
+    horarios: Date[],
+    opciones: { excluirRef?: string; duracionMs?: number } = {}
+  ): Promise<{ horarios: Date[]; quitados: number; agenda: CitaCliente[] }> {
+    const agenda = (await this.listar(chat)).filter((c) => c.ref !== opciones.excluirRef);
+    if (!agenda.length) return { horarios, quitados: 0, agenda };
+    const libres = horarios.filter((h) => !this.choqueCon(h, agenda, opciones.duracionMs));
+    return { horarios: libres, quitados: horarios.length - libres.length, agenda };
+  }
+
+  /** ¿Puede a esa hora? Si no, devuelve con qué cita choca, para decírselo. */
+  async puedeA(
+    chat: ITelegramChat,
+    inicio: Date,
+    opciones: { excluirRef?: string; duracionMs?: number } = {}
+  ): Promise<{ ok: true } | { ok: false; choca: { etiqueta: string; con: string; cuando: string } }> {
+    const agenda = (await this.listar(chat)).filter((c) => c.ref !== opciones.excluirRef);
+    const choque = this.choqueCon(inicio, agenda, opciones.duracionMs);
+    if (!choque) return { ok: true };
+    return { ok: false, choca: { etiqueta: choque.etiqueta, con: choque.con, cuando: fechaEcuador(choque.inicio) } };
+  }
+
   /** Falta menos de dos días: se puede igual, pero se avisa a todo el equipo. */
   esUrgente(cita: CitaCliente): boolean {
     return cita.inicio.getTime() - Date.now() < PLAZO_URGENTE_MS;
@@ -222,7 +278,9 @@ class CitasClienteService {
     if (!cita.calendarId && cita.tipo !== "produccion") return { cita, horarios: [], motivo: "sin_calendario" };
     const { desde, calendario } = await this.ventanaMover(chat, cita);
     try {
-      const horarios = await ghlService.getFreeSlots(calendario, desde, new Date(desde.getTime() + VENTANA_MOVER_DIAS * 86_400_000));
+      const crudos = await ghlService.getFreeSlots(calendario, desde, new Date(desde.getTime() + VENTANA_MOVER_DIAS * 86_400_000));
+      // La cita que se esta moviendo no cuenta como choque consigo misma.
+      const horarios = (await this.sinChoques(chat, crudos, { excluirRef: ref, duracionMs: this.duracion(cita) })).horarios;
       return { cita, horarios: horarios.filter((h) => Math.abs(h.getTime() - cita.inicio.getTime()) > 60_000) };
     } catch (error: any) {
       console.error("[Citas] horarios para mover:", error.response?.data || error.message);
