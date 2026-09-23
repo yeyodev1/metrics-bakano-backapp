@@ -125,17 +125,19 @@ class RecordatorioFacturacionService {
 
     for (const p of pendientes) {
       const link = `${APP_URL}/app/workspaces/${p.workspaceId}/billing`;
+      // Registrar por el chat va primero: el cliente ya está aquí.
       const botones: InlineButton[][] = [
-        [{ text: "💵 Cargar mi facturación", url: link }],
+        [{ text: "💵 Registrar por aquí", callback_data: "fact:ver" }],
+        [{ text: "🌐 Abrir metrics.bakano.ec", url: link }],
         [{ text: "📋 Ver menú", callback_data: "menu:ver" }],
       ];
       const texto =
         p.racha === 1
           ? `Hola! Ayer (${comoTexto(p.dias[0]!)}) no quedó registrada tu facturación 💵\n\n` +
-            "Es un minuto y con eso tu ROAS sale real. Si vendiste 0 también se registra, así no queda hueco."
+            "Escríbeme el monto por aquí y yo lo subo a metrics.bakano.ec. Si vendiste 0 también se registra, así no queda hueco."
           : p.racha < DIAS_PARA_ESCALAR
             ? `Llevas <b>${p.racha} días</b> sin registrar tu facturación (${p.dias.map((d) => comoTexto(d)).join(" y ")}) 💵\n\n` +
-              "Con esos números medimos tu ROAS y decidimos dónde poner la pauta. Los puedes cargar todos de una."
+              "Con esos números medimos tu ROAS y decidimos dónde poner la pauta. Mándamelos por aquí y los subo yo, uno por día."
             : `Llevas <b>${p.racha} días seguidos</b> sin registrar tu facturación 😕\n\n` +
               "Sin eso no podemos saber si la pauta está trayendo plata ni ajustar las campañas. " +
               "Ya le avisé a tu equipo para que te dé una mano, pero si lo cargas ahora quedamos al día.";

@@ -7,6 +7,7 @@ import { onboardingBotService } from "./onboardingBot.service";
 import { citasClienteService } from "./citasCliente.service";
 import { CAMPOS_MARCA, ENTREGABLES, onboardingDatosService } from "./onboardingDatos.service";
 import { metricasClienteService } from "./metricasCliente.service";
+import { claveDia, facturacionChatService, nombreDia } from "./facturacionChat.service";
 import { CATEGORIAS_GUION, revisionGuionesService } from "./revisionGuiones.service";
 import { perfilClienteService, type PerfilCliente } from "./perfilCliente.service";
 import {
@@ -284,6 +285,12 @@ Arrancar el onboarding (tú tomas la iniciativa):
 - Si el cliente está apurado o pregunta otra cosa, atiéndelo primero y retoma lo pendiente después, sin presionar.
 - Si es un cliente en marcha, no le ofrezcas sesiones del onboarding ni le pidas envíos. Solo si faltan datos de su marca, pídele uno al final de la conversación y sin insistir.
 - Si es alguien del equipo de Bakano, no le pidas datos: solo dile qué falta.
+
+Facturación del día:
+- El cliente puede registrar su facturación por aquí: si te dice un monto ("ayer vendí 450", "hoy hice 1.250"), regístralo con registrarFacturacion y confírmale el total del día.
+- Si no sabes de qué día habla, usa verFacturacionPendiente y pregúntale antes de registrar. Nunca inventes el monto ni el día.
+- Registrar 0 es válido y se hace igual: así no queda hueco en el ROAS.
+- Si ya había un monto de ese día, díselo y confirma antes de reemplazarlo.
 
 Métricas:
 - Para facturación, gasto en Meta, ROAS o qué videos funcionan mejor, usa verMetricas. Da los números redondeados y en una o dos líneas.
@@ -730,6 +737,36 @@ Reglas:
           nota: z.string().nullish().describe("Detalle que dio el cliente (qué mandó, desde qué correo)"),
         }),
         execute: async ({ clave, nota }: { clave: string; nota?: string | null }) => onboardingDatosService.registrarEntregable(chat, clave, nota ?? undefined),
+      },
+
+      verFacturacionPendiente: {
+        description:
+          "Días que al cliente le faltan por registrar su facturación (y si ya registró hoy). Úsala antes de pedirle el monto.",
+        inputSchema: z.object({}),
+        execute: async () => {
+          const dias = await facturacionChatService.diasPendientes(chat);
+          return {
+            dias: dias.map((d) => ({ dia: claveDia(d.fecha), texto: d.texto, registrado: d.registrado })),
+            nota: "Para registrar usa registrarFacturacion con el valor exacto de 'dia' (YYYY-MM-DD).",
+          };
+        },
+      },
+
+      registrarFacturacion: {
+        description:
+          "Registra en metrics.bakano.ec cuánto facturó el cliente un día. Si ya había registrado ese día, lo corrige. Úsala cuando el cliente te diga un monto claro.",
+        inputSchema: z.object({
+          monto: z.number().describe("Monto en dólares, solo el número"),
+          dia: z.string().describe("Día en formato YYYY-MM-DD, tomado de verFacturacionPendiente"),
+        }),
+        execute: async ({ monto, dia }: { monto: number; dia: string }) => {
+          const fecha = new Date(`${dia}T05:00:00.000Z`);
+          if (Number.isNaN(fecha.getTime())) return { ok: false, motivo: "día inválido, usa YYYY-MM-DD" };
+          const r = await facturacionChatService.registrar(chat, monto, fecha);
+          return r.ok
+            ? { ok: true, accion: r.accion, monto: r.monto, dia: r.diaTexto, totalDelDia: r.totalDia, roas: r.roas }
+            : r;
+        },
       },
 
       verMetricas: {

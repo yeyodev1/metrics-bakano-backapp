@@ -60,6 +60,8 @@ export interface ITelegramChat extends Document {
   }[];
   /** update_id de Telegram ya procesados: sus reintentos no se repiten. */
   updatesVistos?: number[];
+  /** El bot pidió el monto de facturación de un día y espera la respuesta. */
+  facturacionEsperada?: { fecha: Date; pedidoEn: Date };
   /** Cambio de cita propuesto y esperando que el cliente lo confirme. */
   cambioPendiente?: {
     accion: "cancelar" | "reprogramar";
@@ -126,6 +128,10 @@ const TelegramChatSchema = new Schema<ITelegramChat>(
       default: undefined,
     },
     updatesVistos: { type: [Number], default: undefined },
+    facturacionEsperada: {
+      type: { fecha: Date, pedidoEn: Date },
+      default: undefined,
+    },
     cambioPendiente: {
       type: { accion: String, ref: String, inicio: Date, motivo: String, resumen: String, creadoEn: Date },
       default: undefined,
