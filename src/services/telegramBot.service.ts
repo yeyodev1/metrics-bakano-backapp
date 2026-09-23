@@ -709,27 +709,38 @@ export class TelegramBotService {
       return;
     }
 
+    // Cada cita va numerada y sus botones llevan el MISMO número: con los
+    // nombres largos, Telegram los recortaba ("Mover sesión de…") y no se
+    // sabía a cuál cita correspondía cada botón.
     const lineas: string[] = [];
     const botones: InlineButton[][] = [];
-    for (const cita of citas) {
+    let cambiables = 0;
+    citas.forEach((cita, i) => {
+      const n = i + 1;
       const editable = citasClienteService.editable(cita);
+      if (editable) cambiables++;
       lineas.push(
-        `🗓️ <b>${escaparHtml(cita.etiqueta)}</b>\n     ${fechaEcuador(cita.inicio)}\n     con ${escaparHtml(cita.con)}` +
-          (editable ? "" : "\n     ⏰ faltan menos de 48 h: esta ya se coordina directo")
+        `<b>${n}.</b> 🗓️ <b>${escaparHtml(cita.etiqueta)}</b>\n     ${fechaEcuador(cita.inicio)}\n     con ${escaparHtml(cita.con)}` +
+          (editable
+            ? ""
+            : `\n     ⏰ faltan menos de 48 h: esta la coordinas directo con ${escaparHtml(cita.correos.join(" o "))}`)
       );
       if (editable) {
         botones.push([
-          { text: `🔄 Mover ${cita.etiqueta.toLowerCase().slice(0, 18)}`, callback_data: `cc:m:${cita.ref}` },
-          { text: "✖️ Cancelar", callback_data: `cc:c:${cita.ref}` },
+          { text: `🔄 Mover ${n}`, callback_data: `cc:m:${cita.ref}` },
+          { text: `✖️ Cancelar ${n}`, callback_data: `cc:c:${cita.ref}` },
         ]);
       }
-    }
+    });
     botones.push([{ text: "📋 Volver al menú", callback_data: "menu:ver" }]);
-    await telegramService.sendMessage(
-      chat.chatId,
-      `Estas son tus citas 👇\n\n${lineas.join("\n\n")}\n\nPuedes moverlas o cancelarlas hasta 48 horas antes.`,
-      botones
-    );
+
+    const cierre =
+      cambiables === 0
+        ? "Todas están a menos de 48 horas, así que esas las coordinas directo con la persona de cada una."
+        : cambiables === citas.length
+          ? "Toca el número de la que quieras mover o cancelar 👇"
+          : `Solo ${cambiables === 1 ? "la marcada con botón" : "las marcadas con botón"} se puede${cambiables === 1 ? "" : "n"} cambiar desde aquí: las demás están a menos de 48 horas.`;
+    await telegramService.sendMessage(chat.chatId, `Estas son tus citas 👇\n\n${lineas.join("\n\n")}\n\n${cierre}`, botones);
   }
 
   private async mostrarHorariosParaMover(chat: ITelegramChat, ref: string): Promise<void> {
