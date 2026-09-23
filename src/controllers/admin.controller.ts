@@ -168,6 +168,32 @@ export async function deleteInternalUser(req: AuthRequest, res: Response, next: 
   }
 }
 
+export async function deleteGlobalUser(req: AuthRequest, res: Response, next: NextFunction) {
+  try {
+    const requestingUserId = req.user!._id.toString();
+    const userId = req.params["userId"] as string;
+
+    await workspaceService.deleteGlobalUser(requestingUserId, userId);
+    res.status(HttpStatusCode.Ok).send({ message: "User deleted successfully." });
+    return;
+  } catch (error: any) {
+    if (error.message === "CANNOT_DELETE_SELF") {
+      res.status(HttpStatusCode.BadRequest).send({ message: "No puedes eliminar tu propia cuenta." });
+      return;
+    }
+    if (error.message === "CANNOT_MOD_SUPERADMIN") {
+      res.status(HttpStatusCode.BadRequest).send({ message: "A un superadmin se lo elimina desde la pestaña Superadmins." });
+      return;
+    }
+    if (error.message === "NOT_FOUND" || error.message === "INVALID_ID") {
+      res.status(HttpStatusCode.NotFound).send({ message: "Usuario no encontrado." });
+      return;
+    }
+    console.error("deleteGlobalUser error:", error);
+    next(error);
+  }
+}
+
 export async function getApiKey(req: AuthRequest, res: Response, next: NextFunction) {
   try {
     const userId = req.user!._id.toString();
