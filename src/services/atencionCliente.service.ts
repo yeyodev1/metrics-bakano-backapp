@@ -108,7 +108,7 @@ class AtencionClienteService {
 
   async proximaProduccion(workspaceId: Types.ObjectId): Promise<Date | null> {
     const proxima = await models.planning
-      .findOne({ workspaceId, date: { $gte: new Date() }, title: { $not: /^CANCELADA/ } })
+      .findOne({ workspaceId, date: { $gte: new Date() }, title: { $not: /^CANCELADA/ }, cancelada: { $ne: true } })
       .sort({ date: 1 })
       .select("date")
       .lean();
@@ -186,8 +186,8 @@ class AtencionClienteService {
   async estadoProduccion(workspaceId: Types.ObjectId): Promise<EstadoProduccion> {
     const ahora = new Date();
     const [proxima, ultima] = await Promise.all([
-      models.planning.findOne({ workspaceId, date: { $gte: ahora }, title: { $not: /^CANCELADA/ } }).sort({ date: 1 }).select("date").lean(),
-      models.planning.findOne({ workspaceId, date: { $lt: ahora }, title: { $not: /^CANCELADA/ } }).sort({ date: -1 }).select("date").lean(),
+      models.planning.findOne({ workspaceId, date: { $gte: ahora }, title: { $not: /^CANCELADA/ }, cancelada: { $ne: true } }).sort({ date: 1 }).select("date").lean(),
+      models.planning.findOne({ workspaceId, date: { $lt: ahora }, title: { $not: /^CANCELADA/ }, cancelada: { $ne: true } }).sort({ date: -1 }).select("date").lean(),
     ]);
     if (proxima) return { puedeAgendar: false, proxima: proxima.date, ultima: ultima?.date };
 
@@ -282,7 +282,7 @@ class AtencionClienteService {
         (await models.planning.exists({
           workspaceId: chat.workspaceId,
           date: { $gte: new Date(inicio.getTime() - 60_000), $lte: new Date(inicio.getTime() + 60_000) },
-          title: { $not: /^CANCELADA/ },
+          title: { $not: /^CANCELADA/ }, cancelada: { $ne: true },
         }));
       if (enPlanificador) {
         await slackService

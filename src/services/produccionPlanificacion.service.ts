@@ -72,7 +72,7 @@ class ProduccionPlanificacionService {
       .findOne({
         workspaceId,
         date: { $gte: new Date(fecha.getTime() - 60_000), $lte: new Date(fecha.getTime() + 60_000) },
-        title: { $not: /^CANCELADA/ },
+        title: { $not: /^CANCELADA/ }, cancelada: { $ne: true },
       })
       .select("_id date title avisoPlanificacionEn")
       .lean();
@@ -132,7 +132,7 @@ class ProduccionPlanificacionService {
     const producciones = await models.planning
       .find({
         date: { $gte: ahora, $lte: new Date(ahora.getTime() + VENTANA_PRESION_DIAS * 86_400_000) },
-        title: { $not: /^CANCELADA/ },
+        title: { $not: /^CANCELADA/ }, cancelada: { $ne: true },
         cumplida: { $ne: true },
       })
       .select("_id workspaceId date title avisoPlanificacionEn")

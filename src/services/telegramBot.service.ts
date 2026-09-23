@@ -737,7 +737,7 @@ export class TelegramBotService {
   /** Cuántos guiones hay, en qué estado, y el link para verlos en Metrics. */
   private async mostrarGuiones(chat: ITelegramChat): Promise<void> {
     const entradas = await models.planning
-      .find({ workspaceId: chat.workspaceId, title: { $not: /^CANCELADA/ } })
+      .find({ workspaceId: chat.workspaceId, title: { $not: /^CANCELADA/ }, cancelada: { $ne: true } })
       .sort({ date: -1 })
       .limit(3)
       .select("_id date title")
@@ -791,13 +791,13 @@ export class TelegramBotService {
     const ahora = new Date();
     const [proximas, ultima, estado] = await Promise.all([
       models.planning
-        .find({ workspaceId: chat.workspaceId, date: { $gte: ahora }, title: { $not: /^CANCELADA/ } })
+        .find({ workspaceId: chat.workspaceId, date: { $gte: ahora }, title: { $not: /^CANCELADA/ }, cancelada: { $ne: true } })
         .sort({ date: 1 })
         .limit(3)
         .select("date title")
         .lean(),
       models.planning
-        .findOne({ workspaceId: chat.workspaceId, date: { $lt: ahora }, title: { $not: /^CANCELADA/ } })
+        .findOne({ workspaceId: chat.workspaceId, date: { $lt: ahora }, title: { $not: /^CANCELADA/ }, cancelada: { $ne: true } })
         .sort({ date: -1 })
         .select("date cumplida")
         .lean(),
