@@ -9,6 +9,8 @@ import { CAMPOS_MARCA, ENTREGABLES, onboardingDatosService } from "./onboardingD
 import { metricasClienteService } from "./metricasCliente.service";
 import { claveDia, contextoParaLaIa, facturacionChatService, comoPlata } from "./facturacionChat.service";
 import { publicidadClienteService } from "./publicidadCliente.service";
+import { fueraDeHorario, incidentesService } from "./incidentes.service";
+import { equipoParaLaIa, WHATSAPP_DIRECCION } from "./equipoBakano.service";
 import { CATEGORIAS_GUION, revisionGuionesService } from "./revisionGuiones.service";
 import { perfilClienteService, type PerfilCliente } from "./perfilCliente.service";
 import {
@@ -88,6 +90,26 @@ function cargarAi(): Promise<AiSdk> {
     throw error;
   });
   return aiSdk;
+}
+
+/**
+ * Red de seguridad por si el clasificador no responde (se corta a los 30 s).
+ * Es tosca a propósito: prefiero abrir un incidente de más que dejar pasar a
+ * un cliente furioso porque el modelo tardó.
+ */
+const SENALES_DE_ALARMA =
+  /\b(furios|indignad|harto|hartа|estafa|verguenza|vergüenza|pesimo|pésimo|nadie responde|no me responden|quiero cancelar|voy a cancelar|me quiero ir|desesperad|angustiad|urgente|urgencia|ayuda ya|por favor ayud)/i;
+
+function animoDeEmergencia(texto: string): Clasificacion | null {
+  if (!SENALES_DE_ALARMA.test(texto)) return null;
+  const seVa = /\b(cancelar|me quiero ir|estafa)/i.test(texto);
+  return {
+    estado: seVa ? "en_peligro" : "molesto",
+    tema: "atencion",
+    motivo: "Detectado por palabras clave: la lectura de ánimo no respondió a tiempo",
+    frase: texto.slice(0, 300),
+    recomendacion: "Contactar al cliente de inmediato: el mensaje suena grave y el análisis automático no alcanzó a correr.",
+  };
 }
 
 const clasificacionSchema = z.object({
@@ -202,7 +224,9 @@ class TelegramAgentService {
     }
 
     // La queja se escala aunque la IA no haya podido responder.
-    const c = await clasificacion;
+    // Si el clasificador no llegó, se mira el texto: un "quiero cancelar" no
+    // se puede perder porque el modelo tardó 30 segundos.
+    const c = (await clasificacion) ?? animoDeEmergencia(texto);
     if (c) {
       cliente ??= await atencionClienteService.datosCliente(chat).catch(() => null);
       if (cliente) await this.alertarSiHaceFalta(chat, cliente, c, texto);
@@ -215,8 +239,11 @@ class TelegramAgentService {
           .sendMessage(
             chat.chatId,
             "Te leo, y entiendo que es urgente 🙏\n\n" +
-              "Ya le avisé a tu equipo de Bakano ahora mismo para que te contacten. " +
-              "Cuéntame mientras qué es lo más urgente y lo sumo al aviso.",
+              (fueraDeHorario()
+                ? "A esta hora el equipo ya está fuera de oficina (atendemos hasta las 5 de la tarde), pero igual les avisé a todos ahora mismo " +
+                  "y me voy a encargar de que un asesor tome tu caso apenas arranque el día. Esto lo tiene que ver una persona, no solo yo."
+                : "Ya le avisé a tu equipo de Bakano ahora mismo para que te contacten.") +
+              "\n\nCuéntame mientras qué es lo más urgente y lo sumo al aviso.",
             [[{ text: "📋 Ver menú", callback_data: "menu:ver" }]]
           )
           .catch((error: any) => console.error("[Telegram IA] aviso de urgencia:", error?.message || error));
@@ -275,6 +302,11 @@ Cómo hablas:
 
 Quién atiende a este cliente:
 ${equipo}
+
+Cómo se complementa el equipo (explícaselo cuando pregunte quién hace qué, o cuando ayude a que entienda el proceso):
+${equipoParaLaIa()}
+- A Luis Reyes NO se lo contacta ni se ofrece su contacto, aunque sea dueño.
+- Con Diego Reyes el cliente puede hablar sin ningún problema. Si INSISTE en hablar con alguien de dirección (lo pide dos veces, dice que quiere hablar con un dueño o con el jefe, o está muy molesto y no le basta el equipo), dale su WhatsApp: ${WHATSAPP_DIRECCION.numero}. Solo en ese caso; no lo ofrezcas de entrada.
 
 Revisión y corrección de guiones:
 - Cuando el cliente quiera revisar o corregir sus guiones, usa verGuionesParaRevisar y muéstrale la lista corta (número y tema). Si pide ver uno, usa verGuion y resúmelo en pocas líneas.
@@ -363,6 +395,11 @@ Reglas:
 - Para agendar: consulta horarios libres, ofrece 3 o 4 opciones y agenda solo cuando el cliente elija un horario concreto. Usa exactamente el valor "inicio" que devuelve la herramienta.
 - Antes de pasar un mensaje al equipo asegúrate de entender qué necesita. Después confírmale a quién se lo enviaste.
 - Si el cliente está molesto, reconoce cómo se siente, discúlpate sin excusas y ofrece una solución concreta.
+- Si está muy molesto o angustiado, dile que ya avisaste a su equipo y que te vas a encargar de que un asesor tome el caso, porque esto lo tiene que ver una persona. ${
+    fueraDeHorario()
+      ? "Ahora mismo estamos FUERA de horario de oficina (atendemos hasta las 5 de la tarde): díselo con calma, que igual ya avisaste a todos y que lo toman apenas arranque el día."
+      : "Estamos en horario de oficina: dile que lo van a contactar lo antes posible."
+  }
 - No prometas descuentos, reembolsos, cambios de contrato ni fechas que el equipo no confirmó.
 - Solo hablas de la cuenta de ${cliente.entorno}. Si pregunta algo ajeno a Bakano, redirígelo con buena onda.
 - Si una herramienta falla, discúlpate y ofrece pasar el mensaje al equipo.
@@ -930,6 +967,19 @@ neutral: todo lo demás. Ante la duda, neutral.`,
             : `🟠 ${cliente.entorno} está molesto`;
       const frase = c.frase || texto.slice(0, 300);
       const tema = c.tema;
+      // Queda en Metrics como incidente del cliente: el equipo entero lo ve,
+      // sabe qué se recomienda y quién lo tomó. El correo ya no es el registro.
+      const incidenteId = await incidentesService.abrir({
+        workspaceId: chat.workspaceId!,
+        workspaceName: cliente.entorno,
+        gravedad: c.estado as "molesto" | "angustiado" | "en_peligro",
+        tema,
+        cliente: { nombre: cliente.nombre, email: cliente.email, telegram: chat.telegramUsername, chatId: chat.chatId },
+        frase,
+        motivo: c.motivo,
+        recomendacion: c.recomendacion,
+        mensajeCompleto: texto,
+      });
       const mensaje = [
         `${
           c.estado === "en_peligro"
@@ -945,7 +995,11 @@ neutral: todo lo demás. Ante la duda, neutral.`,
         `Recomendación: ${c.recomendacion}`,
         "",
         `Mensaje completo: “${texto.slice(0, 1000)}”`,
-      ].join("\n");
+        "",
+        incidenteId ? `Tómalo en Metrics: ${incidentesService.link(incidenteId)}` : "",
+      ]
+        .filter(Boolean)
+        .join("\n");
 
       // Molesto va al responsable del tema y a los superadmins. Angustiado o
       // en peligro va a TODO el equipo interno: correo y notificación en

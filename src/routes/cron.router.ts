@@ -88,6 +88,14 @@ cronRouter.get("/onboarding-sync", async (req: Request, res: Response) => {
         `cumplidas desde el CRM: ${sync.cumplidas}, bienvenidas: ${bienvenidas.enviadas}, ` +
         `sin entorno: ${sync.sinResolver.length}`
     );
+    // Mismo cron (cada 30 min): se insiste por los incidentes que nadie tomó.
+    const { incidentesService } = await import("../services/incidentes.service");
+    const insistidos = await incidentesService.insistirPendientes().catch((error: any) => {
+      console.error("[Cron] incidentes sin tomar:", error?.message || error);
+      return 0;
+    });
+    if (insistidos) console.log(`[Cron] Incidentes sin tomar: se insistió por ${insistidos}`);
+
     // El cron corre cada 30 min; el digest de las que no se pudieron asociar
     // sale UNA vez al día (13:10 UTC = 08:10 en Ecuador) para no ser ruido.
     const ahora = new Date();

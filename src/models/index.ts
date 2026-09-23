@@ -19,6 +19,7 @@ import { EngramModel } from "./engram.model";
 import { ScriptFeedbackModel } from "./scriptFeedback.model";
 import { ReviewEventModel } from "./reviewEvent.model";
 import { MonthlyTargetModel } from "./monthlyTarget.model";
+import { IncidenteModel } from "./incidente.model";
 import { TelegramChatModel } from "./telegramChat.model";
 import { SoporteTicketModel } from "./soporteTicket.model";
 import { OnboardingEventoModel } from "./onboardingEvento.model";
@@ -45,6 +46,7 @@ const models = {
   scriptFeedback: ScriptFeedbackModel,
   reviewEvents: ReviewEventModel,
   monthlyTargets: MonthlyTargetModel,
+  incidentes: IncidenteModel,
   telegramChats: TelegramChatModel,
   soporteTickets: SoporteTicketModel,
   onboardingEventos: OnboardingEventoModel,
