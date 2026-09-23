@@ -43,6 +43,12 @@ export interface EstadoSesion {
   emoji: string;
   responsable: string;
   agendada: boolean;
+  /**
+   * La fecha ya paso y nadie la marco cumplida. No se puede seguir mostrando
+   * como "la tienes agendada": en "Mis citas" ya no sale (solo lista futuras)
+   * y el cliente veia dos respuestas distintas a la misma pregunta.
+   */
+  pasada: boolean;
   /** Lo que marco el responsable; si nadie lo movio, se deduce de la agenda. */
   estado: EstadoSesionOnboarding;
   fecha?: Date;
@@ -85,6 +91,7 @@ class OnboardingBotService {
         emoji: def.emoji,
         responsable: def.responsable.nombre,
         agendada: Boolean(guardada?.agendada),
+        pasada: Boolean(guardada?.agendada && guardada?.fecha && new Date(guardada.fecha).getTime() < Date.now()),
         estado: guardada?.estado && guardada.estado !== "pendiente" ? guardada.estado : guardada?.agendada ? "agendada" : "pendiente",
         fecha: guardada?.fecha,
         link: def.link,
