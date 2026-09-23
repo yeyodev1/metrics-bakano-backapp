@@ -9,6 +9,7 @@ import { onboardingBotService } from "./onboardingBot.service";
 import { perfilClienteService } from "./perfilCliente.service";
 import { onboardingDatosService } from "./onboardingDatos.service";
 import { citasClienteService } from "./citasCliente.service";
+import { comoPlata, facturacionChatService, claveDia, nombreDia, parsearMonto } from "./facturacionChat.service";
 import { archivosClienteService, ETIQUETA_CATEGORIA, type CategoriaRecurso } from "./archivosCliente.service";
 import { revisionGuionesService, type RevisionPendiente } from "./revisionGuiones.service";
 import { SESIONES_ONBOARDING, type SesionOnboarding } from "./onboardingSesiones.service";
@@ -263,6 +264,26 @@ export class TelegramBotService {
           chat.tema = undefined;
           await chat.save();
         }
+        // Le pedimos un monto: lo que escriba se lee como facturación antes
+        // que nada, si no se lo llevaría la IA y no quedaría registrado.
+        const diaEsperado = facturacionChatService.esperando(chat);
+        if (diaEsperado && chat.workspaceId) {
+          const monto = parsearMonto(texto);
+          if (monto !== null) return this.registrarFacturacion(chat, monto, diaEsperado);
+          if (/^(cancel|olvid|dejalo|déjalo|no$)/i.test(texto.trim())) {
+            await facturacionChatService.olvidarPedido(chat);
+            await telegramService.sendMessage(chat.chatId, "Listo, lo dejamos para después 👌", [
+              [{ text: "📋 Volver al menú", callback_data: "menu:ver" }],
+            ]);
+            return;
+          }
+          await telegramService.sendMessage(
+            chat.chatId,
+            `No le encontré el monto a eso 😅 mándame solo el número de ${nombreDia(diaEsperado)}, por ejemplo <i>1250</i>. Si prefieres dejarlo, escribe <i>cancelar</i>.`
+          );
+          return;
+        }
+
         // Mover o cancelar una cita lo resuelve la IA con el calendario, no se
         // reenvia suelto al equipo aunque haya un tema elegido.
         if (chat.tema && chat.workspaceId && pideCambioCita(texto)) {
@@ -411,6 +432,14 @@ export class TelegramBotService {
     if (data === "menu:onboarding") return this.mostrarOnboarding(chat);
     if (data === "cita:si" || data === "cita:no") return this.responderCambioCita(chat, data === "cita:si");
     if (data === "citas:ver") return this.mostrarCitas(chat);
+    if (data === "fact:ver") return this.mostrarFacturacion(chat);
+    if (data === "fact:metricas") {
+      chat.tema = undefined;
+      await chat.save();
+      if (await telegramAgentService.responder(chat, "Muéstrame mis métricas del mes")) return;
+      return this.mostrarMenu(chat);
+    }
+    if (data.startsWith("fact:dia:")) return this.pedirMontoDelDia(chat, data.slice(9));
     if (data.startsWith("arch:")) {
       const [, categoria, recursoId] = data.split(":");
       const r = await archivosClienteService.recategorizar(chat, recursoId!, categoria as CategoriaRecurso);
@@ -686,6 +715,92 @@ export class TelegramBotService {
       `${intro}${def.emoji} <b>${def.etiqueta}</b> con <b>${escaparHtml(def.responsable.nombre)}</b>\n\n` +
         `${def.resumen}\n\nAntes de la sesión ten listo:\n${def.requisitos.map((r) => `• ${r}`).join("\n")}\n\n` +
         "Elige el horario que te quede mejor 👇",
+      botones
+    );
+  }
+
+  /**
+   * Facturación desde el chat: qué días faltan y botones para registrarlos.
+   * El cliente ya está aquí; mandarlo a la web solo para escribir un número
+   * es donde se perdía.
+   */
+  private async mostrarFacturacion(chat: ITelegramChat): Promise<void> {
+    const dias = await facturacionChatService.diasPendientes(chat);
+    const faltan = dias.filter((d) => !d.registrado);
+    const botones: InlineButton[][] = faltan.map((d) => [
+      { text: `💵 ${d.texto.replace(/ \(.*\)/, "")} · ${d.fecha.toLocaleDateString("es-EC", { day: "numeric", month: "short", timeZone: "America/Guayaquil" })}`, callback_data: `fact:dia:${claveDia(d.fecha)}` },
+    ]);
+    const yaEstan = dias.filter((d) => d.registrado);
+    for (const d of yaEstan.slice(-2)) {
+      botones.push([{ text: `✏️ Corregir ${d.texto.replace(/ \(.*\)/, "")}`, callback_data: `fact:dia:${claveDia(d.fecha)}` }]);
+    }
+    botones.push([{ text: "📊 Ver mis métricas", callback_data: "fact:metricas" }], [{ text: "📋 Volver al menú", callback_data: "menu:ver" }]);
+
+    const lineas = dias.map((d) => `${d.registrado ? "✅" : "⬜"} ${d.texto}`);
+    await telegramService.sendMessage(
+      chat.chatId,
+      faltan.length
+        ? `💵 <b>Tu facturación</b>\n\n${lineas.join("\n")}\n\nToca el día y me escribes el monto por aquí: yo lo subo a metrics.bakano.ec.`
+        : `💵 <b>Tu facturación</b>\n\n${lineas.join("\n")}\n\nEstás al día 🙌 si quieres corregir un monto, toca el día.`,
+      botones
+    );
+  }
+
+  private async pedirMontoDelDia(chat: ITelegramChat, clave: string): Promise<void> {
+    const fecha = new Date(`${clave}T05:00:00.000Z`);
+    if (Number.isNaN(fecha.getTime())) return this.mostrarFacturacion(chat);
+    await facturacionChatService.pedirMonto(chat, fecha);
+    const previa = await facturacionChatService.entradaDe(chat, fecha);
+    await telegramService.sendMessage(
+      chat.chatId,
+      previa
+        ? `Ya tienes <b>${comoPlata((previa as any).amount)}</b> registrados para ${nombreDia(fecha)}.\n\nEscríbeme el monto correcto y lo actualizo 👇`
+        : `Cuánto facturaste ${nombreDia(fecha)}?\n\nEscríbeme solo el monto (por ejemplo <i>1250</i> o <i>1.250,50</i>) y yo lo subo a metrics.bakano.ec. Si fue 0, también cuenta.`
+    );
+  }
+
+  /** Guarda el monto que el cliente escribió y ofrece seguir con otro día. */
+  private async registrarFacturacion(chat: ITelegramChat, monto: number, fecha: Date): Promise<void> {
+    const r = await facturacionChatService.registrar(chat, monto, fecha);
+    await facturacionChatService.olvidarPedido(chat);
+    if (!r.ok) {
+      const explicacion: Record<string, string> = {
+        sin_permiso: "Ese día ya no lo puedo corregir desde aquí (pasaron más de 7 días). Escríbele a tu equipo y lo ajustan.",
+        dia_invalido: "Ese día no lo puedo registrar desde el chat. Los de más de un mes se cargan en metrics.bakano.ec.",
+        monto_invalido: "Ese monto no me cuadra 😅 mándame solo el número, por ejemplo 1250.",
+        sin_usuario: "Necesito saber quién eres para registrarlo. Escribe /start y nos conectamos.",
+        sin_entorno: "Primero dime de qué entorno hablamos.",
+        error: "No pude guardarlo 😕 inténtalo de nuevo o cárgalo en metrics.bakano.ec.",
+      };
+      await telegramService.sendMessage(chat.chatId, explicacion[r.motivo] || explicacion["error"]!, [
+        [{ text: "💵 Ver mi facturación", callback_data: "fact:ver" }],
+        [{ text: "📋 Volver al menú", callback_data: "menu:ver" }],
+      ]);
+      return;
+    }
+
+    const pendientes = (await facturacionChatService.diasPendientes(chat)).filter((d) => !d.registrado);
+    const botones: InlineButton[][] = [];
+    if (pendientes.length) {
+      botones.push([
+        {
+          text: `💵 Registrar ${pendientes[0]!.texto.replace(/ \(.*\)/, "")}`,
+          callback_data: `fact:dia:${claveDia(pendientes[0]!.fecha)}`,
+        },
+      ]);
+    }
+    botones.push(
+      [{ text: "✏️ Corregir este monto", callback_data: `fact:dia:${claveDia(r.dia)}` }],
+      [{ text: "📊 Ver mis métricas", callback_data: "fact:metricas" }],
+      [{ text: "📋 Volver al menú", callback_data: "menu:ver" }]
+    );
+
+    await telegramService.sendMessage(
+      chat.chatId,
+      `Listo ✅ ${r.accion === "creada" ? "registré" : "actualicé"} <b>${comoPlata(r.monto)}</b> de ${r.diaTexto}.\n\n` +
+        `Total del día en Metrics: <b>${comoPlata(r.totalDia)}</b>` +
+        (r.roas ? ` · gasto en Meta ${comoPlata(r.gastoMeta)} · ROAS <b>${r.roas}</b>` : "") +
+        (pendientes.length ? `\n\nTodavía falta ${pendientes[0]!.texto}.` : "\n\nCon eso quedas al día 🙌"),
       botones
     );
   }
@@ -1118,6 +1233,7 @@ export class TelegramBotService {
         "· <i>cómo va mi facturación este mes?</i>\n\n" +
         "O toca una opción 👇",
       [
+        [{ text: "💵 Mi facturación del día", callback_data: "fact:ver" }],
         [{ text: "🗓️ Mis citas (mover o cancelar)", callback_data: "citas:ver" }],
         [{ text: "🚀 Cómo va mi onboarding", callback_data: "menu:onboarding" }],
         [{ text: "🎬 Mis producciones", callback_data: "menu:produccion" }],
