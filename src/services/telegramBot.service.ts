@@ -269,19 +269,39 @@ export class TelegramBotService {
         const diaEsperado = facturacionChatService.esperando(chat);
         if (diaEsperado && chat.workspaceId) {
           const monto = parsearMonto(texto);
-          if (monto !== null) return this.registrarFacturacion(chat, monto, diaEsperado);
-          if (/^(cancel|olvid|dejalo|déjalo|no$)/i.test(texto.trim())) {
-            await facturacionChatService.olvidarPedido(chat);
-            await telegramService.sendMessage(chat.chatId, "Listo, lo dejamos para después 👌", [
-              [{ text: "📋 Volver al menú", callback_data: "menu:ver" }],
-            ]);
+          const mencionado = facturacionChatService.diaMencionado(texto);
+          // "ayer fueron 300" cuando se esperaba el de hoy: no se adivina.
+          if (monto !== null && mencionado && claveDia(mencionado) !== claveDia(diaEsperado)) {
+            await telegramService.sendMessage(
+              chat.chatId,
+              `Ojo, para no equivocarme: esos <b>${comoPlata(monto)}</b> son de ${nombreDia(mencionado)} o de ${nombreDia(diaEsperado)}?`,
+              [
+                [{ text: `📅 ${nombreDia(mencionado).replace(/ \(.*\)/, "")}`, callback_data: `fact:set:${claveDia(mencionado)}:${monto}` }],
+                [{ text: `📅 ${nombreDia(diaEsperado).replace(/ \(.*\)/, "")}`, callback_data: `fact:set:${claveDia(diaEsperado)}:${monto}` }],
+              ]
+            );
             return;
           }
-          await telegramService.sendMessage(
-            chat.chatId,
-            `No le encontré el monto a eso 😅 mándame solo el número de ${nombreDia(diaEsperado)}, por ejemplo <i>1250</i>. Si prefieres dejarlo, escribe <i>cancelar</i>.`
-          );
-          return;
+          if (monto !== null) return this.registrarFacturacion(chat, monto, diaEsperado);
+
+          // Ventana abierta después de registrar: si escribe cualquier otra
+          // cosa, no se le insiste con el monto, sigue la conversación normal.
+          if ((chat.facturacionEsperada as any)?.modo === "correccion") {
+            await facturacionChatService.olvidarPedido(chat);
+          } else {
+            if (/^(cancel|olvid|dejalo|déjalo|no$)/i.test(texto.trim())) {
+              await facturacionChatService.olvidarPedido(chat);
+              await telegramService.sendMessage(chat.chatId, "Listo, lo dejamos para después 👌", [
+                [{ text: "📋 Volver al menú", callback_data: "menu:ver" }],
+              ]);
+              return;
+            }
+            await telegramService.sendMessage(
+              chat.chatId,
+              `No le encontré el monto a eso 😅 mándame solo el número de ${nombreDia(diaEsperado)}, por ejemplo <i>1250</i>. Si prefieres dejarlo, escribe <i>cancelar</i>. Si es de otro día, dime cuál.`
+            );
+            return;
+          }
         }
 
         // Mover o cancelar una cita lo resuelve la IA con el calendario, no se
@@ -440,6 +460,12 @@ export class TelegramBotService {
       return this.mostrarMenu(chat);
     }
     if (data.startsWith("fact:dia:")) return this.pedirMontoDelDia(chat, data.slice(9));
+    if (data.startsWith("fact:set:")) {
+      const [dia, monto] = data.slice(9).split(":");
+      const fecha = new Date(`${dia}T05:00:00.000Z`);
+      if (Number.isNaN(fecha.getTime()) || !Number.isFinite(Number(monto))) return this.mostrarFacturacion(chat);
+      return this.registrarFacturacion(chat, Number(monto), fecha);
+    }
     if (data.startsWith("arch:")) {
       const [, categoria, recursoId] = data.split(":");
       const r = await archivosClienteService.recategorizar(chat, recursoId!, categoria as CategoriaRecurso);
@@ -779,6 +805,9 @@ export class TelegramBotService {
       return;
     }
 
+    // Queda abierta la corrección: si se equivocó, escribe el monto correcto
+    // y se actualiza ese mismo día, sin volver a tocar botones.
+    await facturacionChatService.pedirMonto(chat, r.dia, "correccion");
     const pendientes = (await facturacionChatService.diasPendientes(chat)).filter((d) => !d.registrado);
     const botones: InlineButton[][] = [];
     if (pendientes.length) {
@@ -801,7 +830,9 @@ export class TelegramBotService {
       chat,
       `Acabas de ${r.accion === "creada" ? "registrar" : "actualizar"} su facturación de ${r.diaTexto} en metrics.bakano.ec. ` +
         "Confírmaselo con el monto y cierra con una lectura corta de lo que significa: compáralo con el promedio del mes, " +
-        "con el día anterior o con el mismo día de la semana pasada, y menciona el ROAS del día solo si hay gasto de Meta. " +
+        "con el día anterior o con el mismo día de la semana pasada, y menciona el ROAS del día solo si hay gasto de Meta " +
+        "(si metaConectado es false, no nombres Meta ni ROAS). " +
+        "Cierra diciéndole que si se equivocó, me escriba el monto correcto y lo actualizo. " +
         (pendientes.length ? `Recuérdale al final que todavía falta registrar ${pendientes[0]!.texto}.` : "Dile que queda al día."),
       { montoRegistrado: comoPlata(r.monto), dia: r.diaTexto, ...contextoParaLaIa(r.contexto) }
     );

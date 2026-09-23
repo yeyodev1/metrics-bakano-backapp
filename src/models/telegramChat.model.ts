@@ -61,7 +61,7 @@ export interface ITelegramChat extends Document {
   /** update_id de Telegram ya procesados: sus reintentos no se repiten. */
   updatesVistos?: number[];
   /** El bot pidió el monto de facturación de un día y espera la respuesta. */
-  facturacionEsperada?: { fecha: Date; pedidoEn: Date };
+  facturacionEsperada?: { fecha: Date; pedidoEn: Date; modo?: "pedido" | "correccion" };
   /** Cambio de cita propuesto y esperando que el cliente lo confirme. */
   cambioPendiente?: {
     accion: "cancelar" | "reprogramar";
@@ -129,7 +129,10 @@ const TelegramChatSchema = new Schema<ITelegramChat>(
     },
     updatesVistos: { type: [Number], default: undefined },
     facturacionEsperada: {
-      type: { fecha: Date, pedidoEn: Date },
+      // "correccion" es la ventana que queda abierta tras registrar: sin este
+      // campo en el esquema, Mongoose lo descartaba y el bot seguía pidiendo
+      // el monto aunque el cliente ya hubiera pasado a otro tema.
+      type: { fecha: Date, pedidoEn: Date, modo: String },
       default: undefined,
     },
     cambioPendiente: {
