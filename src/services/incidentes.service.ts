@@ -103,13 +103,15 @@ class IncidentesService {
       .join("\n");
 
     const usuario = await models.users.findOne({ email: GENESIS, isActive: true }).select("_id").lean();
-    await Promise.allSettled([
+    // Con allSettled a secas, un correo que no sale no deja rastro: aquí se
+    // registra canal por canal, que es lo único que permite comprobarlo.
+    const canales = await Promise.allSettled([
       slackService.avisarEquipo({ titulo, detalle: cuerpo, correos: [GENESIS] }),
       usuario
         ? notificationService.create(usuario._id as Types.ObjectId, "cliente_en_riesgo", titulo, cuerpo.slice(0, 500), {
             workspaceId: incidente.workspaceId,
           })
-        : Promise.resolve(),
+        : Promise.resolve(null),
       resendService.sendSolicitudClienteEmail({
         to: [GENESIS],
         tema: "incidente de cliente",
@@ -121,6 +123,14 @@ class IncidentesService {
         encabezado: titulo,
       }),
     ]);
+    const nombres = ["slack", "notificación", "correo"];
+    canales.forEach((r, i) => {
+      if (r.status === "rejected") {
+        console.error(`[Incidentes] ${nombres[i]} a Genesis falló:`, (r.reason as any)?.message || r.reason);
+      } else {
+        console.log(`[Incidentes] ${nombres[i]} a Genesis: ok`);
+      }
+    });
     await models.incidentes.updateOne({ _id: incidente._id }, { $set: { ultimoPingEn: new Date() } });
   }
 
