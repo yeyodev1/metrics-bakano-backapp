@@ -15,11 +15,10 @@ import { ORDEN_SESIONES, SESIONES_ONBOARDING, type SesionOnboarding } from "./on
  * Citas del cliente: verlas, moverlas y cancelarlas desde Telegram.
  *
  * Reglas (acordadas con direccion):
- * - El cliente cambia su cita por su cuenta hasta DOS DIAS antes. Mas cerca
- *   no se toca el calendario a ciegas: se le dice claro y se le avisa a todos
- *   los encargados de esa cita (DM, correo y notificacion) para que lo
- *   coordinen con el. Antes simplemente se le decia que no y el cliente se
- *   quedaba con el problema en la mano.
+ * - Mover o cancelar SIEMPRE funciona: el boton hace lo que dice. La regla de
+ *   los dos dias se le dice clarisimo, pero no lo deja atascado: si falta
+ *   menos, igual se hace y se le avisa a TODOS los encargados de esa cita
+ *   (DM, correo y notificacion) para que reacomoden su dia.
  * - Cancelar nunca borra: la cita queda "cancelled" en el CRM, con historial.
  * - Solo se tocan citas que el sistema sabe que son de ESE entorno: la
  *   produccion por su Planning, las sesiones por onboardingSesiones y las
@@ -138,14 +137,14 @@ class CitasClienteService {
     return citas.sort((a, b) => a.inicio.getTime() - b.inicio.getTime());
   }
 
-  /** Falta menos de dos días: ya no lo cambia él solo, lo coordina el equipo. */
+  /** Falta menos de dos días: se puede igual, pero se avisa a todo el equipo. */
   esUrgente(cita: CitaCliente): boolean {
     return cita.inicio.getTime() - Date.now() < PLAZO_URGENTE_MS;
   }
 
-  /** Lo puede cambiar por su cuenta: falta más de dos días. */
+  /** Cualquier cita futura se puede cambiar; esUrgente solo cambia el aviso. */
   editable(cita: CitaCliente): boolean {
-    return !this.esUrgente(cita) && cita.inicio.getTime() > Date.now();
+    return cita.inicio.getTime() > Date.now();
   }
 
   /**
@@ -220,7 +219,6 @@ class CitasClienteService {
   async horariosParaMover(chat: ITelegramChat, ref: string): Promise<{ cita?: CitaCliente; horarios: Date[]; motivo?: string }> {
     const cita = (await this.listar(chat)).find((c) => c.ref === ref);
     if (!cita) return { horarios: [], motivo: "no_encontrada" };
-    if (this.esUrgente(cita)) return { cita, horarios: [], motivo: "sobre_la_hora" };
     if (!cita.calendarId && cita.tipo !== "produccion") return { cita, horarios: [], motivo: "sin_calendario" };
     const { desde, calendario } = await this.ventanaMover(chat, cita);
     try {
@@ -306,7 +304,6 @@ class CitasClienteService {
   ): Promise<{ ok: true; resumen: string } | { ok: false; motivo: string; con?: string; correos?: string[] }> {
     const cita = (await this.listar(chat)).find((c) => c.ref === cambio.ref);
     if (!cita) return { ok: false, motivo: "no_encontrada" };
-    if (this.esUrgente(cita)) return { ok: false, motivo: "sobre_la_hora", con: cita.con, correos: cita.correos };
 
     let nuevo: Date | undefined;
     if (cambio.accion === "reprogramar") {

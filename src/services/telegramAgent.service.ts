@@ -378,9 +378,10 @@ Producciones (grabaciones):
 
 Mover o cancelar citas (producción, sesiones del onboarding y reuniones):
 - Usa verMisCitas para ver sus citas. Solo puedes tocar las que salen ahí.
-- REGLA CLARA, dila sin rodeos: el cliente puede mover o cancelar por su cuenta SOLO hasta 2 días antes (48 horas). Si falta menos, tú NO tocas el calendario.
-- Si falta menos de 2 días (sePuedeCambiar en false, o te sale "sobre_la_hora"): dile con todas sus letras que ya está dentro de los 2 días, usa avisarCambioSobreLaHora para avisarle a todo el equipo de esa cita, y cuéntale que ellos lo coordinan con él hoy mismo. No le prometas que ya quedó movida.
-- Siempre que hables de una cita (la agendas, la mueves, la cancelas o avisas), pídele que revise su planificación en Metrics para que no se le cruce nada, y recuérdale la regla de los 2 días.
+- Mover y cancelar SIEMPRE funciona, aunque sea el mismo día: nunca le digas que no se puede.
+- Dile claro que lo ideal es avisar con más de 2 días. Si la cita es en menos (sobreLaHora en true), adviérteselo con naturalidad: se la cambias igual, solo que le avisas a todo el equipo de esa cita para que reacomode su día.
+- avisarCambioSobreLaHora es solo para cuando él NO quiere cambiarla todavía y prefiere que el equipo lo sepa y lo coordine con él (o cuando no hay horarios libres). No la uses para bloquearlo.
+- Siempre que hables de una cita (la agendas, la mueves, la cancelas o avisas), pídele que revise su planificación en Metrics para que no se le cruce nada.
 - Los avisos van a los encargados de esa cita. A dirección (Denisse Quimi y Diego Reyes) NO se les avisa por un cambio normal: solo pasa avisarDireccion en true si el cliente está muy molesto, amenaza con irse o es algo grave de verdad.
 - Antes de cancelar, sugiere mover: casi siempre conviene más. Si igual quiere cancelar, pregúntale el motivo.
 - Para mover: verHorariosParaMover, ofrece 3 o 4 horarios y, cuando elija uno, llama reprogramarCita. Eso NO la mueve todavía: repítele la cita, la fecha actual y la nueva y pídele que confirme (le aparecen botones).
@@ -699,7 +700,7 @@ Reglas:
 
       verMisCitas: {
         description:
-          "Citas futuras del cliente (producción, sesiones del onboarding y reuniones), con su ref, con quién y si él todavía las puede cambiar por su cuenta (solo hasta 2 días antes).",
+          "Citas futuras del cliente (producción, sesiones del onboarding y reuniones), con su ref, con quién y si es sobre la hora (menos de 2 días: se cambia igual, avisando a todo el equipo).",
         inputSchema: z.object({}),
         execute: async () => {
           const citas = await citasClienteService.listar(chat);
@@ -725,14 +726,6 @@ Reglas:
         execute: async ({ ref }: { ref: string }) => {
           const r = await citasClienteService.horariosParaMover(chat, ref);
           if (!r.cita) return { ok: false, motivo: "No encontré esa cita. Usa verMisCitas." };
-          if (r.motivo === "sobre_la_hora")
-            return {
-              ok: false,
-              motivo: "sobre_la_hora",
-              explicacion: "Falta menos de 2 días: él ya no la mueve por su cuenta. Usa avisarCambioSobreLaHora.",
-              responsable: r.cita.con,
-              correos: r.cita.correos,
-            };
           return {
             ok: true,
             cita: r.cita.etiqueta,
@@ -784,7 +777,7 @@ Reglas:
 
       avisarCambioSobreLaHora: {
         description:
-          "Cuando la cita es en menos de 2 días y el cliente quiere moverla o cancelarla: avisa a TODOS los encargados de esa cita para que lo coordinen con él. No toca el calendario.",
+          "Avisa a TODOS los encargados de una cita que el cliente necesita moverla o cancelarla, para que lo coordinen con él. No toca el calendario: úsala solo si él no quiere elegir horario ahora o no hay horarios libres.",
         inputSchema: z.object({
           ref: z.string().describe("ref exacta de verMisCitas"),
           accion: z.enum(["mover", "cancelar"]),
