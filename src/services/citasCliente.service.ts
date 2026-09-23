@@ -66,6 +66,12 @@ export interface CitaCliente {
   planningId?: Types.ObjectId;
   sesion?: SesionOnboarding;
   tema?: TemaAtencion;
+  /**
+   * Produccion que solo existe en Metrics: la cargo el equipo a mano y nunca
+   * paso por el CRM. Se puede mover y cancelar igual, pero el cambio se hace
+   * aqui y se le avisa al equipo, porque no hay cita del CRM que tocar.
+   */
+  soloEnMetrics?: boolean;
 }
 
 export type ResultadoCambio =
@@ -87,8 +93,7 @@ class CitasClienteService {
         .find({
           workspaceId: chat.workspaceId,
           date: { $gte: ahora },
-          title: { $not: /^CANCELADA/ },
-          "crm.appointmentId": { $exists: true, $ne: null },
+          title: { $not: /^CANCELADA/ }, cancelada: { $ne: true },
         })
         .sort({ date: 1 })
         .select("date title crm")
@@ -105,9 +110,13 @@ class CitasClienteService {
         con: equipoAtencionService.nombres("produccion"),
         correos: equipoAtencionService.correos("produccion"),
         inicio: p.date,
-        appointmentId: p.crm!.appointmentId,
+        // Las que cargo el equipo a mano no tienen cita en el CRM. Antes se
+        // las saltaba: el cliente veia su produccion en "Tus producciones" y
+        // al tocar "Mover o cancelar" le salia que no tenia ninguna cita.
+        appointmentId: p.crm?.appointmentId || "",
         calendarId: p.crm?.calendarId,
         planningId: p._id as Types.ObjectId,
+        soloEnMetrics: !p.crm?.appointmentId,
       });
     }
     for (const s of ORDEN_SESIONES) {
@@ -259,7 +268,7 @@ class CitasClienteService {
       // La regla se mide contra la ultima produccion ya realizada, no contra
       // la que se esta moviendo: mover no la cuenta como nueva.
       const ultima = await models.planning
-        .findOne({ workspaceId: chat.workspaceId, date: { $lt: new Date() }, title: { $not: /^CANCELADA/ } })
+        .findOne({ workspaceId: chat.workspaceId, date: { $lt: new Date() }, title: { $not: /^CANCELADA/ }, cancelada: { $ne: true } })
         .sort({ date: -1 })
         .select("date")
         .lean();
@@ -297,7 +306,7 @@ class CitasClienteService {
       const verificada = await this.verificar(cita);
       if (!verificada.ok) return { ok: false, motivo: verificada.motivo, con: cita.con, correos: cita.correos };
       try {
-        await ghlService.updateAppointment(cita.appointmentId, { cancelar: true });
+        if (!cita.soloEnMetrics) await ghlService.updateAppointment(cita.appointmentId, { cancelar: true });
       } catch (error: any) {
         console.error("[Citas] cancelar:", error.response?.data || error.message);
         // Un timeout no dice si el CRM lo aplico: se vuelve a leer.
@@ -329,7 +338,7 @@ class CitasClienteService {
       const verificada = await this.verificar(cita);
       if (!verificada.ok) return { ok: false, motivo: verificada.motivo, con: cita.con, correos: cita.correos };
       try {
-        await ghlService.updateAppointment(cita.appointmentId, { startTime: nuevoInicio });
+        if (!cita.soloEnMetrics) await ghlService.updateAppointment(cita.appointmentId, { startTime: nuevoInicio });
       } catch (error: any) {
         console.error("[Citas] reprogramar:", error.response?.data || error.message);
         const ahora = await ghlService.getAppointment(cita.appointmentId);
@@ -429,6 +438,7 @@ class CitasClienteService {
    * Deja en `cita.inicio` la hora real para los avisos.
    */
   private async verificar(cita: CitaCliente): Promise<{ ok: boolean; motivo: string }> {
+    if (cita.soloEnMetrics) return { ok: true, motivo: "" };
     const evento = await ghlService.getAppointment(cita.appointmentId);
     if (!evento) return { ok: false, motivo: "no_encontrada_en_crm" };
     if (CANCELADAS.includes(String(evento.appointmentStatus || "").toLowerCase())) return { ok: false, motivo: "ya_cancelada" };
@@ -459,6 +469,10 @@ class CitasClienteService {
             },
           }
         );
+      } else if (cita.tipo === "produccion" && cita.soloEnMetrics) {
+        // Solo vive en Metrics: aqui se mueve de verdad, no hay CRM que
+        // sincronizar despues.
+        await models.planning.updateOne({ _id: cita.planningId }, { $set: { date: nuevo! } });
       } else if (cita.tipo === "produccion") {
         // Rango que cubre la fecha vieja y la nueva: si solo cubriera una, el
         // sync veria la otra como huerfana y mandaria avisos falsos.
@@ -512,7 +526,9 @@ class CitasClienteService {
       (accion === "reprogramada" ? ` Antes: ${fechaEcuador(cita.inicio)}.` : "") +
       (motivoCliente ? `\nMotivo: ${motivoCliente}` : "") +
       (urgente ? "\n\nFaltaban menos de 48 horas: hay que reacomodar la agenda." : "") +
-      "\nYa quedó en el calendario del CRM.";
+      (cita.soloEnMetrics
+        ? "\nEsta producción no estaba en el CRM (la cargaron a mano en Metrics), así que el cambio quedó solo en Metrics: revisen su calendario."
+        : "\nYa quedó en el calendario del CRM.");
 
     // Sobre la hora avisa a TODOS los de esa cita y a atención (Genesis).
     // Dirección solo si hace falta de verdad: eso lo decide la IA.
@@ -527,7 +543,8 @@ class CitasClienteService {
       // Un DM llega; un mensaje en el canal a esta altura puede no verse.
       tareas.push(...correos.map((c) => slackService.mensajeDirecto(c, titulo, detalle)));
     }
-    if (cita.tipo !== "produccion" || accion === "cancelada" || urgente) {
+    // La manual no la sincroniza nadie despues: el aviso completo sale de aqui.
+    if (cita.tipo !== "produccion" || accion === "cancelada" || urgente || cita.soloEnMetrics) {
       const internos = await models.users.find({ email: { $in: correos }, isActive: true }).select("_id").lean();
       tareas.push(
         ...internos.map((u) =>
