@@ -184,6 +184,12 @@ class IncidentesService {
     return { incidentes, abiertos };
   }
 
+  /** Uno solo, para cuando se entra por el link del correo o del DM. */
+  async uno(id: string) {
+    if (!Types.ObjectId.isValid(id)) return null;
+    return models.incidentes.findById(id).lean();
+  }
+
   /** Alguien se hace cargo: queda su nombre y deja de insistirse. */
   async tomar(id: string, usuario: { _id: Types.ObjectId; name?: string; email?: string }) {
     if (!Types.ObjectId.isValid(id)) throw new Error("INVALID_ID");
