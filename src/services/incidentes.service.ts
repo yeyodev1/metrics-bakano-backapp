@@ -106,7 +106,11 @@ class IncidentesService {
     // Con allSettled a secas, un correo que no sale no deja rastro: aquí se
     // registra canal por canal, que es lo único que permite comprobarlo.
     const canales = await Promise.allSettled([
-      slackService.avisarEquipo({ titulo, detalle: cuerpo, correos: [GENESIS] }),
+      // DM directo primero: es lo que de verdad la interrumpe.
+      slackService.mensajeDirecto(GENESIS, titulo, cuerpo).then(async (ok) => {
+        await slackService.avisarEquipo({ titulo, detalle: cuerpo, correos: [GENESIS] });
+        return ok;
+      }),
       usuario
         ? notificationService.create(usuario._id as Types.ObjectId, "cliente_en_riesgo", titulo, cuerpo.slice(0, 500), {
             workspaceId: incidente.workspaceId,
@@ -123,7 +127,7 @@ class IncidentesService {
         encabezado: titulo,
       }),
     ]);
-    const nombres = ["slack", "notificación", "correo"];
+    const nombres = ["slack (DM + canal)", "notificación", "correo"];
     canales.forEach((r, i) => {
       if (r.status === "rejected") {
         console.error(`[Incidentes] ${nombres[i]} a Genesis falló:`, (r.reason as any)?.message || r.reason);
@@ -150,6 +154,7 @@ class IncidentesService {
         `Nadie lo ha tomado todavía. Tómalo aquí: ${this.link(incidente._id as Types.ObjectId)}`;
       const usuario = await models.users.findOne({ email: GENESIS, isActive: true }).select("_id").lean();
       await Promise.allSettled([
+        slackService.mensajeDirecto(GENESIS, titulo, cuerpo),
         slackService.avisarEquipo({ titulo, detalle: cuerpo, correos: [GENESIS] }),
         usuario
           ? notificationService.create(usuario._id as Types.ObjectId, "cliente_en_riesgo", titulo, cuerpo.slice(0, 500), {
