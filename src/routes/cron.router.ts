@@ -5,6 +5,27 @@ import { runMetaMetricsSync } from "../crons/metaMetrics.cron";
 
 const cronRouter = Router();
 
+// GET /api/cron/facturacion-telegram — una vez al dia (14:10 UTC = 09:10 Ecuador).
+// Le recuerda por el chat a cada cliente que no registro su facturacion, y a
+// los 3 dias seguidos avisa al equipo. Solo clientes: los chats del equipo
+// interno no reciben nada.
+cronRouter.get("/facturacion-telegram", async (req: Request, res: Response) => {
+  const secret = process.env.CRON_SECRET;
+  if (!secret || req.headers["authorization"] !== `Bearer ${secret}`) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  try {
+    const { recordatorioFacturacionService } = await import("../services/recordatorioFacturacion.service");
+    const r = await recordatorioFacturacionService.enviarRecordatorios();
+    console.log(`[Cron] Facturación — avisados: ${r.avisados}, escalados: ${r.escalados} · ${r.detalle.join(" | ")}`);
+    res.status(200).json(r);
+  } catch (error: any) {
+    console.error("[Cron] Facturación:", error?.message || error);
+    res.status(500).json({ error: error?.message || "error" });
+  }
+});
+
 // GET /api/cron/onboarding-sync — cada 30 min.
 // Marca las sesiones de onboarding que el cliente agendo por el link del CRM
 // y manda el correo de arranque de los entornos nuevos.
