@@ -62,6 +62,31 @@ class SlackService {
     return data.ts as string;
   }
 
+  /**
+   * Mensaje DIRECTO a una persona (no al canal).
+   *
+   * Un aviso en el canal se pierde entre mensajes; un DM llega a su bandeja y
+   * le suena el teléfono. Para un cliente angustiado eso es la diferencia
+   * entre que alguien lo atienda en minutos o mañana.
+   */
+  async mensajeDirecto(email: string, titulo: string, detalle?: string): Promise<boolean> {
+    if (!process.env.SLACK_BOT_TOKEN) return false;
+    const id = await this.idPorCorreo(email);
+    if (!id) return false;
+    try {
+      const cuerpo = detalle ? `\n>${this.escapar(detalle.slice(0, 2800)).replace(/\n/g, "\n>")}` : "";
+      // El canal de un DM es el propio id del usuario: Slack abre la
+      // conversacion solo. Necesita el scope chat:write (y im:write).
+      await this.publicar(id, titulo, [
+        { type: "section", text: { type: "mrkdwn", text: `*${this.escapar(titulo)}*${cuerpo}` } },
+      ]);
+      return true;
+    } catch (error: any) {
+      console.error(`[Slack] no se pudo enviar el DM a ${email}:`, error.message);
+      return false;
+    }
+  }
+
   /** Aviso interno con @mencion a quienes atienden. true si se publico. */
   async avisarEquipo(aviso: { titulo: string; detalle?: string; correos: string[] }): Promise<boolean> {
     if (!this.configurado()) return false;
