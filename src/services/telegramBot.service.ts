@@ -795,11 +795,53 @@ export class TelegramBotService {
     );
   }
 
+
+  /**
+   * Ultimo filtro antes de reservar: el boton pudo quedarse abierto desde
+   * antes de que agendara otra cosa. Si ya tiene esa hora ocupada, se lo dice
+   * con nombre y apellido en vez de dejarlo con dos citas a la vez.
+   */
+  private async chocaConSuAgenda(chat: ITelegramChat, inicio: Date, duracionMs?: number): Promise<boolean> {
+    const r = await citasClienteService.puedeA(chat, inicio, { duracionMs });
+    if (r.ok) return false;
+    await telegramService.sendMessage(
+      chat.chatId,
+      `A esa hora <b>ya tienes algo con nosotros</b> ⛔\n\n` +
+        `🗓️ <b>${escaparHtml(r.choca.etiqueta)}</b> · ${r.choca.cuando}\n     con ${escaparHtml(r.choca.con)}\n\n` +
+        "Aunque el equipo esté libre a esa hora, tú no puedes estar en las dos. " +
+        "Elige otro horario, o si prefieres mover la que ya tienes, dale a “Ver mis citas”.",
+      [
+        [{ text: "🗓️ Ver mis citas", callback_data: "citas:ver" }],
+        [{ text: "📋 Volver al menú", callback_data: "menu:ver" }],
+      ]
+    );
+    return true;
+  }
+
+  /** Lo que se le dice cuando se le quitaron horarios por su propia agenda. */
+  private avisoChoques(quitados: number): string {
+    if (!quitados) return "";
+    return (
+      `\n\n🔒 Quité ${quitados === 1 ? "un horario" : `${quitados} horarios`} en los que <b>ya tienes algo agendado con nosotros</b>. ` +
+      "Aunque el equipo esté libre a esa hora, tú no puedes estar en dos reuniones a la vez."
+    );
+  }
+
   private async mostrarHorarios(chat: ITelegramChat, tema: TemaAtencion, aviso?: string): Promise<void> {
-    const horarios = await atencionClienteService.horariosLibres(tema);
-    if (horarios === null) return this.coordinarPorCorreo(chat, tema, aviso);
-    if (!horarios.length) {
+    const crudos = await atencionClienteService.horariosLibres(tema);
+    if (crudos === null) return this.coordinarPorCorreo(chat, tema, aviso);
+    if (!crudos.length) {
       return this.coordinarPorCorreo(chat, tema, "No encontré horarios libres esta semana en su calendario 😅");
+    }
+    // El cliente es uno solo: si a esa hora ya tiene otra cita con nosotros,
+    // no se la ofrecemos aunque el calendario del equipo esté libre.
+    const { horarios, quitados } = await citasClienteService.sinChoques(chat, crudos);
+    if (!horarios.length) {
+      return this.coordinarPorCorreo(
+        chat,
+        tema,
+        "Todos los horarios libres de esta semana chocan con citas que ya tienes con nosotros 😅"
+      );
     }
 
     const botones = this.botonesHorarios(horarios, (h) => `slot:${tema}:${Math.floor(h.getTime() / 1000)}`);
@@ -807,7 +849,8 @@ export class TelegramBotService {
 
     await telegramService.sendMessage(
       chat.chatId,
-      `${aviso ? `${aviso}\n\n` : ""}Genial! 🙌 Estos son los próximos horarios libres de <b>${escaparHtml(equipoAtencionService.nombres(tema))}</b> (hora Ecuador).\n\nElige el que mejor te quede 👇`,
+      `${aviso ? `${aviso}\n\n` : ""}Genial! 🙌 Estos son los próximos horarios libres de <b>${escaparHtml(equipoAtencionService.nombres(tema))}</b> (hora Ecuador).\n\nElige el que mejor te quede 👇` +
+        this.avisoChoques(quitados),
       botones
     );
   }
@@ -972,7 +1015,10 @@ export class TelegramBotService {
   private async mostrarHorariosOnboarding(chat: ITelegramChat, sesion: SesionOnboarding, aviso?: string): Promise<void> {
     if (!(sesion in SESIONES_ONBOARDING)) return this.mostrarOnboarding(chat);
     const def = SESIONES_ONBOARDING[sesion];
-    const horarios = await onboardingBotService.horarios(sesion);
+    const crudos = await onboardingBotService.horarios(sesion);
+    const { horarios, quitados } = crudos?.length
+      ? await citasClienteService.sinChoques(chat, crudos)
+      : { horarios: crudos || [], quitados: 0 };
     const intro = aviso ? `${aviso}\n\n` : "";
 
     if (!horarios || !horarios.length) {
@@ -994,7 +1040,8 @@ export class TelegramBotService {
       chat.chatId,
       `${intro}${def.emoji} <b>${def.etiqueta}</b> con <b>${escaparHtml(def.responsable.nombre)}</b>\n\n` +
         `${def.resumen}\n\nAntes de la sesión ten listo:\n${def.requisitos.map((r) => `• ${r}`).join("\n")}\n\n` +
-        "Elige el horario que te quede mejor 👇",
+        "Elige el horario que te quede mejor 👇" +
+        this.avisoChoques(quitados),
       botones
     );
   }
@@ -1287,6 +1334,7 @@ export class TelegramBotService {
     if (!(sesion in SESIONES_ONBOARDING)) return this.mostrarOnboarding(chat);
     const inicio = new Date(Number(segundos) * 1000);
     if (Number.isNaN(inicio.getTime())) return this.mostrarHorariosOnboarding(chat, sesion);
+    if (await this.chocaConSuAgenda(chat, inicio)) return;
 
     await telegramService.sendMessage(chat.chatId, "⏳ Un segundito, estoy agendando tu sesión...");
     const r = await onboardingBotService.agendar(chat, sesion, inicio);
@@ -1322,7 +1370,11 @@ export class TelegramBotService {
 
   // ── Produccion ─────────────────────────────────────────────────────────────
   private async mostrarHorariosProduccion(chat: ITelegramChat, aviso?: string): Promise<void> {
-    const { estado, horarios } = await atencionClienteService.horariosProduccion(chat.workspaceId!);
+    const { estado, horarios: crudos } = await atencionClienteService.horariosProduccion(chat.workspaceId!);
+    // La grabación se lleva media mañana: si ya tiene algo cerca, no se ofrece.
+    const { horarios, quitados } = crudos?.length
+      ? await citasClienteService.sinChoques(chat, crudos, { duracionMs: 3 * 3_600_000 })
+      : { horarios: crudos, quitados: 0 };
     const nombres = escaparHtml(equipoAtencionService.nombres("produccion"));
     const intro = aviso ? `${aviso}\n\n` : "";
 
@@ -1362,7 +1414,8 @@ export class TelegramBotService {
       chat.chatId,
       `${intro}🎬 Agendemos tu producción con <b>${nombres}</b>.\n\n` +
         "Es la sesión en ambiente controlado para grabar las tomas de tu avatar y de los productos que vamos a promocionar.\n\n" +
-        `${regla}Elige el horario que te quede mejor 👇`,
+        `${regla}Elige el horario que te quede mejor 👇` +
+        this.avisoChoques(quitados),
       botones
     );
   }
@@ -1370,6 +1423,7 @@ export class TelegramBotService {
   private async agendarProduccion(chat: ITelegramChat, segundos: string): Promise<void> {
     const inicio = new Date(Number(segundos) * 1000);
     if (Number.isNaN(inicio.getTime())) return this.mostrarHorariosProduccion(chat);
+    if (await this.chocaConSuAgenda(chat, inicio, 3 * 3_600_000)) return;
 
     await telegramService.sendMessage(chat.chatId, "⏳ Un segundito, estoy reservando tu producción...");
     const reserva = await atencionClienteService.reservarProduccion(chat, inicio);
@@ -1410,6 +1464,7 @@ export class TelegramBotService {
     const inicio = new Date(Number(segundos) * 1000);
     if (Number.isNaN(inicio.getTime())) return this.mostrarHorarios(chat, tema);
     if (inicio.getTime() < Date.now()) return this.mostrarHorarios(chat, tema, "Ese horario ya pasó ⌛ Te muestro los que siguen libres.");
+    if (await this.chocaConSuAgenda(chat, inicio)) return;
 
     await telegramService.sendMessage(chat.chatId, "⏳ Un segundito, estoy reservando tu reunión...");
     const reserva = await atencionClienteService.reservarReunion(chat, tema, inicio);

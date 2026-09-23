@@ -376,6 +376,7 @@ Producciones (grabaciones):
 - Cada cliente puede agendar una producción cada 2 meses, contados desde la última. Si ya tiene una agendada, no puede agendar otra.
 - Para agendar: usa verHorariosProduccion, ofrece 3 o 4 horarios y, cuando el cliente elija uno concreto, usa agendarProduccion con el valor "inicio" exacto. Confirma fecha, hora y que lo atienden ${equipoAtencionService.nombres("produccion")}.
 - Si todavía no puede agendar, explica la regla con naturalidad y dile desde qué fecha puede.
+- El cliente es UNO SOLO: nunca le agendes dos cosas a la misma hora, aunque sean con personas distintas del equipo. Los horarios que te devuelven las herramientas ya vienen filtrados; si aun así te sale "ya_tiene_esa_hora", dile qué cita tiene a esa hora y con quién, y ofrécele otro horario o mover la que ya tiene.
 - Mover una producción no cambia la regla: la nueva fecha también tiene que respetar los 2 meses desde la última grabación.
 
 Mover o cancelar citas (producción, sesiones del onboarding y reuniones):
@@ -498,10 +499,13 @@ Reglas:
                   : `Con ${equipoAtencionService.nombres(tema)} la reunión se coordina por mensaje: pregunta qué día y hora prefiere y usa pasarMensajeAlEquipo.`,
             };
           }
+          // El cliente es uno solo: no se le ofrecen horas que ya tiene ocupadas.
+          const libres = await citasClienteService.sinChoques(chat, horarios);
           return {
             agendable: true,
             con: equipoAtencionService.nombres(tema),
-            horarios: horarios.slice(0, 12).map((h) => ({ inicio: h.toISOString(), texto: fechaEcuador(h) })),
+            horariosQuitadosPorSuAgenda: libres.quitados,
+            horarios: libres.horarios.slice(0, 12).map((h) => ({ inicio: h.toISOString(), texto: fechaEcuador(h) })),
           };
         },
       },
@@ -616,15 +620,16 @@ Reglas:
         inputSchema: z.object({ sesion: z.enum(["meta", "crm", "estrategia"]) }),
         execute: async ({ sesion }: { sesion: SesionOnboarding }) => {
           const def = SESIONES_ONBOARDING[sesion];
-          const horarios = await onboardingBotService.horarios(sesion);
+          const crudos = await onboardingBotService.horarios(sesion);
+          const libres = crudos?.length ? await citasClienteService.sinChoques(chat, crudos) : { horarios: [], quitados: 0 };
           return {
             con: def.responsable.nombre,
             etiqueta: def.etiqueta,
             link: def.link,
-            horarios:
-              horarios === null || !horarios.length
-                ? `No pude ver los horarios: pásale el link ${def.link}`
-                : horarios.slice(0, 12).map((h) => ({ inicio: h.toISOString(), texto: fechaEcuador(h) })),
+            horariosQuitadosPorSuAgenda: libres.quitados,
+            horarios: !libres.horarios.length
+              ? `No pude ver los horarios: pásale el link ${def.link}`
+              : libres.horarios.slice(0, 12).map((h) => ({ inicio: h.toISOString(), texto: fechaEcuador(h) })),
           };
         },
       },
@@ -639,6 +644,14 @@ Reglas:
         execute: async ({ sesion, inicio }: { sesion: SesionOnboarding; inicio: string }) => {
           const fecha = new Date(inicio);
           if (Number.isNaN(fecha.getTime())) return { ok: false, motivo: "horario inválido" };
+          const choque = await citasClienteService.puedeA(chat, fecha);
+          if (!choque.ok)
+            return {
+              ok: false,
+              motivo: "ya_tiene_esa_hora",
+              yaTiene: choque.choca,
+              siguiente: "Dile que a esa hora ya tiene esa cita con nosotros y que no puede estar en las dos. Ofrécele otro horario o mover la que ya tiene.",
+            };
           const r = await onboardingBotService.agendar(chat, sesion, fecha);
           const def = SESIONES_ONBOARDING[sesion];
           return r.ok
@@ -652,7 +665,11 @@ Reglas:
           "Dice si el cliente puede agendar su producción (una cada 2 meses desde la última; con una ya agendada no puede otra) y los horarios libres de Karen Muñoz y Jean Ortega desde la fecha permitida.",
         inputSchema: z.object({}),
         execute: async () => {
-          const { estado, horarios } = await atencionClienteService.horariosProduccion(chat.workspaceId!);
+          const { estado, horarios: crudos } = await atencionClienteService.horariosProduccion(chat.workspaceId!);
+          const libres = crudos?.length
+            ? (await citasClienteService.sinChoques(chat, crudos, { duracionMs: 3 * 3_600_000 })).horarios
+            : crudos;
+          const horarios = libres;
           return {
             puedeAgendar: estado.puedeAgendar,
             yaTieneAgendada: estado.proxima ? fechaEcuador(estado.proxima) : null,
@@ -676,6 +693,14 @@ Reglas:
         execute: async ({ inicio }: { inicio: string }) => {
           const fecha = new Date(inicio);
           if (Number.isNaN(fecha.getTime())) return { ok: false, motivo: "horario inválido" };
+          const choque = await citasClienteService.puedeA(chat, fecha, { duracionMs: 3 * 3_600_000 });
+          if (!choque.ok)
+            return {
+              ok: false,
+              motivo: "ya_tiene_esa_hora",
+              yaTiene: choque.choca,
+              siguiente: "Dile que a esa hora ya tiene esa cita con nosotros y que no puede estar en las dos. Ofrécele otro horario o mover la que ya tiene.",
+            };
           const r = await atencionClienteService.reservarProduccion(chat, fecha);
           return r.ok
             ? { ok: true, cuando: r.cuando, con: equipoAtencionService.nombres("produccion"), correos: equipoAtencionService.correos("produccion") }
@@ -693,6 +718,14 @@ Reglas:
         execute: async ({ tema, inicio }: { tema: "guiones" | "atencion"; inicio: string }) => {
           const fecha = new Date(inicio);
           if (Number.isNaN(fecha.getTime())) return { ok: false, motivo: "horario inválido" };
+          const choque = await citasClienteService.puedeA(chat, fecha);
+          if (!choque.ok)
+            return {
+              ok: false,
+              motivo: "ya_tiene_esa_hora",
+              yaTiene: choque.choca,
+              siguiente: "Dile que a esa hora ya tiene esa cita con nosotros y que no puede estar en las dos. Ofrécele otro horario o mover la que ya tiene.",
+            };
           const r = await atencionClienteService.reservarReunion(chat, tema, fecha);
           return r.ok
             ? { ok: true, cuando: r.cuando, con: equipoAtencionService.nombres(tema), correos: equipoAtencionService.correos(tema) }
