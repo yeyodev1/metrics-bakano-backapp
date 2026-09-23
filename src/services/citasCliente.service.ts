@@ -15,7 +15,11 @@ import { ORDEN_SESIONES, SESIONES_ONBOARDING, type SesionOnboarding } from "./on
  * Citas del cliente: verlas, moverlas y cancelarlas desde Telegram.
  *
  * Reglas (acordadas con direccion):
- * - Solo hasta 48 h antes de la cita. Mas cerca, lo decide el responsable.
+ * - El cliente cambia su cita por su cuenta hasta DOS DIAS antes. Mas cerca
+ *   no se toca el calendario a ciegas: se le dice claro y se le avisa a todos
+ *   los encargados de esa cita (DM, correo y notificacion) para que lo
+ *   coordinen con el. Antes simplemente se le decia que no y el cliente se
+ *   quedaba con el problema en la mano.
  * - Cancelar nunca borra: la cita queda "cancelled" en el CRM, con historial.
  * - Solo se tocan citas que el sistema sabe que son de ESE entorno: la
  *   produccion por su Planning, las sesiones por onboardingSesiones y las
@@ -27,7 +31,8 @@ import { ORDEN_SESIONES, SESIONES_ONBOARDING, type SesionOnboarding } from "./on
  *   el cliente toca el boton o confirma en un mensaje posterior.
  */
 
-const PLAZO_CAMBIOS_MS = 48 * 3_600_000;
+/** Debajo de esto el cambio es "sobre la hora": se avisa a todo el equipo de la cita. */
+const PLAZO_URGENTE_MS = 48 * 3_600_000;
 const ANTICIPACION_MS = 2 * 3_600_000;
 const ANTICIPACION_PRODUCCION_MS = 48 * 3_600_000;
 const VENTANA_MOVER_DIAS = 30;
@@ -133,8 +138,65 @@ class CitasClienteService {
     return citas.sort((a, b) => a.inicio.getTime() - b.inicio.getTime());
   }
 
+  /** Falta menos de dos días: ya no lo cambia él solo, lo coordina el equipo. */
+  esUrgente(cita: CitaCliente): boolean {
+    return cita.inicio.getTime() - Date.now() < PLAZO_URGENTE_MS;
+  }
+
+  /** Lo puede cambiar por su cuenta: falta más de dos días. */
   editable(cita: CitaCliente): boolean {
-    return cita.inicio.getTime() - Date.now() >= PLAZO_CAMBIOS_MS;
+    return !this.esUrgente(cita) && cita.inicio.getTime() > Date.now();
+  }
+
+  /**
+   * Sobre la hora no se toca el calendario: se le avisa a TODOS los encargados
+   * de esa cita (y a atención) para que lo coordinen con el cliente. Dirección
+   * solo si de verdad hace falta, y eso lo decide la IA.
+   */
+  async solicitarCambio(
+    chat: ITelegramChat,
+    ref: string,
+    accion: "mover" | "cancelar",
+    motivo?: string,
+    avisarDireccion = false
+  ): Promise<{ ok: boolean; motivo?: string; con?: string; correos?: string[]; cuando?: string; etiqueta?: string }> {
+    const cita = (await this.listar(chat)).find((c) => c.ref === ref);
+    if (!cita) return { ok: false, motivo: "no_encontrada" };
+
+    const cliente = await atencionClienteService.datosCliente(chat);
+    const titulo = `⚠️ SOBRE LA HORA · ${cliente.entorno} quiere ${accion} su ${cita.etiqueta.toLowerCase()} del ${fechaEcuador(cita.inicio)}`;
+    const detalle =
+      `${cliente.nombre} lo pidió por Telegram y faltan menos de dos días, así que NO se tocó el calendario.\n` +
+      (motivo ? `Motivo: ${motivo}\n` : "") +
+      `\nCoordínenlo con el cliente y muevan o cancelen la cita en el CRM si corresponde.`;
+
+    const correos = [...new Set([
+      ...cita.correos,
+      ...equipoAtencionService.correos("atencion"),
+      ...(avisarDireccion ? ["dquimi@bakano.ec", "dreyes@bakano.ec"] : []),
+    ])];
+    const internos = await models.users.find({ email: { $in: correos }, isActive: true }).select("_id").lean();
+
+    await Promise.allSettled([
+      slackService.avisarEquipo({ titulo, detalle, correos }),
+      ...correos.map((c) => slackService.mensajeDirecto(c, titulo, detalle)),
+      ...internos.map((u) =>
+        notificationService.create(u._id as Types.ObjectId, "solicitud_cliente", titulo, detalle, { workspaceId: chat.workspaceId! })
+      ),
+      resendService.sendSolicitudClienteEmail({
+        to: correos,
+        tema: `cambio de ${cita.etiqueta.toLowerCase()} sobre la hora`,
+        workspaceName: cliente.entorno,
+        clienteNombre: cliente.nombre,
+        clienteEmail: cliente.email,
+        telegramUsername: chat.telegramUsername,
+        mensaje: detalle,
+        asunto: titulo,
+        encabezado: titulo,
+      }),
+    ]);
+
+    return { ok: true, con: cita.con, correos: cita.correos, cuando: fechaEcuador(cita.inicio), etiqueta: cita.etiqueta };
   }
 
   private async ventanaMover(chat: ITelegramChat, cita: CitaCliente): Promise<{ desde: Date; calendario: string }> {
@@ -158,7 +220,7 @@ class CitasClienteService {
   async horariosParaMover(chat: ITelegramChat, ref: string): Promise<{ cita?: CitaCliente; horarios: Date[]; motivo?: string }> {
     const cita = (await this.listar(chat)).find((c) => c.ref === ref);
     if (!cita) return { horarios: [], motivo: "no_encontrada" };
-    if (!this.editable(cita)) return { cita, horarios: [], motivo: "fuera_de_plazo" };
+    if (this.esUrgente(cita)) return { cita, horarios: [], motivo: "sobre_la_hora" };
     if (!cita.calendarId && cita.tipo !== "produccion") return { cita, horarios: [], motivo: "sin_calendario" };
     const { desde, calendario } = await this.ventanaMover(chat, cita);
     try {
@@ -170,10 +232,9 @@ class CitasClienteService {
     }
   }
 
-  async cancelar(chat: ITelegramChat, ref: string, motivoCliente?: string): Promise<ResultadoCambio> {
+  async cancelar(chat: ITelegramChat, ref: string, motivoCliente?: string, avisarDireccion = false): Promise<ResultadoCambio> {
     const cita = (await this.listar(chat)).find((c) => c.ref === ref);
     if (!cita) return { ok: false, motivo: "no_encontrada" };
-    if (!this.editable(cita)) return { ok: false, motivo: "fuera_de_plazo", con: cita.con, correos: cita.correos };
     if (!(await atencionClienteService.tomarCandado(chat))) return { ok: false, motivo: "en_curso" };
 
     try {
@@ -190,19 +251,18 @@ class CitasClienteService {
         }
       }
       await this.reflejar(chat, cita, "cancelada");
-      await this.avisar(chat, cita, "cancelada", undefined, motivoCliente);
+      await this.avisar(chat, cita, "cancelada", undefined, motivoCliente, avisarDireccion);
       return { ok: true, accion: "cancelada", cita: cita.etiqueta, antes: fechaEcuador(cita.inicio), con: cita.con };
     } finally {
       await atencionClienteService.soltarCandado(chat);
     }
   }
 
-  async reprogramar(chat: ITelegramChat, ref: string, nuevoInicio: Date): Promise<ResultadoCambio> {
+  async reprogramar(chat: ITelegramChat, ref: string, nuevoInicio: Date, avisarDireccion = false): Promise<ResultadoCambio> {
     if (Number.isNaN(nuevoInicio.getTime())) return { ok: false, motivo: "horario_invalido" };
     const opciones = await this.horariosParaMover(chat, ref);
     const cita = opciones.cita;
     if (!cita) return { ok: false, motivo: "no_encontrada" };
-    if (opciones.motivo === "fuera_de_plazo") return { ok: false, motivo: "fuera_de_plazo", con: cita.con, correos: cita.correos };
     // Solo un horario que el sistema ofrecio: respeta la regla y esta libre.
     if (!opciones.horarios.some((h) => Math.abs(h.getTime() - nuevoInicio.getTime()) < 60_000)) {
       return { ok: false, motivo: "horario_no_disponible", con: cita.con, correos: cita.correos };
@@ -222,7 +282,7 @@ class CitasClienteService {
         }
       }
       await this.reflejar(chat, cita, "reprogramada", nuevoInicio);
-      await this.avisar(chat, cita, "reprogramada", nuevoInicio);
+      await this.avisar(chat, cita, "reprogramada", nuevoInicio, undefined, avisarDireccion);
       return {
         ok: true,
         accion: "reprogramada",
@@ -242,11 +302,11 @@ class CitasClienteService {
    */
   async proponer(
     chat: ITelegramChat,
-    cambio: { accion: "cancelar" | "reprogramar"; ref: string; inicio?: string; motivo?: string }
+    cambio: { accion: "cancelar" | "reprogramar"; ref: string; inicio?: string; motivo?: string; avisarDireccion?: boolean }
   ): Promise<{ ok: true; resumen: string } | { ok: false; motivo: string; con?: string; correos?: string[] }> {
     const cita = (await this.listar(chat)).find((c) => c.ref === cambio.ref);
     if (!cita) return { ok: false, motivo: "no_encontrada" };
-    if (!this.editable(cita)) return { ok: false, motivo: "fuera_de_plazo", con: cita.con, correos: cita.correos };
+    if (this.esUrgente(cita)) return { ok: false, motivo: "sobre_la_hora", con: cita.con, correos: cita.correos };
 
     let nuevo: Date | undefined;
     if (cambio.accion === "reprogramar") {
@@ -258,14 +318,15 @@ class CitasClienteService {
       }
     }
     const resumen =
-      cambio.accion === "cancelar"
+      (cambio.accion === "cancelar"
         ? `Cancelar ${cita.etiqueta.toLowerCase()} con ${cita.con} del ${fechaEcuador(cita.inicio)}`
-        : `Mover ${cita.etiqueta.toLowerCase()} con ${cita.con} del ${fechaEcuador(cita.inicio)} al ${fechaEcuador(nuevo!)}`;
+        : `Mover ${cita.etiqueta.toLowerCase()} con ${cita.con} del ${fechaEcuador(cita.inicio)} al ${fechaEcuador(nuevo!)}`);
     const pendiente = {
       accion: cambio.accion,
       ref: cambio.ref,
       inicio: nuevo,
       motivo: cambio.motivo?.slice(0, 500),
+      avisarDireccion: cambio.avisarDireccion === true,
       resumen,
       creadoEn: new Date(),
     };
@@ -297,7 +358,9 @@ class CitasClienteService {
     );
     if (!tomado.modifiedCount) return { ok: false, motivo: "en_curso" };
     chat.cambioPendiente = undefined;
-    return p.accion === "cancelar" ? this.cancelar(chat, p.ref, p.motivo) : this.reprogramar(chat, p.ref, new Date(p.inicio!));
+    return p.accion === "cancelar"
+      ? this.cancelar(chat, p.ref, p.motivo, p.avisarDireccion === true)
+      : this.reprogramar(chat, p.ref, new Date(p.inicio!), p.avisarDireccion === true);
   }
 
   async descartar(chat: ITelegramChat): Promise<void> {
@@ -315,11 +378,9 @@ class CitasClienteService {
     if (!evento) return { ok: false, motivo: "no_encontrada_en_crm" };
     if (CANCELADAS.includes(String(evento.appointmentStatus || "").toLowerCase())) return { ok: false, motivo: "ya_cancelada" };
     if (cita.calendarId && evento.calendarId && evento.calendarId !== cita.calendarId) return { ok: false, motivo: "no_coincide" };
+    // La hora real del CRM manda (el equipo pudo moverla) y se usa en los avisos.
     const real = evento.startTime ? new Date(evento.startTime) : null;
-    if (real && !Number.isNaN(real.getTime())) {
-      cita.inicio = real;
-      if (!this.editable(cita)) return { ok: false, motivo: "fuera_de_plazo" };
-    }
+    if (real && !Number.isNaN(real.getTime())) cita.inicio = real;
     return { ok: true, motivo: "" };
   }
 
@@ -374,27 +435,49 @@ class CitasClienteService {
    * correo y notificacion al equipo: ahi solo Slack, para no duplicar. Al
    * cancelarla el sync no avisa (la encuentra ya cancelada): van todos.
    */
-  private async avisar(chat: ITelegramChat, cita: CitaCliente, accion: "cancelada" | "reprogramada", nuevo?: Date, motivoCliente?: string) {
+  private async avisar(
+    chat: ITelegramChat,
+    cita: CitaCliente,
+    accion: "cancelada" | "reprogramada",
+    nuevo?: Date,
+    motivoCliente?: string,
+    avisarDireccion = false
+  ) {
     const cliente = await atencionClienteService.datosCliente(chat);
+    const urgente = this.esUrgente(cita);
     const titulo =
-      accion === "cancelada"
-        ? `🗓️ ${cliente.entorno} canceló su ${cita.etiqueta.toLowerCase()} del ${fechaEcuador(cita.inicio)}`
-        : `🗓️ ${cliente.entorno} movió su ${cita.etiqueta.toLowerCase()} al ${fechaEcuador(nuevo!)}`;
+      (urgente ? "⚠️ SOBRE LA HORA · " : "🗓️ ") +
+      (accion === "cancelada"
+        ? `${cliente.entorno} canceló su ${cita.etiqueta.toLowerCase()} del ${fechaEcuador(cita.inicio)}`
+        : `${cliente.entorno} movió su ${cita.etiqueta.toLowerCase()} al ${fechaEcuador(nuevo!)}`);
     const detalle =
       `${cliente.nombre} lo hizo por Telegram.` +
       (accion === "reprogramada" ? ` Antes: ${fechaEcuador(cita.inicio)}.` : "") +
       (motivoCliente ? `\nMotivo: ${motivoCliente}` : "") +
+      (urgente ? "\n\nFaltaban menos de 48 horas: hay que reacomodar la agenda." : "") +
       "\nYa quedó en el calendario del CRM.";
 
-    const tareas: Promise<unknown>[] = [slackService.avisarEquipo({ titulo, detalle, correos: cita.correos })];
-    if (cita.tipo !== "produccion" || accion === "cancelada") {
-      const internos = await models.users.find({ email: { $in: cita.correos }, isActive: true }).select("_id").lean();
+    // Sobre la hora avisa a TODOS los de esa cita y a atención (Genesis).
+    // Dirección solo si hace falta de verdad: eso lo decide la IA.
+    const correos = [...new Set([
+      ...cita.correos,
+      ...(urgente ? equipoAtencionService.correos("atencion") : []),
+      ...(avisarDireccion ? ["dquimi@bakano.ec", "dreyes@bakano.ec"] : []),
+    ])];
+
+    const tareas: Promise<unknown>[] = [slackService.avisarEquipo({ titulo, detalle, correos })];
+    if (urgente) {
+      // Un DM llega; un mensaje en el canal a esta altura puede no verse.
+      tareas.push(...correos.map((c) => slackService.mensajeDirecto(c, titulo, detalle)));
+    }
+    if (cita.tipo !== "produccion" || accion === "cancelada" || urgente) {
+      const internos = await models.users.find({ email: { $in: correos }, isActive: true }).select("_id").lean();
       tareas.push(
         ...internos.map((u) =>
           notificationService.create(u._id as Types.ObjectId, "reunion_agendada", titulo, detalle, { workspaceId: chat.workspaceId! })
         ),
         resendService.sendSolicitudClienteEmail({
-          to: cita.correos,
+          to: correos,
           tema: cita.etiqueta,
           workspaceName: cliente.entorno,
           clienteNombre: cliente.nombre,

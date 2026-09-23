@@ -10,6 +10,16 @@ import { Schema, model, Document, Types } from "mongoose";
  */
 export type GravedadIncidente = "molesto" | "angustiado" | "en_peligro";
 export type EstadoIncidente = "abierto" | "tomado" | "cerrado";
+/** Cada cosa que le pasó al incidente, para poder reconstruir la historia. */
+export type AccionIncidente = "abierto" | "asignado" | "tomado" | "cerrado" | "reabierto" | "recordatorio" | "nota";
+
+export interface EventoIncidente {
+  accion: AccionIncidente;
+  porNombre: string;
+  porUserId?: Types.ObjectId;
+  detalle?: string;
+  en: Date;
+}
 
 export interface IIncidente extends Document {
   workspaceId: Types.ObjectId;
@@ -30,6 +40,10 @@ export interface IIncidente extends Document {
   fueraDeHorario: boolean;
 
   estado: EstadoIncidente;
+  /** A quién se le asignó a dedo (puede no ser el responsable por tema). */
+  asignadoA?: { userId: Types.ObjectId; nombre: string; email: string; en: Date; porNombre: string };
+  /** Todo lo que pasó, en orden. Nunca se borra nada de aquí. */
+  historial: EventoIncidente[];
   tomadoPor?: { userId: Types.ObjectId; nombre: string; en: Date };
   cerradoPor?: { userId: Types.ObjectId; nombre: string; en: Date };
   nota?: string;
@@ -62,6 +76,26 @@ const IncidenteSchema = new Schema<IIncidente>(
     fueraDeHorario: { type: Boolean, default: false },
 
     estado: { type: String, enum: ["abierto", "tomado", "cerrado"], default: "abierto" },
+    asignadoA: {
+      userId: { type: Schema.Types.ObjectId, ref: "User" },
+      nombre: { type: String, trim: true },
+      email: { type: String, trim: true, lowercase: true },
+      en: { type: Date },
+      porNombre: { type: String, trim: true },
+    },
+    historial: {
+      type: [
+        {
+          _id: false,
+          accion: { type: String, enum: ["abierto", "asignado", "tomado", "cerrado", "reabierto", "recordatorio", "nota"] },
+          porNombre: { type: String, trim: true },
+          porUserId: { type: Schema.Types.ObjectId, ref: "User" },
+          detalle: { type: String, trim: true, maxlength: 2000 },
+          en: { type: Date, default: Date.now },
+        },
+      ],
+      default: [],
+    },
     tomadoPor: {
       userId: { type: Schema.Types.ObjectId, ref: "User" },
       nombre: { type: String, trim: true },

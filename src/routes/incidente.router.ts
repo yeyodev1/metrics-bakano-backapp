@@ -15,16 +15,49 @@ incidenteRouter.use(authMiddleware, internalOrSuperadminMiddleware);
 
 incidenteRouter.get("/", async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const { estado, workspaceId, mios, limite } = req.query as Record<string, string>;
+    const { estado, workspaceId, mios, buscar, pagina, limite } = req.query as Record<string, string>;
     const datos = await incidentesService.listar({
       estado,
       workspaceId,
       correo: req.user?.email,
       mios: mios === "true",
+      buscar,
+      pagina: pagina ? Number(pagina) : undefined,
       limite: limite ? Number(limite) : undefined,
     });
     res.status(200).send(datos);
   } catch (error) {
+    next(error);
+  }
+});
+
+/** El equipo al que se le puede asignar un caso. */
+incidenteRouter.get("/equipo", async (_req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    res.status(200).send({ equipo: await incidentesService.equipo() });
+  } catch (error) {
+    next(error);
+  }
+});
+
+incidenteRouter.patch("/:id/asignar", async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const incidente = await incidentesService.asignar(
+      req.params["id"] as string,
+      req.body?.userId,
+      req.user as any,
+      req.body?.nota
+    );
+    res.status(200).send({ message: "Caso asignado.", incidente });
+  } catch (error: any) {
+    if (error.message === "NOT_FOUND" || error.message === "INVALID_ID") {
+      res.status(404).send({ message: "Incidente no encontrado." });
+      return;
+    }
+    if (error.message === "USUARIO_NO_ENCONTRADO") {
+      res.status(404).send({ message: "Esa persona no está en el equipo." });
+      return;
+    }
     next(error);
   }
 });

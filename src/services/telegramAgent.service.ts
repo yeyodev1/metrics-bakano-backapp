@@ -378,7 +378,10 @@ Producciones (grabaciones):
 
 Mover o cancelar citas (producción, sesiones del onboarding y reuniones):
 - Usa verMisCitas para ver sus citas. Solo puedes tocar las que salen ahí.
-- Solo se pueden mover o cancelar hasta 48 horas antes. Si falta menos, no lo hagas: dile que lo coordina directo con el responsable, dale su correo y pásale el mensaje con pasarMensajeAlEquipo.
+- REGLA CLARA, dila sin rodeos: el cliente puede mover o cancelar por su cuenta SOLO hasta 2 días antes (48 horas). Si falta menos, tú NO tocas el calendario.
+- Si falta menos de 2 días (sePuedeCambiar en false, o te sale "sobre_la_hora"): dile con todas sus letras que ya está dentro de los 2 días, usa avisarCambioSobreLaHora para avisarle a todo el equipo de esa cita, y cuéntale que ellos lo coordinan con él hoy mismo. No le prometas que ya quedó movida.
+- Siempre que hables de una cita (la agendas, la mueves, la cancelas o avisas), pídele que revise su planificación en Metrics para que no se le cruce nada, y recuérdale la regla de los 2 días.
+- Los avisos van a los encargados de esa cita. A dirección (Denisse Quimi y Diego Reyes) NO se les avisa por un cambio normal: solo pasa avisarDireccion en true si el cliente está muy molesto, amenaza con irse o es algo grave de verdad.
 - Antes de cancelar, sugiere mover: casi siempre conviene más. Si igual quiere cancelar, pregúntale el motivo.
 - Para mover: verHorariosParaMover, ofrece 3 o 4 horarios y, cuando elija uno, llama reprogramarCita. Eso NO la mueve todavía: repítele la cita, la fecha actual y la nueva y pídele que confirme (le aparecen botones).
 - Para cancelar: cuando quede claro que quiere cancelar, llama cancelarCita. Eso NO la cancela todavía: repítele qué cita y qué fecha se cancela y pídele que confirme (le aparecen botones).
@@ -696,7 +699,7 @@ Reglas:
 
       verMisCitas: {
         description:
-          "Citas futuras del cliente que se pueden gestionar (producción, sesiones del onboarding y reuniones), con su ref, con quién y si todavía se pueden mover o cancelar (hasta 48 h antes).",
+          "Citas futuras del cliente (producción, sesiones del onboarding y reuniones), con su ref, con quién y si él todavía las puede cambiar por su cuenta (solo hasta 2 días antes).",
         inputSchema: z.object({}),
         execute: async () => {
           const citas = await citasClienteService.listar(chat);
@@ -709,6 +712,7 @@ Reglas:
               con: c.con,
               correos: c.correos,
               sePuedeCambiar: citasClienteService.editable(c),
+              sobreLaHora: citasClienteService.esUrgente(c),
             })),
           };
         },
@@ -721,8 +725,14 @@ Reglas:
         execute: async ({ ref }: { ref: string }) => {
           const r = await citasClienteService.horariosParaMover(chat, ref);
           if (!r.cita) return { ok: false, motivo: "No encontré esa cita. Usa verMisCitas." };
-          if (r.motivo === "fuera_de_plazo")
-            return { ok: false, motivo: "Faltan menos de 48 horas: ya no se puede mover desde aquí.", responsable: r.cita.con, correos: r.cita.correos };
+          if (r.motivo === "sobre_la_hora")
+            return {
+              ok: false,
+              motivo: "sobre_la_hora",
+              explicacion: "Falta menos de 2 días: él ya no la mueve por su cuenta. Usa avisarCambioSobreLaHora.",
+              responsable: r.cita.con,
+              correos: r.cita.correos,
+            };
           return {
             ok: true,
             cita: r.cita.etiqueta,
@@ -755,11 +765,40 @@ Reglas:
         inputSchema: z.object({
           ref: z.string().describe("ref exacta de verMisCitas"),
           motivo: z.string().nullish().describe("Por qué cancela, con sus palabras"),
+          avisarDireccion: z
+            .boolean()
+            .nullish()
+            .describe("true SOLO si es grave (cliente muy molesto o en riesgo de irse): avisa también a Denisse y Diego"),
         }),
-        execute: async ({ ref, motivo }: { ref: string; motivo?: string | null }) => {
-          const r = await citasClienteService.proponer(chat, { accion: "cancelar", ref, motivo: motivo ?? undefined });
+        execute: async ({ ref, motivo, avisarDireccion }: { ref: string; motivo?: string | null; avisarDireccion?: boolean | null }) => {
+          const r = await citasClienteService.proponer(chat, {
+            accion: "cancelar",
+            ref,
+            motivo: motivo ?? undefined,
+            avisarDireccion: avisarDireccion === true,
+          });
           if (r.ok && "resumen" in r) turno.propuesta = true;
           return r.ok ? { ...r, siguiente: "Pídele que confirme con el botón o respondiéndote que sí." } : r;
+        },
+      },
+
+      avisarCambioSobreLaHora: {
+        description:
+          "Cuando la cita es en menos de 2 días y el cliente quiere moverla o cancelarla: avisa a TODOS los encargados de esa cita para que lo coordinen con él. No toca el calendario.",
+        inputSchema: z.object({
+          ref: z.string().describe("ref exacta de verMisCitas"),
+          accion: z.enum(["mover", "cancelar"]),
+          motivo: z.string().nullish().describe("Por qué lo necesita, con sus palabras"),
+          avisarDireccion: z
+            .boolean()
+            .nullish()
+            .describe("true SOLO si es grave (cliente muy molesto o en riesgo de irse): avisa también a Denisse y Diego"),
+        }),
+        execute: async ({ ref, accion, motivo, avisarDireccion }: { ref: string; accion: "mover" | "cancelar"; motivo?: string | null; avisarDireccion?: boolean | null }) => {
+          const r = await citasClienteService.solicitarCambio(chat, ref, accion, motivo ?? undefined, avisarDireccion === true);
+          return r.ok
+            ? { ...r, siguiente: "Dile que ya avisaste a todo el equipo de esa cita, que lo coordinan hoy con él, y recuérdale la regla de los 2 días y que revise su planificación." }
+            : r;
         },
       },
 
