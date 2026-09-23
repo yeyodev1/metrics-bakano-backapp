@@ -1,6 +1,7 @@
 import express, { Application } from "express";
 import authRouter from "./auth.router";
 import workspaceRouter from "./workspace.router";
+import { incidenteRouter } from "./incidente.router";
 import metaRouter from "./meta.router";
 import { recibirEventoResend } from "../controllers/resendWebhook.controller";
 import adminRouter from "./admin.router";
@@ -37,6 +38,7 @@ function routerApi(app: Application) {
   app.use("/api", router);
 
   router.use("/auth", authRouter);
+  router.use("/incidentes", incidenteRouter);
   router.use("/workspaces", workspaceRouter);
   router.use("/meta", metaRouter);
   // Publico por definicion: lo llama Resend, no un usuario con sesion.

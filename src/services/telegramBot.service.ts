@@ -9,6 +9,7 @@ import { onboardingBotService } from "./onboardingBot.service";
 import { perfilClienteService } from "./perfilCliente.service";
 import { onboardingDatosService } from "./onboardingDatos.service";
 import { citasClienteService } from "./citasCliente.service";
+import { equipoEnTexto, DIRECCION } from "./equipoBakano.service";
 import { comoPlata, contextoParaLaIa, facturacionChatService, claveDia, nombreDia, parsearMonto } from "./facturacionChat.service";
 import { archivosClienteService, ETIQUETA_CATEGORIA, type CategoriaRecurso } from "./archivosCliente.service";
 import { revisionGuionesService, type RevisionPendiente } from "./revisionGuiones.service";
@@ -25,6 +26,7 @@ const VERBO_CAMBIO = /\b(mover|muev[eao]|reprogram\w*|cancel\w*|pospon\w*|poster
 const OBJETO_CITA =
   /\b(cita|sesi[oó]n|reuni[oó]n|grabaci[oó]n|producci[oó]n|fecha|hora|d[ií]a|lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bado|domingo|semana)\b|\b(mover|cancelar|reprogramar|posponer|postergar|pasar)la\b/i;
 const pideCambioCita = (texto: string) => VERBO_CAMBIO.test(texto) && OBJETO_CITA.test(texto) || /\b(mover|cancelar|reprogramar|posponer|postergar)la\b/i.test(texto);
+const APP_URL = process.env.APP_URL || "https://metrics.bakano.ec";
 const CORREO_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const CODIGO_MINUTOS = 10;
 const CODIGO_MAX_INTENTOS = 5;
@@ -497,6 +499,7 @@ export class TelegramBotService {
     if (data === "menu:onboarding") return this.mostrarOnboarding(chat);
     if (data === "cita:si" || data === "cita:no") return this.responderCambioCita(chat, data === "cita:si");
     if (data === "citas:ver") return this.mostrarCitas(chat);
+    if (data === "menu:equipo") return this.mostrarEquipo(chat);
     if (data === "fact:ver") return this.mostrarFacturacion(chat);
     if (data.startsWith("sub:")) return this.pedirArchivo(chat, data.slice(4) as CategoriaRecurso);
     if (data === "fact:metricas") {
@@ -569,32 +572,138 @@ export class TelegramBotService {
     return this.mostrarMenu(chat);
   }
 
+  /** El equipo en cadena: quién hace qué y con quién se habla en cada paso. */
+  private async mostrarEquipo(chat: ITelegramChat): Promise<void> {
+    await telegramService.sendMessage(
+      chat.chatId,
+      "👥 <b>Así trabajamos contigo</b>\n\n" +
+        `${equipoEnTexto()}\n\n` +
+        `${escaparHtml(DIRECCION.texto)}\n\n` +
+        "Escríbeme lo que necesites y yo lo dirijo a quien le toca 💛",
+      [
+        [{ text: "📅 Agendar una reunión", callback_data: "menu:agendar" }],
+        [{ text: "📋 Volver al menú", callback_data: "menu:ver" }],
+      ]
+    );
+  }
+
   private async elegirTema(chat: ITelegramChat, tema: TemaAtencion): Promise<void> {
     if (tema === "guiones") {
       const revision = await revisionGuionesService.pendiente(chat.workspaceId!);
       if (revision && !revision.produccion?.ventanaCerrada) return this.invitarARevisar(chat, revision);
+      return this.mostrarGuiones(chat);
     }
+    if (tema === "produccion") return this.mostrarProducciones(chat);
     chat.tema = tema;
     await chat.save();
 
+    // Producción y guiones tienen su propia pantalla con datos; aquí llega
+    // atención, donde lo útil es que escriba y se lo pasemos.
     const { etiqueta, personas } = EQUIPO_ATENCION[tema];
-    let contexto = "";
-    if (tema === "produccion") {
-      const proxima = await atencionClienteService.proximaProduccion(chat.workspaceId!);
-      contexto = proxima
-        ? `🎬 Tu próxima producción es el <b>${fechaEcuador(proxima)}</b>.\n\n`
-        : "🎬 Todavía no tienes una producción agendada.\n\n";
-    }
     await telegramService.sendMessage(
       chat.chatId,
-      `${contexto}${EMOJI_TEMA[tema]} Para ${etiqueta} te atiende${personas.length > 1 ? "n" : ""} <b>${escaparHtml(equipoAtencionService.nombres(tema))}</b> 💛\n\n` +
+      `${EMOJI_TEMA[tema]} Para ${etiqueta} te atiende${personas.length > 1 ? "n" : ""} <b>${escaparHtml(equipoAtencionService.nombres(tema))}</b> 💛\n\n` +
         "Cuéntame qué necesitas y se lo paso ahora mismo a su correo 📩\n\n" +
         "Prefieres hablarlo en persona? Toca abajo 👇",
       [
-        [{ text: tema === "produccion" ? "🎬 Agendar mi producción" : "📅 Agendar una reunión", callback_data: `ag:${tema}` }],
+        [{ text: "📅 Agendar una reunión", callback_data: `ag:${tema}` }],
+        [{ text: "👥 Quién es quién en Bakano", callback_data: "menu:equipo" }],
         [{ text: "📋 Volver al menú", callback_data: "menu:ver" }],
       ]
     );
+  }
+
+  /** Cuántos guiones hay, en qué estado, y el link para verlos en Metrics. */
+  private async mostrarGuiones(chat: ITelegramChat): Promise<void> {
+    const entradas = await models.planning
+      .find({ workspaceId: chat.workspaceId, title: { $not: /^CANCELADA/ } })
+      .sort({ date: -1 })
+      .limit(3)
+      .select("_id date title")
+      .lean();
+    const planes = entradas.length
+      ? await models.videoPlanning
+          .find({ planningEntryId: { $in: entradas.map((e) => e._id) } })
+          .select("planningEntryId items listaParaCliente")
+          .lean()
+      : [];
+
+    const botones: InlineButton[][] = [];
+    const lineas: string[] = [];
+    for (const e of entradas) {
+      const plan = planes.find((p) => String(p.planningEntryId) === String(e._id));
+      const total = plan?.items?.length ?? 0;
+      if (!total) continue;
+      const aprobados = (plan?.items || []).filter((i: any) => i.clienteAprobacion === "APROBADO").length;
+      lineas.push(
+        `📝 <b>${total} guiones</b> · producción del ${fechaEcuador(e.date)}\n` +
+          `     ${aprobados} aprobados · ${plan?.listaParaCliente ? "listos para tu revisión" : "en preparación"}`
+      );
+      if (plan?.listaParaCliente) {
+        botones.push([
+          {
+            text: `📝 Ver los ${total} guiones en Metrics`,
+            url: `${APP_URL}/app/workspaces/${chat.workspaceId}/planning/${e._id}/video-planning/client`,
+          },
+        ]);
+      }
+    }
+
+    botones.push([{ text: "📅 Ver mi calendario", url: `${APP_URL}/app/workspaces/${chat.workspaceId}/planning` }]);
+    botones.push([{ text: "📅 Agendar reunión con Ariana", callback_data: "ag:guiones" }], [{ text: "📋 Volver al menú", callback_data: "menu:ver" }]);
+
+    await telegramService.sendMessage(
+      chat.chatId,
+      lineas.length
+        ? `📝 <b>Tus guiones</b>\n\n${lineas.join("\n\n")}\n\n` +
+            `Los escribe <b>${escaparHtml(equipoAtencionService.nombres("guiones"))}</b> a partir de tu estrategia. ` +
+            "Puedes verlos en Metrics, o decirme por aquí qué cambiarías y yo se lo paso."
+        : "📝 Todavía no tienes guiones cargados.\n\n" +
+            `Los escribe <b>${escaparHtml(equipoAtencionService.nombres("guiones"))}</b> después de tu sesión de estrategia y de tu producción. ` +
+            "Apenas estén listos te aviso por aquí para que los revises.",
+      botones
+    );
+  }
+
+  /** Si hay producciones o no, con el calendario de Metrics a un toque. */
+  private async mostrarProducciones(chat: ITelegramChat): Promise<void> {
+    const ahora = new Date();
+    const [proximas, ultima, estado] = await Promise.all([
+      models.planning
+        .find({ workspaceId: chat.workspaceId, date: { $gte: ahora }, title: { $not: /^CANCELADA/ } })
+        .sort({ date: 1 })
+        .limit(3)
+        .select("date title")
+        .lean(),
+      models.planning
+        .findOne({ workspaceId: chat.workspaceId, date: { $lt: ahora }, title: { $not: /^CANCELADA/ } })
+        .sort({ date: -1 })
+        .select("date cumplida")
+        .lean(),
+      atencionClienteService.estadoProduccion(chat.workspaceId!),
+    ]);
+
+    const lineas = [
+      proximas.length
+        ? proximas.map((p) => `🎬 <b>${fechaEcuador(p.date)}</b>`).join("\n")
+        : "🎬 No tienes ninguna producción agendada.",
+      ultima ? `\nLa última fue el ${fechaEcuador(ultima.date)}${ultima.cumplida ? " y ya quedó grabada ✅" : ""}.` : "",
+      `\nGraban <b>${escaparHtml(equipoAtencionService.nombres("produccion"))}</b>: tu avatar, tus productos y los recursos que hagan falta.`,
+      estado.puedeAgendar && estado.habilitadaDesde
+        ? `\nPuedes agendar la siguiente desde el ${fechaEcuador(estado.habilitadaDesde)}.`
+        : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+    const botones: InlineButton[][] = [
+      [{ text: "📅 Ver mi calendario en Metrics", url: `${APP_URL}/app/workspaces/${chat.workspaceId}/planning` }],
+    ];
+    if (estado.puedeAgendar) botones.push([{ text: "🎬 Agendar mi producción", callback_data: "ag:produccion" }]);
+    else if (proximas.length) botones.push([{ text: "🗓️ Mover o cancelar", callback_data: "citas:ver" }]);
+    botones.push([{ text: "📋 Volver al menú", callback_data: "menu:ver" }]);
+
+    await telegramService.sendMessage(chat.chatId, `🎬 <b>Tus producciones</b>\n\n${lineas}`, botones);
   }
 
   // ── Revision de guiones ────────────────────────────────────────────────────
@@ -1330,6 +1439,7 @@ export class TelegramBotService {
         [{ text: "📝 Revisar mis guiones", callback_data: "menu:guiones" }],
         [{ text: "📅 Agendar una reunión", callback_data: "menu:agendar" }],
         [{ text: "💬 Escribirle a mi equipo", callback_data: "menu:atencion" }],
+        [{ text: "👥 Quién es quién en Bakano", callback_data: "menu:equipo" }],
         [{ text: "🔄 Cambiar de entorno", callback_data: "menu:entorno" }],
       ]
     );
