@@ -772,6 +772,24 @@ export class WorkspaceService {
     return true;
   }
 
+  /**
+   * Borra a cualquier persona desde el panel de superadmin (equipo interno o
+   * usuario de cliente). Antes solo se podia borrar al equipo interno y a los
+   * usuarios de un entorno concreto: una cuenta mal creada se quedaba ahi.
+   * A un superadmin no se le toca desde aqui: eso tiene su propia pantalla.
+   */
+  async deleteGlobalUser(requestingUserId: string, targetUserId: string) {
+    if (!Types.ObjectId.isValid(targetUserId)) throw new Error("INVALID_ID");
+    if (requestingUserId === targetUserId) throw new Error("CANNOT_DELETE_SELF");
+
+    const user = await models.users.findById(targetUserId).select("role email");
+    if (!user) throw new Error("NOT_FOUND");
+    if (user.role === "superadmin") throw new Error("CANNOT_MOD_SUPERADMIN");
+
+    await models.users.findByIdAndDelete(targetUserId);
+    return true;
+  }
+
   // ── Global User Management (Multi-workspace) ─────────────────
 
   async createGlobalUser(payload: CreateGlobalUserPayload) {
