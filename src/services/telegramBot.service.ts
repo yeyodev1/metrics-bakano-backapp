@@ -283,6 +283,15 @@ export class TelegramBotService {
       case "esperando_codigo":
         // Si escribe otro correo, asumimos que se equivoco en el primero.
         if (CORREO_RE.test(texto)) return this.recibirCorreo(chat, texto);
+        // "cambiar correo", "me equivoqué de mail"…: pedirle el correcto en vez
+        // de repetirle que el código tiene 6 números, que es lo que hacía antes.
+        if (/correo|mail|equivoqu|corregir|cambiar/i.test(texto) && !/^\d/.test(texto.trim())) {
+          await telegramService.sendMessage(
+            chat.chatId,
+            "Claro 😊 escríbeme aquí el correo correcto (el que usas en <b>metrics.bakano.ec</b>) y te mando el código ahí."
+          );
+          return;
+        }
         return this.recibirCodigo(chat, texto);
       case "eligiendo_entorno":
         return this.pedirEntorno(chat);
@@ -404,7 +413,7 @@ export class TelegramBotService {
     }
   }
 
-  private async recibirCorreo(chat: ITelegramChat, texto: string, confirmado = false): Promise<void> {
+  private async recibirCorreo(chat: ITelegramChat, texto: string): Promise<void> {
     const correo = texto.toLowerCase().trim();
     if (!CORREO_RE.test(correo)) {
       await telegramService.sendMessage(
@@ -418,25 +427,11 @@ export class TelegramBotService {
       return;
     }
 
-    // Escribio OTRO correo mientras esperaba el codigo: casi siempre es que se
-    // equivoco en el primero (una letra de diferencia). No se cambia a ciegas,
-    // pero tampoco se ignora: se le pregunta cual es el bueno.
-    if (!confirmado && chat.estado === "esperando_codigo" && chat.correoPendiente && correo !== chat.correoPendiente) {
-      chat.correoPropuesto = correo;
-      await chat.save();
-      await telegramService.sendMessage(
-        chat.chatId,
-        "Ojo, para no equivocarme 🙌\n\n" +
-          `El código lo mandé a <b>${escaparHtml(chat.correoPendiente)}</b>\n` +
-          `y ahora me escribiste <b>${escaparHtml(correo)}</b>.\n\n` +
-          "Cuál es el bueno?",
-        [
-          [{ text: "✅ El nuevo, mándalo ahí", callback_data: "mail:ok" }],
-          [{ text: "↩️ El primero estaba bien", callback_data: "mail:no" }],
-        ]
-      );
-      return;
-    }
+    // Escribio OTRO correo mientras esperaba el codigo: se equivoco en el
+    // primero. La correccion se aplica sola y el flujo sigue; el anterior
+    // queda a un boton de distancia por si el equivocado era este.
+    const corrigio = chat.estado === "esperando_codigo" && Boolean(chat.correoPendiente) && correo !== chat.correoPendiente;
+    const anterior = corrigio ? chat.correoPendiente : undefined;
 
     // El limite de reenvio es por correo: si esta corrigiendo el suyo, no se
     // le puede decir "ya te mande uno" y dejarlo esperando un minuto.
@@ -452,7 +447,8 @@ export class TelegramBotService {
     const usuario = await models.users.findOne({ email: correo, isActive: true }).select("name email").lean();
 
     chat.correoPendiente = correo;
-    chat.correoPropuesto = undefined;
+    // Se guarda el anterior para el boton de "no, era el otro".
+    chat.correoPropuesto = anterior;
     chat.codigoHash = hashCodigo(chat.chatId, codigo);
     chat.codigoExpira = new Date(Date.now() + CODIGO_MINUTOS * 60_000);
     chat.codigoEnviadoEn = new Date();
@@ -474,11 +470,19 @@ export class TelegramBotService {
       }
     }
 
+    const botones: InlineButton[][] = [];
+    if (anterior) botones.push([{ text: `↩️ No, era ${anterior.slice(0, 28)}`, callback_data: "mail:no" }]);
+    botones.push([{ text: "✉️ Escribir otro correo", callback_data: "mail:otro" }]);
+
     await telegramService.sendMessage(
       chat.chatId,
-      `Perfecto! 📬 Si <b>${escaparHtml(correo)}</b> tiene cuenta en metrics.bakano.ec, te acabo de enviar un código de 6 dígitos.\n\n` +
-        `Escríbelo aquí 👇 (vence en ${CODIGO_MINUTOS} minutos). Te equivocaste de correo? Solo escribe el correcto.\n\n` +
-        "Si en unos minutos no te llega, revisa el spam. Si tampoco está, ese correo todavía no tiene un <b>entorno creado</b> en metrics.bakano.ec: pídele a tu asesor de Bakano que lo cree o escríbenos a soporte@bakano.ec. Sin entorno no puedo conectarte."
+      (anterior
+        ? `Listo, lo corregí ✅\n\nCambié tu correo a <b>${escaparHtml(correo)}</b> y te mandé ahí el código de 6 dígitos ` +
+          `(el de <s>${escaparHtml(anterior)}</s> ya no sirve).\n\n`
+        : `Perfecto! 📬 Si <b>${escaparHtml(correo)}</b> tiene cuenta en metrics.bakano.ec, te acabo de enviar un código de 6 dígitos.\n\n`) +
+        `Escríbelo aquí 👇 (vence en ${CODIGO_MINUTOS} minutos). Si te volviste a equivocar, solo escribe el correo correcto.\n\n` +
+        "Si en unos minutos no te llega, revisa el spam. Si tampoco está, ese correo todavía no tiene un <b>entorno creado</b> en metrics.bakano.ec: pídele a tu asesor de Bakano que lo cree o escríbenos a soporte@bakano.ec. Sin entorno no puedo conectarte.",
+      botones
     );
   }
 
@@ -535,20 +539,20 @@ export class TelegramBotService {
   private async onBoton(chat: ITelegramChat, data: string): Promise<void> {
     // Corregir el correo pasa ANTES de estar vinculado: si no, el boton
     // reiniciaba el login y el cliente volvia al punto de partida.
-    if (data === "mail:ok") {
-      const nuevo = chat.correoPropuesto;
-      chat.correoPropuesto = undefined;
-      await chat.save();
-      if (!nuevo) return this.reiniciar(chat, PEDIR_CORREO);
-      return this.recibirCorreo(chat, nuevo, true);
-    }
+    // Se arrepintio del cambio: se vuelve al correo anterior y se le manda un
+    // codigo nuevo ahi mismo, sin hacerlo esperar el minuto de reenvio.
     if (data === "mail:no") {
-      const anterior = chat.correoPendiente;
+      const anterior = chat.correoPropuesto;
       chat.correoPropuesto = undefined;
+      chat.codigoEnviadoEn = undefined;
       await chat.save();
+      if (!anterior) return this.reiniciar(chat, PEDIR_CORREO);
+      return this.recibirCorreo(chat, anterior);
+    }
+    if (data === "mail:otro") {
       await telegramService.sendMessage(
         chat.chatId,
-        `Listo, seguimos con <b>${escaparHtml(anterior || "tu correo")}</b> 👌\n\nEscríbeme aquí el código de 6 números que te llegó.`
+        "Claro 😊 escríbeme aquí el correo correcto (el que usas en <b>metrics.bakano.ec</b>) y te mando el código ahí."
       );
       return;
     }
