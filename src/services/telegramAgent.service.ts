@@ -91,7 +91,7 @@ function cargarAi(): Promise<AiSdk> {
 }
 
 const clasificacionSchema = z.object({
-  estado: z.enum(["en_peligro", "molesto", "feliz", "neutral"]),
+  estado: z.enum(["en_peligro", "angustiado", "molesto", "feliz", "neutral"]),
   /** De qué se queja: define a qué responsable se escala. */
   tema: z.enum(TEMAS).catch("atencion"),
   motivo: z.string().default(""),
@@ -206,6 +206,22 @@ class TelegramAgentService {
     if (c) {
       cliente ??= await atencionClienteService.datosCliente(chat).catch(() => null);
       if (cliente) await this.alertarSiHaceFalta(chat, cliente, c, texto);
+
+      // Alguien angustiado no puede recibir "se me trabó, escríbeme de nuevo".
+      // Si la IA no alcanzó a responder, igual se le contesta como persona y
+      // se le dice que el equipo ya está en eso (el aviso ya salió arriba).
+      if (!respuesta && (c.estado === "angustiado" || c.estado === "en_peligro")) {
+        await telegramService
+          .sendMessage(
+            chat.chatId,
+            "Te leo, y entiendo que es urgente 🙏\n\n" +
+              "Ya le avisé a tu equipo de Bakano ahora mismo para que te contacten. " +
+              "Cuéntame mientras qué es lo más urgente y lo sumo al aviso.",
+            [[{ text: "📋 Ver menú", callback_data: "menu:ver" }]]
+          )
+          .catch((error: any) => console.error("[Telegram IA] aviso de urgencia:", error?.message || error));
+        return true;
+      }
     }
     return Boolean(respuesta);
   }
@@ -875,9 +891,10 @@ Reglas:
     const { text } = await generateText({
       model: modelo(),
       system: `Clasificas el ánimo de un cliente de una agencia de marketing según su último mensaje y el contexto. Responde SOLO un JSON válido, sin texto extra:
-{"estado":"en_peligro|molesto|feliz|neutral","tema":"produccion|guiones|atencion","motivo":"...","frase":"frase exacta del cliente que lo muestra","recomendacion":"acción concreta para el equipo"}
+{"estado":"en_peligro|angustiado|molesto|feliz|neutral","tema":"produccion|guiones|atencion","motivo":"...","frase":"frase exacta del cliente que lo muestra","recomendacion":"acción concreta para el equipo"}
 tema: produccion si habla de grabaciones o fechas de producción; guiones si habla de guiones, contenido o videos; atencion para pagos, resultados, contrato o cualquier otra cosa.
 en_peligro: quiere cancelar o pausar el SERVICIO con la agencia (no una cita, sesión o grabación puntual), no ve resultados, siente que pierde dinero, compara con otra agencia, amenaza con irse.
+angustiado: se le nota angustia, ansiedad o miedo: algo urgente que no sale, presión fuerte (una fecha encima, plata comprometida, su jefe o su familia encima), insiste varias veces, pide ayuda con desesperación, escribe en mayúsculas o repite el mismo pedido. No amenaza con irse, pero está pasándola mal y necesita que alguien lo atienda YA.
 molesto: queja, frustración, reclamo por demoras o errores, tono duro.
 feliz: satisfacción clara, agradecimiento entusiasta, buenos resultados.
 neutral: todo lo demás. Ante la duda, neutral.`,
@@ -895,18 +912,32 @@ neutral: todo lo demás. Ante la duda, neutral.`,
   private async alertarSiHaceFalta(chat: ITelegramChat, cliente: DatosCliente, c: Clasificacion, texto: string): Promise<void> {
     try {
       await models.telegramChats.updateOne({ _id: chat._id }, { $set: { ultimoAnimo: { estado: c.estado, motivo: c.motivo, en: new Date() } } });
-      if (c.estado !== "en_peligro" && c.estado !== "molesto") return;
+      if (c.estado !== "en_peligro" && c.estado !== "angustiado" && c.estado !== "molesto") return;
 
+      // Un cliente angustiado o a punto de irse no espera un día: si antes
+      // solo estaba molesto, el aviso vuelve a salir aunque sea el mismo día.
+      const GRAVEDAD: Record<string, number> = { molesto: 1, angustiado: 2, en_peligro: 3 };
       const previa = chat.ultimaAlerta;
-      const empeoro = previa?.estado === "molesto" && c.estado === "en_peligro";
+      const empeoro = GRAVEDAD[c.estado]! > (GRAVEDAD[previa?.estado ?? ""] ?? 0);
       if (previa?.en && Date.now() - new Date(previa.en).getTime() < ALERTA_CADA_MS && !empeoro) return;
 
-      const urgente = c.estado === "en_peligro";
-      const titulo = urgente ? `🔴 URGENTE · ${cliente.entorno} podría irse` : `🟠 ${cliente.entorno} está molesto`;
+      const urgente = c.estado === "en_peligro" || c.estado === "angustiado";
+      const titulo =
+        c.estado === "en_peligro"
+          ? `🔴 URGENTE · ${cliente.entorno} podría irse`
+          : c.estado === "angustiado"
+            ? `🔴 URGENTE · ${cliente.entorno} está angustiado y necesita que lo atiendan`
+            : `🟠 ${cliente.entorno} está molesto`;
       const frase = c.frase || texto.slice(0, 300);
       const tema = c.tema;
       const mensaje = [
-        `${urgente ? "🔴 Cliente en peligro" : "🟠 Cliente molesto"} (detectado por la IA en Telegram)`,
+        `${
+          c.estado === "en_peligro"
+            ? "🔴 Cliente en peligro"
+            : c.estado === "angustiado"
+              ? "🔴 Cliente angustiado: lo detecté yo en la conversación de Telegram y se lo estoy avisando a todo el equipo"
+              : "🟠 Cliente molesto"
+        } (detectado por la IA en Telegram)`,
         `Tema: ${EQUIPO_ATENCION[tema].etiqueta} · responsable: ${equipoAtencionService.nombres(tema)}`,
         "",
         `Frase: “${frase}”`,
@@ -916,14 +947,19 @@ neutral: todo lo demás. Ante la duda, neutral.`,
         `Mensaje completo: “${texto.slice(0, 1000)}”`,
       ].join("\n");
 
-      // Queja fuerte: va directo al responsable del tema y a los superadmins,
-      // todos en el mismo aviso. Los contactos bloqueados los filtra cada canal.
-      const [responsables, superadmins] = await Promise.all([
+      // Molesto va al responsable del tema y a los superadmins. Angustiado o
+      // en peligro va a TODO el equipo interno: correo y notificación en
+      // Metrics, para que alguien lo agarre ya. Los contactos bloqueados los
+      // filtra cada canal.
+      const [responsables, equipo] = await Promise.all([
         equipoAtencionService.usuarios(tema),
-        models.users.find({ role: "superadmin", isActive: true }).select("_id email").lean(),
+        models.users
+          .find({ isActive: true, ...(urgente ? { $or: [{ isInternal: true }, { role: "superadmin" }] } : { role: "superadmin" }) })
+          .select("_id email")
+          .lean(),
       ]);
-      const correos = [...new Set([...equipoAtencionService.correos(tema), ...superadmins.map((u) => u.email).filter(Boolean)])];
-      const ids = [...new Map([...responsables, ...superadmins].map((u) => [String(u._id), u._id])).values()];
+      const correos = [...new Set([...equipoAtencionService.correos(tema), ...equipo.map((u) => u.email).filter(Boolean)])];
+      const ids = [...new Map([...responsables, ...equipo].map((u) => [String(u._id), u._id])).values()];
       await Promise.allSettled([
         ...ids.map((id) =>
           notificationService.create(id as any, "cliente_en_riesgo", titulo, `${cliente.nombre}: “${frase.slice(0, 240)}” · ${c.recomendacion}`, {
@@ -932,7 +968,7 @@ neutral: todo lo demás. Ante la duda, neutral.`,
         ),
         resendService.sendSolicitudClienteEmail({
           to: correos,
-          tema: urgente ? "cliente en peligro" : "cliente molesto",
+          tema: c.estado === "angustiado" ? "cliente angustiado" : urgente ? "cliente en peligro" : "cliente molesto",
           workspaceName: cliente.entorno,
           clienteNombre: cliente.nombre,
           clienteEmail: cliente.email,
