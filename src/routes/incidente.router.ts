@@ -29,6 +29,19 @@ incidenteRouter.get("/", async (req: AuthRequest, res: Response, next: NextFunct
   }
 });
 
+incidenteRouter.get("/:id", async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const incidente = await incidentesService.uno(req.params["id"] as string);
+    if (!incidente) {
+      res.status(404).send({ message: "Ese incidente no existe." });
+      return;
+    }
+    res.status(200).send({ incidente });
+  } catch (error) {
+    next(error);
+  }
+});
+
 incidenteRouter.patch("/:id/tomar", async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const incidente = await incidentesService.tomar(req.params["id"] as string, req.user as any);
