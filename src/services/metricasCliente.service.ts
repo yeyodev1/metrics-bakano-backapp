@@ -40,8 +40,12 @@ class MetricasClienteService {
    * usa para contarle al cliente como le fue, no para exigirle nada.
    */
   async mesCerrado(workspaceId: Types.ObjectId) {
-    const cerrado = await this.mes(workspaceId, -1);
-    const previo = await this.mes(workspaceId, -2);
+    const [cerrado, previo, workspace] = await Promise.all([
+      this.mes(workspaceId, -1),
+      this.mes(workspaceId, -2),
+      models.workspaces.findById(workspaceId).select("metaAds.adAccountId").lean(),
+    ]);
+    const metaConectado = Boolean((workspace as any)?.metaAds?.adAccountId);
     const [anio, mes] = cerrado.mes.split("-").map(Number);
 
     const meta = await models.monthlyTargets.findOne({ workspaceId, year: anio, month: mes }).select("targetAmount").lean();
@@ -62,8 +66,9 @@ class MetricasClienteService {
         timeZone: "UTC",
       }),
       facturacion: cerrado.facturacion,
-      gastoMeta: cerrado.gastoMeta,
-      roas: cerrado.roas,
+      metaConectado,
+      gastoMeta: metaConectado ? cerrado.gastoMeta : 0,
+      roas: metaConectado ? cerrado.roas : null,
       diasRegistrados: cerrado.diasConRegistro,
       diasDelMes: cerrado.diasTranscurridos,
       diasSinRegistrar: cerrado.diasSinRegistro,

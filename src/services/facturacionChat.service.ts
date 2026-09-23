@@ -82,6 +82,8 @@ export function parsearMonto(texto: string): number | null {
 /** Con qué comparar el día para poder decir algo útil, sin inventar. */
 export interface ContextoDelDia {
   totalDia: number;
+  /** Sin cuenta publicitaria conectada no hay gasto ni ROAS de qué hablar. */
+  metaConectado: boolean;
   gastoMeta: number;
   roasDia: number | null;
   /** Promedio diario del mes, sin contar el día que se acaba de registrar. */
@@ -115,8 +117,11 @@ export function contextoParaLaIa(c: ContextoDelDia): Record<string, unknown> {
   const plata = (n: number | null) => (n === null || n === undefined ? null : comoPlata(n));
   return {
     totalDelDia: plata(c.totalDia),
-    gastoEnMeta: c.gastoMeta > 0 ? comoPlata(c.gastoMeta) : null,
-    roasDelDia: c.roasDia,
+    // Sin Meta conectado no se manda ni el gasto ni el ROAS: si van en el
+    // payload, la IA los nombra igual ("gasto $0,00") y confunde al cliente.
+    metaConectado: c.metaConectado,
+    gastoEnMeta: c.metaConectado && c.gastoMeta > 0 ? comoPlata(c.gastoMeta) : null,
+    roasDelDia: c.metaConectado ? c.roasDia : null,
     promedioDiarioDelMes: plata(c.promedioMes),
     diasRegistradosEsteMes: c.diasRegistradosMes,
     totalDelMes: plata(c.totalMes),
@@ -157,10 +162,11 @@ class FacturacionChatService {
     const ec = new Date(fecha.getTime() - 5 * 3_600_000);
     const inicioMes = new Date(Date.UTC(ec.getUTCFullYear(), ec.getUTCMonth(), 1, 5, 0, 0));
 
-    const registros = await models.dailyBilling
-      .find({ workspaceId, date: { $gte: inicioMes, $lte: fecha } })
-      .select("date amount metaSpend")
-      .lean();
+    const [registros, workspace] = await Promise.all([
+      models.dailyBilling.find({ workspaceId, date: { $gte: inicioMes, $lte: fecha } }).select("date amount metaSpend").lean(),
+      models.workspaces.findById(workspaceId).select("metaAds.adAccountId").lean(),
+    ]);
+    const metaConectado = Boolean((workspace as any)?.metaAds?.adAccountId);
 
     const porDia = new Map<string, { monto: number; gasto: number }>();
     for (const e of registros as any[]) {
@@ -178,8 +184,9 @@ class FacturacionChatService {
     const valorDe = (offsetDias: number) => porDia.get(claveDia(new Date(fecha.getTime() - offsetDias * MS_DIA)))?.monto ?? null;
     return {
       totalDia: delDia.monto,
-      gastoMeta: delDia.gasto,
-      roasDia: delDia.gasto > 0 ? Math.round((delDia.monto / delDia.gasto) * 100) / 100 : null,
+      metaConectado,
+      gastoMeta: metaConectado ? delDia.gasto : 0,
+      roasDia: metaConectado && delDia.gasto > 0 ? Math.round((delDia.monto / delDia.gasto) * 100) / 100 : null,
       promedioMes: otros.length ? Math.round((otros.reduce((a, b) => a + b, 0) / otros.length) * 100) / 100 : null,
       diasRegistradosMes: porDia.size,
       totalMes: Math.round(totalMes * 100) / 100,
@@ -251,11 +258,37 @@ class FacturacionChatService {
     }
   }
 
-  /** El bot queda esperando el monto de ese día. */
-  async pedirMonto(chat: ITelegramChat, fecha: Date): Promise<void> {
-    const dato = { fecha: diaEcuador(fecha), pedidoEn: new Date() };
+  /**
+   * El bot queda esperando el monto de ese día. En modo "correccion" es una
+   * ventana abierta después de registrar: si el cliente escribe otra cosa que
+   * no sea un monto, no se le insiste, sigue la conversación normal.
+   */
+  async pedirMonto(chat: ITelegramChat, fecha: Date, modo: "pedido" | "correccion" = "pedido"): Promise<void> {
+    const dato = { fecha: diaEcuador(fecha), pedidoEn: new Date(), modo };
     await models.telegramChats.updateOne({ _id: chat._id }, { $set: { facturacionEsperada: dato } });
     chat.facturacionEsperada = dato;
+  }
+
+  /**
+   * El día del que habla el mensaje ("ayer 300", "el lunes vendí 500"), o null
+   * si no nombra ninguno. Sirve para no registrar en el día equivocado.
+   */
+  diaMencionado(texto: string): Date | null {
+    const t = texto.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    const hoy = diaEcuador(new Date());
+    if (/\bhoy\b/.test(t)) return hoy;
+    if (/\bayer\b/.test(t)) return new Date(hoy.getTime() - MS_DIA);
+    if (/\banteayer\b|\bantier\b/.test(t)) return new Date(hoy.getTime() - 2 * MS_DIA);
+    const dias = ["domingo", "lunes", "martes", "miercoles", "jueves", "viernes", "sabado"];
+    const nombrado = dias.findIndex((d) => new RegExp(`\\b${d}\\b`).test(t));
+    if (nombrado >= 0) {
+      // El más reciente que ya pasó: "el lunes" es el lunes de esta semana.
+      for (let i = 1; i <= 7; i++) {
+        const candidato = new Date(hoy.getTime() - i * MS_DIA);
+        if (new Date(candidato.getTime() - 5 * 3_600_000).getUTCDay() === nombrado) return candidato;
+      }
+    }
+    return null;
   }
 
   /** El día que el bot está esperando, si el pedido sigue vigente. */

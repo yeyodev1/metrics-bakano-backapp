@@ -79,8 +79,9 @@ class ResumenMensualService {
       const datos = {
         mes: r.nombreMes,
         facturacionDelMes: comoPlata(r.facturacion),
-        gastoEnMeta: r.gastoMeta > 0 ? comoPlata(r.gastoMeta) : null,
-        roasDelMes: r.roas,
+        metaConectado: r.metaConectado,
+        gastoEnMeta: r.metaConectado && r.gastoMeta > 0 ? comoPlata(r.gastoMeta) : null,
+        roasDelMes: r.metaConectado ? r.roas : null,
         objetivoDelMes: r.objetivo ? comoPlata(r.objetivo) : null,
         porcentajeDelObjetivo: r.avanceObjetivo,
         cumplioObjetivo: r.cumplioObjetivo,
@@ -102,6 +103,9 @@ class ResumenMensualService {
         (r.diasSinRegistrar > 0
           ? ` Menciona en una línea que quedaron ${r.diasSinRegistrar} días sin registrar y que con eso completo el ROAS sale más fino.`
           : "") +
+        (r.metaConectado
+          ? ""
+          : " Este cliente NO tiene cuenta de Meta conectada: no menciones Meta, ni gasto en pauta, ni ROAS.") +
         " Máximo 6 líneas.";
 
       const chatBase = await models.telegramChats.findOne({ chatId: chats[0] });
@@ -110,7 +114,7 @@ class ResumenMensualService {
         `📊 <b>Cierre de ${r.nombreMes}</b>\n\n` +
         `Facturación: <b>${comoPlata(r.facturacion)}</b>` +
         (r.objetivo ? ` de una meta de ${comoPlata(r.objetivo)} (${r.avanceObjetivo}%)` : "") +
-        (r.roas ? `\nROAS del mes: <b>${r.roas}</b> con ${comoPlata(r.gastoMeta)} en Meta` : "") +
+        (r.metaConectado && r.roas ? `\nROAS del mes: <b>${r.roas}</b> con ${comoPlata(r.gastoMeta)} en Meta` : "") +
         (r.cumplioObjetivo === false ? "\n\nNo llegamos a la meta: este mes tomamos acción en eso 💪" : "") +
         (r.diasSinRegistrar > 0 ? `\n\nQuedaron ${r.diasSinRegistrar} días sin registrar.` : "");
 
