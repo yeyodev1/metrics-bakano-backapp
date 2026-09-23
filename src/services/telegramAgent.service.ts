@@ -92,6 +92,26 @@ function cargarAi(): Promise<AiSdk> {
   return aiSdk;
 }
 
+/**
+ * Red de seguridad por si el clasificador no responde (se corta a los 30 s).
+ * Es tosca a propósito: prefiero abrir un incidente de más que dejar pasar a
+ * un cliente furioso porque el modelo tardó.
+ */
+const SENALES_DE_ALARMA =
+  /\b(furios|indignad|harto|hartа|estafa|verguenza|vergüenza|pesimo|pésimo|nadie responde|no me responden|quiero cancelar|voy a cancelar|me quiero ir|desesperad|angustiad|urgente|urgencia|ayuda ya|por favor ayud)/i;
+
+function animoDeEmergencia(texto: string): Clasificacion | null {
+  if (!SENALES_DE_ALARMA.test(texto)) return null;
+  const seVa = /\b(cancelar|me quiero ir|estafa)/i.test(texto);
+  return {
+    estado: seVa ? "en_peligro" : "molesto",
+    tema: "atencion",
+    motivo: "Detectado por palabras clave: la lectura de ánimo no respondió a tiempo",
+    frase: texto.slice(0, 300),
+    recomendacion: "Contactar al cliente de inmediato: el mensaje suena grave y el análisis automático no alcanzó a correr.",
+  };
+}
+
 const clasificacionSchema = z.object({
   estado: z.enum(["en_peligro", "angustiado", "molesto", "feliz", "neutral"]),
   /** De qué se queja: define a qué responsable se escala. */
@@ -204,7 +224,9 @@ class TelegramAgentService {
     }
 
     // La queja se escala aunque la IA no haya podido responder.
-    const c = await clasificacion;
+    // Si el clasificador no llegó, se mira el texto: un "quiero cancelar" no
+    // se puede perder porque el modelo tardó 30 segundos.
+    const c = (await clasificacion) ?? animoDeEmergencia(texto);
     if (c) {
       cliente ??= await atencionClienteService.datosCliente(chat).catch(() => null);
       if (cliente) await this.alertarSiHaceFalta(chat, cliente, c, texto);
