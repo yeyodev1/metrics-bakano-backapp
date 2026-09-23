@@ -313,6 +313,32 @@ export class TelegramBotService {
           return;
         }
 
+        // Le pedimos el link o el número donde cae la venta: eso se lee antes
+        // que la IA, si no se pierde en la conversación y nunca queda guardado.
+        if (chat.datoEsperado?.campo && chat.workspaceId && texto.trim()) {
+          const campo = chat.datoEsperado.campo;
+          const r = await onboardingDatosService.registrarDatoMarca(chat, campo, texto.trim(), true);
+          if (r.ok) {
+            chat.datoEsperado = undefined;
+            await chat.save();
+            await telegramService.sendMessage(
+              chat.chatId,
+              "Listo, lo guardé en tu perfil de marca ✅\n\nCon eso ya sabemos a dónde mandar a la gente que vea tus videos.",
+              [
+                [{ text: "🚀 Ver mi onboarding", callback_data: "menu:onboarding" }],
+                [{ text: "📋 Volver al menú", callback_data: "menu:ver" }],
+              ]
+            );
+          } else {
+            await telegramService.sendMessage(
+              chat.chatId,
+              `${escaparHtml(String((r as any).motivo || "No pude guardarlo"))}\n\nMándamelo de nuevo, o si todavía no lo tienes lo vemos con el equipo 👇`,
+              [[{ text: "🤝 Todavía no lo sé", callback_data: "venta:nose" }], [{ text: "📋 Volver al menú", callback_data: "menu:ver" }]]
+            );
+          }
+          return;
+        }
+
         const diaEsperado = facturacionChatService.esperando(chat);
         if (diaEsperado && chat.workspaceId) {
           const monto = parsearMonto(texto);
@@ -535,6 +561,10 @@ export class TelegramBotService {
       if (await telegramAgentService.responder(chat, "Quiero contarte de mi negocio para que lo dejes en el sistema")) return;
       return this.mostrarMenu(chat);
     }
+    if (data === "venta:donde") return this.preguntarDondeCaeLaVenta(chat);
+    if (data === "venta:wh") return this.guardarDireccionVenta(chat, "WhatsApp");
+    if (data === "venta:ghl") return this.guardarDireccionVenta(chat, "GHL / Agenda");
+    if (data === "venta:nose") return this.ayudaConLaVenta(chat);
     // cc:m:<ref> mueve · cc:c:<ref> cancela · cs:<epoch>:<ref> elige horario
     if (data.startsWith("cc:m:")) return this.mostrarHorariosParaMover(chat, data.slice(5));
     if (data.startsWith("cc:c:")) return this.pedirConfirmacionCita(chat, { accion: "cancelar", ref: data.slice(5) });
@@ -857,7 +887,12 @@ export class TelegramBotService {
       const accion = ACCION_POR_CHAT[e.clave];
       if (accion) botones.push([{ text: accion.texto, callback_data: accion.data }]);
     }
-    if (faltaContar.length) botones.push([{ text: `✍️ Contarte de mi negocio (${faltaContar.length})`, callback_data: "datos:contar" }]);
+    // Dónde cae la venta tiene su propio botón: sin ese dato los videos no
+    // tienen a dónde mandar a la gente, y preguntarlo suelto no funcionaba.
+    const faltaVenta = faltaContar.some((d) => d.campo === "trafficDirection" || d.campo === "trafficLink");
+    if (faltaVenta) botones.push([{ text: "🎯 Dónde capturo mis ventas", callback_data: "venta:donde" }]);
+    const otrosDatos = faltaContar.filter((d) => d.campo !== "trafficDirection" && d.campo !== "trafficLink");
+    if (otrosDatos.length) botones.push([{ text: `✍️ Contarte de mi negocio (${otrosDatos.length})`, callback_data: "datos:contar" }]);
     botones.push([{ text: "📋 Volver al menú", callback_data: "menu:ver" }]);
 
     const invitacionMeta = faltaEnviar.find((e) => e.clave === "invitacionMeta");
@@ -872,6 +907,65 @@ export class TelegramBotService {
           ? "\n\nTodo eso me lo puedes mandar por aquí mismo con los botones de abajo: yo lo subo a tu entorno. Si ya lo subiste tú, dímelo y le aviso al equipo."
           : ""),
       botones
+    );
+  }
+
+  /**
+   * Dónde cae la venta: el dato que define a dónde mandamos a la gente que ve
+   * los videos. Con botones, no preguntándolo suelto: es una decisión de dos
+   * opciones y el cliente muchas veces no sabe cómo se llama cada una.
+   */
+  private async preguntarDondeCaeLaVenta(chat: ITelegramChat): Promise<void> {
+    await telegramService.sendMessage(
+      chat.chatId,
+      "🎯 <b>Dónde capturas la venta</b>\n\n" +
+        "Cuando alguien vea tu video y quiera comprarte, <b>a dónde lo mandamos?</b>\n\n" +
+        "📱 <b>WhatsApp</b> · te escriben directo a tu número y tú cierras la venta ahí.\n" +
+        "🗓️ <b>GHL / Agenda</b> · agendan una cita contigo en tu calendario y queda registrada en el CRM.\n\n" +
+        "Si no sabes cuál te conviene, dale a “Todavía no lo sé” y lo vemos con el equipo 👇",
+      [
+        [
+          { text: "📱 WhatsApp", callback_data: "venta:wh" },
+          { text: "🗓️ GHL / Agenda", callback_data: "venta:ghl" },
+        ],
+        [{ text: "🤝 Todavía no lo sé", callback_data: "venta:nose" }],
+        [{ text: "📋 Volver al menú", callback_data: "menu:ver" }],
+      ]
+    );
+  }
+
+  private async guardarDireccionVenta(chat: ITelegramChat, eleccion: string): Promise<void> {
+    const r = await onboardingDatosService.registrarDatoMarca(chat, "trafficDirection", eleccion, true);
+    if (!r.ok) return this.preguntarDondeCaeLaVenta(chat);
+    const porWhatsapp = /whats/i.test(eleccion);
+    chat.datoEsperado = { campo: "trafficLink", pedidoEn: new Date() };
+    await chat.save();
+    await telegramService.sendMessage(
+      chat.chatId,
+      `Perfecto, ${porWhatsapp ? "<b>WhatsApp</b>" : "<b>GHL / Agenda</b>"} ✅\n\n` +
+        (porWhatsapp
+          ? "Ahora mándame el <b>número de WhatsApp</b> al que quieres que te escriban, con código de país.\nPor ejemplo: <code>+593 99 123 4567</code>"
+          : "Ahora mándame el <b>link de tu agenda</b> (el de tu calendario o formulario), pegándolo aquí.\nPor ejemplo: <code>https://...</code>") +
+        "\n\nSi todavía no lo tienes, dale al botón y lo armamos con el equipo 👇",
+      [[{ text: "🤝 Todavía no lo tengo", callback_data: "venta:nose" }], [{ text: "📋 Volver al menú", callback_data: "menu:ver" }]]
+    );
+  }
+
+  private async ayudaConLaVenta(chat: ITelegramChat): Promise<void> {
+    const campo = chat.datoEsperado?.campo === "trafficLink" ? "trafficLink" : "trafficDirection";
+    chat.datoEsperado = undefined;
+    await chat.save();
+    const r = await onboardingDatosService.pedirAyudaConDato(chat, campo, "Lo dijo por el botón “Todavía no lo sé” del bot.");
+    await telegramService.sendMessage(
+      chat.chatId,
+      r.ok
+        ? `Tranquilo, esto lo armamos juntos 💛\n\nYa le avisé a <b>${escaparHtml(r.responsable)}</b> y lo dejan listo en <b>${escaparHtml(r.donde)}</b>. ` +
+          "No lo pierdas de vista: sin ese dato los videos no tienen a dónde mandar a la gente, así que es de lo primero que vemos."
+        : "Listo, lo dejo anotado y lo vemos con el equipo 💛",
+      [
+        [{ text: "🚀 Ver mi onboarding", callback_data: "menu:onboarding" }],
+        [{ text: "📋 Volver al menú", callback_data: "menu:ver" }],
+      ]
     );
   }
 

@@ -26,6 +26,7 @@ export function linkEntregable(clave: Entregable, workspaceId: Types.ObjectId | 
 }
 
 const DENISSE = { nombre: "Denisse Quimi", email: "dquimi@bakano.ec" };
+const DAVID = { nombre: "David Robles", email: "drobles@bakano.ec" };
 const JOEL = { nombre: "Joel Jimenez", email: "jjimenez@bakano.ec" };
 
 /**
@@ -74,6 +75,20 @@ export const CAMPOS_MARCA: Record<string, string> = {
   propuestaValor: "Qué lo diferencia de la competencia",
   problemaResuelto: "Qué problema le resuelve a su cliente",
   tono: "Cómo le gusta comunicarse",
+  // Donde cae la venta. Sin esto los videos no tienen a donde mandar a la
+  // gente: es el dato que define si la pauta va a WhatsApp o a la agenda.
+  trafficDirection: "Dónde captura la venta: WhatsApp o GHL/Agenda",
+  trafficLink: "El link o el número de WhatsApp al que llegan sus clientes",
+};
+
+/**
+ * Campos que el cliente muchas veces no sabe todavia (no tiene la agenda
+ * montada, no sabe que link poner). Ahi no se lo deja atascado: lo resuelve
+ * con el equipo en su sesion, y al responsable le llega el aviso.
+ */
+export const AYUDA_CAMPO_MARCA: Record<string, { responsable: { nombre: string; email: string }; donde: string }> = {
+  trafficDirection: { responsable: DAVID, donde: "tu sesión de Configuración de CRM y Metrics" },
+  trafficLink: { responsable: DAVID, donde: "tu sesión de Configuración de CRM y Metrics" },
 };
 
 class OnboardingDatosService {
@@ -125,7 +140,20 @@ class OnboardingDatosService {
       return { ok: false as const, motivo: "ya_tiene_valor", actual, siguiente: "Pregúntale si quiere reemplazarlo; si dice que sí, vuelve a llamar con reemplazar=true." };
     }
     let limpio = String(valor || "").trim().slice(0, 1500);
-    if (campo === "tipoNegocio") {
+    if (campo === "trafficDirection") {
+      const v = limpio.toLowerCase();
+      limpio = /whats|wpp|wasap/.test(v) ? "WHATSAPP" : /ghl|agenda|calendar|crm|cita/.test(v) ? "GHL" : "";
+      if (!limpio) return { ok: false as const, motivo: "trafficDirection debe ser WhatsApp o GHL/Agenda" };
+    } else if (campo === "trafficLink") {
+      // O es un numero de WhatsApp o es un link: cualquier otra cosa no sirve
+      // para pautar y se vuelve un problema recien cuando el anuncio esta vivo.
+      const digitos = limpio.replace(/[^\d]/g, "");
+      const esLink = /^(https?:\/\/|www\.|wa\.me|[\w-]+\.[a-z]{2,})/i.test(limpio);
+      if (!esLink && digitos.length < 9) {
+        return { ok: false as const, motivo: "Necesito un número de WhatsApp con código de país (+593…) o un link completo." };
+      }
+      if (!esLink) limpio = digitos.startsWith("593") ? `+${digitos}` : digitos.length === 10 && digitos.startsWith("0") ? `+593${digitos.slice(1)}` : limpio;
+    } else if (campo === "tipoNegocio") {
       const v = limpio.toLowerCase();
       limpio = /servicio/.test(v) ? "SERVICIOS" : /producto/.test(v) ? "PRODUCTOS" : "";
       if (!limpio) return { ok: false as const, motivo: "tipoNegocio debe ser productos o servicios" };
@@ -143,6 +171,55 @@ class OnboardingDatosService {
       { $set: { [`brandProfile.${campo}`]: limpio, "brandProfile.updatedAt": new Date() } }
     );
     return { ok: true as const, guardado: CAMPOS_MARCA[campo] };
+  }
+
+  /**
+   * El cliente no sabe ese dato. No se lo deja dando vueltas: se le dice quien
+   * lo va a resolver con el y a ese responsable le llega el aviso (Slack, DM,
+   * correo y notificacion en Metrics), una sola vez por campo.
+   */
+  async pedirAyudaConDato(chat: ITelegramChat, campo: string, nota?: string) {
+    const ayuda = AYUDA_CAMPO_MARCA[campo];
+    if (!ayuda) return { ok: false as const, motivo: `ese campo no tiene ayuda del equipo: ${campo}` };
+    const clave = `ayuda_${campo}`;
+    const workspace = await models.workspaces.findById(chat.workspaceId).select("name onboardingEntregables").lean();
+    const yaAvisado = (workspace as any)?.onboardingEntregables?.[clave]?.estado === "declarado";
+
+    await models.workspaces.updateOne(
+      { _id: chat.workspaceId },
+      { $set: { [`onboardingEntregables.${clave}`]: { estado: "declarado", declaradoEn: new Date(), nota: nota?.slice(0, 500) } } }
+    );
+
+    if (!yaAvisado) {
+      const cliente = await atencionClienteService.datosCliente(chat);
+      const titulo = `${cliente.entorno} necesita ayuda con: ${CAMPOS_MARCA[campo]}`;
+      const detalle =
+        `${cliente.nombre} me dijo por Telegram que todavía no lo sabe.\n` +
+        (nota ? `Lo que contó: ${nota}\n` : "") +
+        `\nLe dije que lo resuelven juntos en ${ayuda.donde}. Queda pendiente en su perfil de marca:\n` +
+        `${APP_URL}/app/workspaces/${chat.workspaceId}/brand-profile`;
+      const correos = [ayuda.responsable.email];
+      const internos = await models.users.find({ email: { $in: correos }, isActive: true }).select("_id").lean();
+      await Promise.allSettled([
+        slackService.avisarEquipo({ titulo, detalle, correos }),
+        slackService.mensajeDirecto(ayuda.responsable.email, titulo, detalle),
+        ...internos.map((u) =>
+          notificationService.create(u._id as any, "solicitud_cliente", titulo, detalle, { workspaceId: chat.workspaceId! })
+        ),
+        resendService.sendSolicitudClienteEmail({
+          to: correos,
+          tema: CAMPOS_MARCA[campo],
+          workspaceName: cliente.entorno,
+          clienteNombre: cliente.nombre,
+          clienteEmail: cliente.email,
+          telegramUsername: chat.telegramUsername,
+          mensaje: detalle,
+          asunto: titulo,
+          encabezado: titulo,
+        }),
+      ]);
+    }
+    return { ok: true as const, responsable: ayuda.responsable.nombre, donde: ayuda.donde, yaAvisado };
   }
 
   /** El cliente dice que ya envio algo: queda declarado y se avisa al responsable para verificar. */

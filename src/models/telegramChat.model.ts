@@ -64,6 +64,8 @@ export interface ITelegramChat extends Document {
   archivoEsperado?: { categoria: string; pedidoEn: Date };
   /** El bot pidió el monto de facturación de un día y espera la respuesta. */
   facturacionEsperada?: { fecha: Date; pedidoEn: Date; modo?: "pedido" | "correccion" };
+  /** El bot pidió un dato del perfil de marca por escrito (ej. el link de la venta). */
+  datoEsperado?: { campo: string; pedidoEn: Date };
   /** Cambio de cita propuesto y esperando que el cliente lo confirme. */
   cambioPendiente?: {
     accion: "cancelar" | "reprogramar";
@@ -141,6 +143,10 @@ const TelegramChatSchema = new Schema<ITelegramChat>(
       // campo en el esquema, Mongoose lo descartaba y el bot seguía pidiendo
       // el monto aunque el cliente ya hubiera pasado a otro tema.
       type: { fecha: Date, pedidoEn: Date, modo: String },
+      default: undefined,
+    },
+    datoEsperado: {
+      type: { campo: String, pedidoEn: Date },
       default: undefined,
     },
     cambioPendiente: {

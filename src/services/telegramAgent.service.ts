@@ -5,7 +5,7 @@ import { EQUIPO_ATENCION, equipoAtencionService, type TemaAtencion } from "./equ
 import { atencionClienteService, fechaEcuador, type DatosCliente } from "./atencionCliente.service";
 import { onboardingBotService } from "./onboardingBot.service";
 import { citasClienteService } from "./citasCliente.service";
-import { CAMPOS_MARCA, ENTREGABLES, onboardingDatosService } from "./onboardingDatos.service";
+import { AYUDA_CAMPO_MARCA, CAMPOS_MARCA, ENTREGABLES, onboardingDatosService } from "./onboardingDatos.service";
 import { metricasClienteService } from "./metricasCliente.service";
 import { claveDia, contextoParaLaIa, facturacionChatService, comoPlata } from "./facturacionChat.service";
 import { publicidadClienteService } from "./publicidadCliente.service";
@@ -328,6 +328,8 @@ Onboarding (arranque del cliente):
 Arrancar el onboarding (tú tomas la iniciativa):
 - Si el cliente es nuevo o está en onboarding, apenas termines de responder lo que preguntó, usa verPendientesOnboarding y sigue con lo que falta. No esperes a que él lo pida.
 - Una cosa a la vez, en este orden: agendar la sesión que le toca, luego los datos de su marca que falten y luego los envíos (archivos de marca, facturación, catálogo, invitación a Meta).
+- Dónde captura la venta (trafficDirection y trafficLink): es el dato que define a dónde mandamos a la gente que ve sus videos. Explícaselo así y pregúntale si quiere que le escriban por WhatsApp o que le agenden una cita (GHL / Agenda). Después pídele el número de WhatsApp con código de país o el link de su agenda, y guárdalo con registrarDatoMarca.
+- Si te dice que no sabe, que no lo tiene o que no entiende: NO insistas. Usa pedirAyudaConDato y dile con tranquilidad que el equipo lo arma con él en esa sesión y que ya avisaste al responsable.
 - Datos de marca: pregúntale de forma natural, uno por mensaje (por ejemplo "cuéntame, a quién le vendes?"). Cuando responda algo concreto, guárdalo con registrarDatoMarca usando sus palabras, y confírmale en pocas palabras que quedó en el sistema. Si responde algo vago, pídele un poco más de detalle antes de guardar.
 - Todo lo que entrega va POR LA PLATAFORMA, nunca por correo: pásale el link de SU entorno (el de arriba, ya trae su id) y dile en una línea qué sube ahí. La única excepción es la invitación al portafolio de Meta, que se hace dentro de Meta Business.
 - Puede mandarte los archivos por aquí mismo: dile que los adjunte con el clip 📎 y, si es el logo, que lo envíe como Archivo (no como foto) en PNG, porque Telegram comprime las fotos y el logo pierde el fondo transparente. Tú los guardas solo en su entorno.
@@ -793,6 +795,18 @@ Reglas:
             ? { ...r, siguiente: "Dile que ya avisaste a todo el equipo de esa cita, que lo coordinan hoy con él, y recuérdale la regla de los 2 días y que revise su planificación." }
             : r;
         },
+      },
+
+      pedirAyudaConDato: {
+        description: `El cliente no sabe o no tiene un dato del perfil de marca. Lo deja pendiente y avisa al responsable para que lo resuelva con él. Campos: ${Object.keys(
+          AYUDA_CAMPO_MARCA
+        ).join(", ")}.`,
+        inputSchema: z.object({
+          campo: z.enum(Object.keys(AYUDA_CAMPO_MARCA) as [string, ...string[]]),
+          nota: z.string().nullish().describe("Lo que contó el cliente, con sus palabras"),
+        }),
+        execute: async ({ campo, nota }: { campo: string; nota?: string | null }) =>
+          onboardingDatosService.pedirAyudaConDato(chat, campo, nota ?? undefined),
       },
 
       confirmarCambioCita: {
