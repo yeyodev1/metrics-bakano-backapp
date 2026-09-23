@@ -79,6 +79,20 @@ export function parsearMonto(texto: string): number | null {
   return Math.round(valor * 100) / 100;
 }
 
+/** Con qué comparar el día para poder decir algo útil, sin inventar. */
+export interface ContextoDelDia {
+  totalDia: number;
+  gastoMeta: number;
+  roasDia: number | null;
+  /** Promedio diario del mes, sin contar el día que se acaba de registrar. */
+  promedioMes: number | null;
+  diasRegistradosMes: number;
+  totalMes: number;
+  diaAnterior: number | null;
+  mismoDiaSemanaPasada: number | null;
+  mejorDiaMes: number | null;
+}
+
 export type ResultadoFacturacion =
   | {
       ok: true;
@@ -89,8 +103,28 @@ export type ResultadoFacturacion =
       totalDia: number;
       gastoMeta: number;
       roas: number | null;
+      contexto: ContextoDelDia;
     }
   | { ok: false; motivo: "sin_entorno" | "sin_usuario" | "monto_invalido" | "dia_invalido" | "sin_permiso" | "error" };
+
+/**
+ * El contexto con los montos ya escritos como plata ($1.028,57). Si se le
+ * pasan numeros crudos, la IA los copia tal cual y el cliente lee "$1028.57".
+ */
+export function contextoParaLaIa(c: ContextoDelDia): Record<string, unknown> {
+  const plata = (n: number | null) => (n === null || n === undefined ? null : comoPlata(n));
+  return {
+    totalDelDia: plata(c.totalDia),
+    gastoEnMeta: c.gastoMeta > 0 ? comoPlata(c.gastoMeta) : null,
+    roasDelDia: c.roasDia,
+    promedioDiarioDelMes: plata(c.promedioMes),
+    diasRegistradosEsteMes: c.diasRegistradosMes,
+    totalDelMes: plata(c.totalMes),
+    diaAnterior: plata(c.diaAnterior),
+    mismoDiaSemanaPasada: plata(c.mismoDiaSemanaPasada),
+    mejorDiaDelMes: plata(c.mejorDiaMes),
+  };
+}
 
 class FacturacionChatService {
   /** Días que le faltan por registrar, del más viejo al más nuevo, más hoy. */
@@ -111,6 +145,48 @@ class FacturacionChatService {
       ).map((e: any) => claveDia(e.date))
     );
     return dias.map((fecha) => ({ fecha, texto: nombreDia(fecha), registrado: registradas.has(claveDia(fecha)) }));
+  }
+
+  /**
+   * Con qué se compara ese día: promedio del mes, el día anterior y el mismo
+   * día de la semana pasada. Sin esto, "registré $1.250" no dice nada; con
+   * esto la IA puede cerrar con una lectura real.
+   */
+  async contextoDelDia(workspaceId: Types.ObjectId, dia: Date): Promise<ContextoDelDia> {
+    const fecha = diaEcuador(dia);
+    const ec = new Date(fecha.getTime() - 5 * 3_600_000);
+    const inicioMes = new Date(Date.UTC(ec.getUTCFullYear(), ec.getUTCMonth(), 1, 5, 0, 0));
+
+    const registros = await models.dailyBilling
+      .find({ workspaceId, date: { $gte: inicioMes, $lte: fecha } })
+      .select("date amount metaSpend")
+      .lean();
+
+    const porDia = new Map<string, { monto: number; gasto: number }>();
+    for (const e of registros as any[]) {
+      const clave = claveDia(e.date);
+      const previo = porDia.get(clave) ?? { monto: 0, gasto: 0 };
+      // El gasto de Meta se repite en cada entrada del día: no se suma.
+      porDia.set(clave, { monto: previo.monto + (e.amount || 0), gasto: Math.max(previo.gasto, e.metaSpend || 0) });
+    }
+
+    const hoyClave = claveDia(fecha);
+    const delDia = porDia.get(hoyClave) ?? { monto: 0, gasto: 0 };
+    const otros = [...porDia.entries()].filter(([k]) => k !== hoyClave).map(([, v]) => v.monto);
+    const totalMes = [...porDia.values()].reduce((a, v) => a + v.monto, 0);
+
+    const valorDe = (offsetDias: number) => porDia.get(claveDia(new Date(fecha.getTime() - offsetDias * MS_DIA)))?.monto ?? null;
+    return {
+      totalDia: delDia.monto,
+      gastoMeta: delDia.gasto,
+      roasDia: delDia.gasto > 0 ? Math.round((delDia.monto / delDia.gasto) * 100) / 100 : null,
+      promedioMes: otros.length ? Math.round((otros.reduce((a, b) => a + b, 0) / otros.length) * 100) / 100 : null,
+      diasRegistradosMes: porDia.size,
+      totalMes: Math.round(totalMes * 100) / 100,
+      diaAnterior: valorDe(1),
+      mismoDiaSemanaPasada: valorDe(7),
+      mejorDiaMes: otros.length ? Math.max(...otros, delDia.monto) : delDia.monto,
+    };
   }
 
   /** Lo que ya registró esa persona ese día (para ofrecer corregirlo). */
@@ -156,17 +232,17 @@ class FacturacionChatService {
         await billingService.createEntry(workspaceId, userId, monto, "Registrada desde Telegram", dia);
       }
 
-      const resumen = await billingService.getDaySummary(workspaceId, dia);
-      const gastoMeta = resumen.entries?.[0]?.metaSpend ?? 0;
+      const contexto = await this.contextoDelDia(chat.workspaceId, dia);
       return {
         ok: true,
         accion,
         monto,
         dia,
         diaTexto: nombreDia(dia),
-        totalDia: resumen.totalAmount ?? monto,
-        gastoMeta,
-        roas: gastoMeta > 0 ? Math.round(((resumen.totalAmount ?? monto) / gastoMeta) * 100) / 100 : null,
+        totalDia: contexto.totalDia,
+        gastoMeta: contexto.gastoMeta,
+        roas: contexto.roasDia,
+        contexto,
       };
     } catch (error: any) {
       if (error?.message === "EDIT_NOT_ALLOWED") return { ok: false, motivo: "sin_permiso" };

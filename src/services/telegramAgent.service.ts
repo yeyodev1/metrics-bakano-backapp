@@ -7,7 +7,7 @@ import { onboardingBotService } from "./onboardingBot.service";
 import { citasClienteService } from "./citasCliente.service";
 import { CAMPOS_MARCA, ENTREGABLES, onboardingDatosService } from "./onboardingDatos.service";
 import { metricasClienteService } from "./metricasCliente.service";
-import { claveDia, facturacionChatService, nombreDia } from "./facturacionChat.service";
+import { claveDia, contextoParaLaIa, facturacionChatService, comoPlata } from "./facturacionChat.service";
 import { CATEGORIAS_GUION, revisionGuionesService } from "./revisionGuiones.service";
 import { perfilClienteService, type PerfilCliente } from "./perfilCliente.service";
 import {
@@ -43,6 +43,8 @@ const modelo = () => process.env.AI_MODEL || "google/gemini-3.8-flash";
 // Enviar una revision encadena varias herramientas: con 35 s no alcanzaba.
 const LIMITE_MS = Number(process.env.AI_LIMITE_MS) || 50_000;
 const LIMITE_CLASIFICACION_MS = 30_000;
+/** Un comentario ya no bloquea la respuesta del cliente: puede tomarse más. */
+const LIMITE_COMENTARIO_MS = 45_000;
 
 /**
  * Razonamiento del modelo. Medido el 2026-09-22 con el flujo completo de
@@ -286,11 +288,20 @@ Arrancar el onboarding (tú tomas la iniciativa):
 - Si es un cliente en marcha, no le ofrezcas sesiones del onboarding ni le pidas envíos. Solo si faltan datos de su marca, pídele uno al final de la conversación y sin insistir.
 - Si es alguien del equipo de Bakano, no le pidas datos: solo dile qué falta.
 
+Preguntas de facturación (esto lo respondes siempre, nunca lo derives):
+- "cuánto facturé/vendí", "cómo voy este mes", "cuánto llevo", "cuál es mi ROAS", "cómo cerré el mes", "llegué a la meta": usa verMetricas y contesta con los números, en plata y con una lectura corta.
+- Si falta registrar días, dilo y ofrécele registrarlos ahí mismo por el chat.
+- Si hay meta del mes, di en qué porcentaje va o quedó. Si no hay meta, no la inventes ni la menciones.
+- Cuenta el resultado en positivo. Si el mes quedó por debajo de la meta, dilo de frente, sin dramatizar, y cierra con que este mes tomamos acción en eso.
+
 Facturación del día:
 - El cliente puede registrar su facturación por aquí: si te dice un monto ("ayer vendí 450", "hoy hice 1.250"), regístralo con registrarFacturacion y confírmale el total del día.
 - Si no sabes de qué día habla, usa verFacturacionPendiente y pregúntale antes de registrar. Nunca inventes el monto ni el día.
 - Registrar 0 es válido y se hace igual: así no queda hueco en el ROAS.
 - Si ya había un monto de ese día, díselo y confirma antes de reemplazarlo.
+- Después de registrar, CIERRA con una lectura corta de lo que significa ese número, usando solo el "contexto" que te devuelve la herramienta: compáralo con el promedio del mes, con el día anterior o con el mismo día de la semana pasada, y si hay gasto de Meta menciona el ROAS del día. Dos líneas, en plata y en porcentaje redondeado, sin inventar nada que no esté en esos datos.
+- Si el día viene muy por debajo de su promedio, dilo sin dramatizar y ofrece pasarle el dato a su equipo. Si viene bien, díselo también: es la parte que le interesa.
+- Si no hay con qué comparar todavía (primer día registrado del mes), no inventes tendencias: dile que a partir de ahora ya puedes comparar.
 
 Métricas:
 - Para facturación, gasto en Meta, ROAS o qué videos funcionan mejor, usa verMetricas. Da los números redondeados y en una o dos líneas.
@@ -764,16 +775,30 @@ Reglas:
           if (Number.isNaN(fecha.getTime())) return { ok: false, motivo: "día inválido, usa YYYY-MM-DD" };
           const r = await facturacionChatService.registrar(chat, monto, fecha);
           return r.ok
-            ? { ok: true, accion: r.accion, monto: r.monto, dia: r.diaTexto, totalDelDia: r.totalDia, roas: r.roas }
+            ? {
+                ok: true,
+                accion: r.accion,
+                monto: r.monto,
+                dia: r.diaTexto,
+                montoRegistrado: comoPlata(r.monto),
+                contexto: contextoParaLaIa(r.contexto),
+                siguiente: "Confirma lo registrado y cierra con una lectura corta del número usando el contexto.",
+              }
             : r;
         },
       },
 
       verMetricas: {
         description:
-          "Métricas del entorno: facturación, gasto en Meta y ROAS del mes actual y del anterior, días sin facturación registrada y los videos con más vistas del mes.",
+          "Métricas del entorno: facturación, gasto en Meta y ROAS del mes actual y del anterior, días sin registrar, meta del mes si existe, y los videos con más vistas.",
         inputSchema: z.object({}),
-        execute: async () => metricasClienteService.resumen(chat.workspaceId!),
+        execute: async () => {
+          const [resumen, cerrado] = await Promise.all([
+            metricasClienteService.resumen(chat.workspaceId!),
+            metricasClienteService.mesCerrado(chat.workspaceId!).catch(() => null),
+          ]);
+          return { ...resumen, mesCerrado: cerrado };
+        },
       },
 
       pasarMensajeAlEquipo: {
@@ -792,6 +817,37 @@ Reglas:
         },
       },
     };
+  }
+
+  /**
+   * Cierre en lenguaje natural para algo que ya pasó (por ejemplo, una
+   * facturación registrada con los botones). No usa herramientas: recibe los
+   * datos ya calculados y solo los interpreta, así el cliente recibe una
+   * lectura y no una plantilla.
+   */
+  async comentar(chat: ITelegramChat, instruccion: string, datos: unknown): Promise<string | null> {
+    try {
+      const { generateText } = await cargarAi();
+      const cliente = await atencionClienteService.datosCliente(chat);
+      const { text } = await generateText({
+        model: modelo(),
+        system:
+          `Eres el asistente de Bakano hablando por Telegram con ${cliente.nombre}, del cliente "${cliente.entorno}".\n` +
+          "Escribes como una persona por WhatsApp: cercano, claro y corto (máximo 4 líneas). " +
+          "NUNCA uses signos de apertura (¡ ¿). Sin markdown. Emojis con moderación (0 a 2).\n" +
+          "Usa SOLO los datos que te paso: no inventes cifras, tendencias ni promesas. " +
+          "Si un dato viene en null, es que no existe todavía y no se menciona. " +
+          "Escribe en español correcto, con tildes.",
+        prompt: `${instruccion}\n\nDatos:\n${JSON.stringify(datos)}`,
+        abortSignal: AbortSignal.timeout(LIMITE_COMENTARIO_MS),
+        ...opcionesModelo(),
+      });
+      const limpio = text.replace(/\*\*?|__|#+ /g, "").replace(/[¡¿]/g, "").trim();
+      return limpio || null;
+    } catch (error: any) {
+      console.error("[Telegram IA] comentario:", error?.message || error);
+      return null;
+    }
   }
 
   private async clasificar(historial: Mensaje[], texto: string): Promise<Clasificacion | null> {

@@ -34,6 +34,47 @@ function redondear(n: number): number {
 }
 
 class MetricasClienteService {
+  /**
+   * El mes ya cerrado (el anterior al de hoy) contra su meta, para el resumen
+   * de fin de mes. La meta la define el equipo en el Pulso Interno; aqui se
+   * usa para contarle al cliente como le fue, no para exigirle nada.
+   */
+  async mesCerrado(workspaceId: Types.ObjectId) {
+    const cerrado = await this.mes(workspaceId, -1);
+    const previo = await this.mes(workspaceId, -2);
+    const [anio, mes] = cerrado.mes.split("-").map(Number);
+
+    const meta = await models.monthlyTargets.findOne({ workspaceId, year: anio, month: mes }).select("targetAmount").lean();
+    const objetivo = (meta as any)?.targetAmount ?? null;
+    const avance = objetivo && objetivo > 0 ? Math.round((cerrado.facturacion / objetivo) * 1000) / 10 : null;
+    const variacion =
+      previo.facturacion > 0
+        ? Math.round(((cerrado.facturacion - previo.facturacion) / previo.facturacion) * 1000) / 10
+        : null;
+
+    return {
+      mes: cerrado.mes,
+      // En UTC: con la zona de Ecuador, el 1 a las 00:00 cae en el mes anterior
+      // y el cierre de agosto salía anunciado como "julio".
+      nombreMes: new Date(Date.UTC(anio!, mes! - 1, 1)).toLocaleDateString("es-EC", {
+        month: "long",
+        year: "numeric",
+        timeZone: "UTC",
+      }),
+      facturacion: cerrado.facturacion,
+      gastoMeta: cerrado.gastoMeta,
+      roas: cerrado.roas,
+      diasRegistrados: cerrado.diasConRegistro,
+      diasDelMes: cerrado.diasTranscurridos,
+      diasSinRegistrar: cerrado.diasSinRegistro,
+      objetivo,
+      avanceObjetivo: avance,
+      cumplioObjetivo: objetivo ? cerrado.facturacion >= objetivo : null,
+      mesAnterior: { mes: previo.mes, facturacion: previo.facturacion },
+      variacionVsMesAnterior: variacion,
+    };
+  }
+
   private async mes(workspaceId: Types.ObjectId, offset: number) {
     const r = rangoMes(offset);
     const registros = await models.dailyBilling

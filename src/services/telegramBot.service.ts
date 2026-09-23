@@ -9,7 +9,7 @@ import { onboardingBotService } from "./onboardingBot.service";
 import { perfilClienteService } from "./perfilCliente.service";
 import { onboardingDatosService } from "./onboardingDatos.service";
 import { citasClienteService } from "./citasCliente.service";
-import { comoPlata, facturacionChatService, claveDia, nombreDia, parsearMonto } from "./facturacionChat.service";
+import { comoPlata, contextoParaLaIa, facturacionChatService, claveDia, nombreDia, parsearMonto } from "./facturacionChat.service";
 import { archivosClienteService, ETIQUETA_CATEGORIA, type CategoriaRecurso } from "./archivosCliente.service";
 import { revisionGuionesService, type RevisionPendiente } from "./revisionGuiones.service";
 import { SESIONES_ONBOARDING, type SesionOnboarding } from "./onboardingSesiones.service";
@@ -795,14 +795,24 @@ export class TelegramBotService {
       [{ text: "📋 Volver al menú", callback_data: "menu:ver" }]
     );
 
-    await telegramService.sendMessage(
-      chat.chatId,
-      `Listo ✅ ${r.accion === "creada" ? "registré" : "actualicé"} <b>${comoPlata(r.monto)}</b> de ${r.diaTexto}.\n\n` +
-        `Total del día en Metrics: <b>${comoPlata(r.totalDia)}</b>` +
-        (r.roas ? ` · gasto en Meta ${comoPlata(r.gastoMeta)} · ROAS <b>${r.roas}</b>` : "") +
-        (pendientes.length ? `\n\nTodavía falta ${pendientes[0]!.texto}.` : "\n\nCon eso quedas al día 🙌"),
-      botones
+    // El cierre lo escribe la IA con los números del día: una plantilla dice
+    // "registré $1.250" y ya; la lectura es lo que al cliente le sirve.
+    const comentario = await telegramAgentService.comentar(
+      chat,
+      `Acabas de ${r.accion === "creada" ? "registrar" : "actualizar"} su facturación de ${r.diaTexto} en metrics.bakano.ec. ` +
+        "Confírmaselo con el monto y cierra con una lectura corta de lo que significa: compáralo con el promedio del mes, " +
+        "con el día anterior o con el mismo día de la semana pasada, y menciona el ROAS del día solo si hay gasto de Meta. " +
+        (pendientes.length ? `Recuérdale al final que todavía falta registrar ${pendientes[0]!.texto}.` : "Dile que queda al día."),
+      { montoRegistrado: comoPlata(r.monto), dia: r.diaTexto, ...contextoParaLaIa(r.contexto) }
     );
+
+    const respaldo =
+      `Listo ✅ ${r.accion === "creada" ? "registré" : "actualicé"} <b>${comoPlata(r.monto)}</b> de ${r.diaTexto}.\n\n` +
+      `Total del día en Metrics: <b>${comoPlata(r.totalDia)}</b>` +
+      (r.roas ? ` · gasto en Meta ${comoPlata(r.gastoMeta)} · ROAS <b>${r.roas}</b>` : "") +
+      (pendientes.length ? `\n\nTodavía falta ${pendientes[0]!.texto}.` : "\n\nCon eso quedas al día 🙌");
+
+    await telegramService.sendMessage(chat.chatId, comentario ? escaparHtml(comentario) : respaldo, botones);
   }
 
   /**
