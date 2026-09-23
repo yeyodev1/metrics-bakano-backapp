@@ -8,6 +8,7 @@ import { citasClienteService } from "./citasCliente.service";
 import { CAMPOS_MARCA, ENTREGABLES, onboardingDatosService } from "./onboardingDatos.service";
 import { metricasClienteService } from "./metricasCliente.service";
 import { claveDia, contextoParaLaIa, facturacionChatService, comoPlata } from "./facturacionChat.service";
+import { publicidadClienteService } from "./publicidadCliente.service";
 import { CATEGORIAS_GUION, revisionGuionesService } from "./revisionGuiones.service";
 import { perfilClienteService, type PerfilCliente } from "./perfilCliente.service";
 import {
@@ -287,6 +288,13 @@ Arrancar el onboarding (tú tomas la iniciativa):
 - Si el cliente está apurado o pregunta otra cosa, atiéndelo primero y retoma lo pendiente después, sin presionar.
 - Si es un cliente en marcha, no le ofrezcas sesiones del onboarding ni le pidas envíos. Solo si faltan datos de su marca, pídele uno al final de la conversación y sin insistir.
 - Si es alguien del equipo de Bakano, no le pidas datos: solo dile qué falta.
+
+Publicidad (qué estamos anunciando):
+- "qué están pautando", "qué anuncios tengo activos", "cuánto se ha gastado en Meta", "muéstrame los anuncios": usa verPublicidad y responde con los nombres, los links tal cual vienen y la inversión de los últimos 30 días.
+- Pásale los links sin cambiarlos. Si un anuncio no trae link, no inventes uno ni prometas mandarlo después.
+- Si la herramienta devuelve hayDatos en false, dile con naturalidad que ahora mismo no puedes ver la pauta, que ya avisaste a Denisse Quimi y que ella se comunica para resolverlo. Nunca inventes anuncios, montos ni fechas.
+- Si "activosSinInversion" viene en true, díselo con naturalidad: los anuncios están encendidos pero no registran gasto en los últimos 30 días, y el equipo ya está revisándolo.
+- No prometas resultados ni cambios de campaña: eso lo decide el equipo.
 
 Preguntas de facturación (esto lo respondes siempre, nunca lo derives):
 - "cuánto facturé/vendí", "cómo voy este mes", "cuánto llevo", "cuál es mi ROAS", "cómo cerré el mes", "llegué a la meta": usa verMetricas y contesta con los números, en plata y con una lectura corta.
@@ -787,6 +795,13 @@ Reglas:
               }
             : r;
         },
+      },
+
+      verPublicidad: {
+        description:
+          "Qué le estamos anunciando AHORA en Meta: anuncios activos, su link para verlos y cuánto se invirtió en los últimos 30 días. Úsala siempre que pregunte por la pauta, los anuncios o la inversión.",
+        inputSchema: z.object({}),
+        execute: async () => publicidadClienteService.paraElCliente(chat.workspaceId!),
       },
 
       verMetricas: {

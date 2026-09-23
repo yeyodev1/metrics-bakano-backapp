@@ -5,6 +5,29 @@ import { runMetaMetricsSync } from "../crons/metaMetrics.cron";
 
 const cronRouter = Router();
 
+// GET /api/cron/publicidad — lunes (14:20 UTC = 09:20 Ecuador).
+// Avisa al equipo si un cliente lleva 20 dias con los mismos anuncios y le
+// cuenta al cliente cada 3 semanas que estamos anunciando.
+cronRouter.get("/publicidad", async (req: Request, res: Response) => {
+  const secret = process.env.CRON_SECRET;
+  if (!secret || req.headers["authorization"] !== `Bearer ${secret}`) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  try {
+    const { publicidadClienteService } = await import("../services/publicidadCliente.service");
+    const r = await publicidadClienteService.revisar();
+    console.log(
+      `[Cron] Publicidad — revisados: ${r.revisados}, avisos de pauta sin rotar: ${r.avisosMismos}, ` +
+        `resúmenes al cliente: ${r.resumenes}, sin datos: ${r.sinDatos}`
+    );
+    res.status(200).json(r);
+  } catch (error: any) {
+    console.error("[Cron] Publicidad:", error?.message || error);
+    res.status(500).json({ error: error?.message || "error" });
+  }
+});
+
 // GET /api/cron/resumen-mensual — el dia 1 (14:40 UTC = 09:40 Ecuador).
 // Le manda a cada cliente el cierre del mes anterior contra su meta.
 cronRouter.get("/resumen-mensual", async (req: Request, res: Response) => {
