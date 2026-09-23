@@ -7,6 +7,7 @@ import { EQUIPO_ATENCION, equipoAtencionService, type TemaAtencion } from "./equ
 import { atencionClienteService, diaEcuador, fechaEcuador, horarioCorto } from "./atencionCliente.service";
 import { onboardingBotService } from "./onboardingBot.service";
 import { produccionPlanificacionService } from "./produccionPlanificacion.service";
+import { contenidoClienteService } from "./contenidoCliente.service";
 import { perfilClienteService } from "./perfilCliente.service";
 import { onboardingDatosService } from "./onboardingDatos.service";
 import { citasClienteService } from "./citasCliente.service";
@@ -809,9 +810,14 @@ export class TelegramBotService {
         : "🎬 No tienes ninguna producción agendada.",
       ultima ? `\nLa última fue el ${fechaEcuador(ultima.date)}${ultima.cumplida ? " y ya quedó grabada ✅" : ""}.` : "",
       `\nGraban <b>${escaparHtml(equipoAtencionService.nombres("produccion"))}</b>: tu avatar, tus productos y los recursos que hagan falta.`,
-      estado.puedeAgendar && estado.habilitadaDesde
-        ? `\nPuedes agendar la siguiente desde el ${fechaEcuador(estado.habilitadaDesde)}.`
-        : "",
+      estado.reserva ? `\n${contenidoClienteService.enTexto(estado.reserva)}` : "",
+      // Grabamos hasta quedarnos sin contenido: si ya no queda nada escrito
+      // por grabar, no se le dice "espera al mes que viene".
+      estado.sinContenido
+        ? "\n👉 <b>Toca agendar la siguiente ya</b>: cuando salga lo que está en edición, no queda nada más que publicar."
+        : estado.puedeAgendar && estado.habilitadaDesde
+          ? `\nPuedes agendar la siguiente desde el ${fechaEcuador(estado.habilitadaDesde)}.`
+          : "",
     ]
       .filter(Boolean)
       .join("\n");
@@ -1472,6 +1478,7 @@ export class TelegramBotService {
       await telegramService.sendMessage(
         chat.chatId,
         `${intro}🎬 Ya tienes una producción agendada para el <b>${fechaEcuador(estado.proxima!)}</b>.\n\n` +
+          (estado.reserva ? `${contenidoClienteService.enTexto(estado.reserva)}\n\n` : "") +
           "Agendamos una producción cada 2 meses, así que no puedo reservar otra por ahora.\n\n" +
           "Si necesitas moverla o cancelarla, toca abajo (se puede hasta 48 horas antes). " +
           `Para otro tema de producción, cuéntame aquí y se lo paso a <b>${nombres}</b> 📩`,
@@ -1492,9 +1499,11 @@ export class TelegramBotService {
     }
 
     const regla =
-      estado.esperar && estado.ultima
-        ? `Tu última producción fue el ${fechaEcuador(estado.ultima)} y agendamos una cada 2 meses, así que te muestro horarios desde el <b>${fechaEcuador(estado.habilitadaDesde!)}</b>.\n\n`
-        : "";
+      estado.sinContenido && estado.ultima
+        ? "Y esto es lo importante: <b>ya grabamos todo lo que estaba escrito</b>, así que no hay que esperar nada. Mientras antes grabemos, antes vuelves a tener contenido saliendo 🎯\n\n"
+        : estado.esperar && estado.ultima
+          ? `Tu última producción fue el ${fechaEcuador(estado.ultima)} y agendamos una cada 2 meses, así que te muestro horarios desde el <b>${fechaEcuador(estado.habilitadaDesde!)}</b>.\n\n`
+          : "";
     const botones = this.botonesHorarios(horarios, (h) => `prod:${Math.floor(h.getTime() / 1000)}`);
     botones.push([{ text: "✍️ Prefiero escribirles", callback_data: "menu:produccion" }]);
 
@@ -1502,6 +1511,7 @@ export class TelegramBotService {
       chat.chatId,
       `${intro}🎬 Agendemos tu producción con <b>${nombres}</b>.\n\n` +
         "Es la sesión en ambiente controlado para grabar las tomas de tu avatar y de los productos que vamos a promocionar.\n\n" +
+        (estado.reserva ? `${contenidoClienteService.enTexto(estado.reserva)}\n\n` : "") +
         `${regla}Elige el horario que te quede mejor 👇` +
         this.avisoChoques(quitados),
       botones

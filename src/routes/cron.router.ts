@@ -77,7 +77,11 @@ cronRouter.get("/produccion-planificacion", async (req: Request, res: Response) 
     const { produccionPlanificacionService } = await import("../services/produccionPlanificacion.service");
     const r = await produccionPlanificacionService.presionarPendientes();
     console.log(`[Cron] Producción sin planificación — revisadas: ${r.revisadas}, insistidas: ${r.insistidas}`);
-    res.status(200).json(r);
+    // Y al reves: quien se esta quedando sin guiones por grabar y no tiene
+    // fecha. Grabamos hasta quedarnos sin contenido, no hasta que "toque".
+    const c = await produccionPlanificacionService.avisarContenidoQueSeAcaba();
+    console.log(`[Cron] Contenido que se acaba — revisados: ${c.revisados}, avisados: ${c.avisados}, en cola: ${c.enCola}`);
+    res.status(200).json({ ...r, contenido: c });
   } catch (error: any) {
     console.error("[Cron] Producción sin planificación:", error?.message || error);
     res.status(500).json({ error: error?.message || "error" });
