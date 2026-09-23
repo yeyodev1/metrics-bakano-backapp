@@ -66,6 +66,14 @@ class IncidentesService {
         recomendacion: datos.recomendacion,
         mensajeCompleto: datos.mensajeCompleto?.slice(0, 4000),
         fueraDeHorario: fueraDeHorario(),
+        historial: [
+          {
+            accion: "abierto",
+            porNombre: "Bot de Telegram",
+            detalle: `Lo detectó la IA en la conversación (${datos.gravedad}).`,
+            en: new Date(),
+          },
+        ],
       });
 
       if (datos.gravedad !== "molesto") await this.avisarAGenesis(incidente as any);
@@ -163,25 +171,142 @@ class IncidentesService {
           : Promise.resolve(),
       ]);
       incidente.ultimoPingEn = new Date();
+      incidente.historial.push({
+        accion: "recordatorio",
+        porNombre: "Sistema",
+        detalle: `Se insistió a Genesis: seguía sin tomar después de ${minutos} min`,
+        en: new Date(),
+      } as any);
       await incidente.save();
     }
     return pendientes.length;
   }
 
   /** Lo que ve el equipo en Metrics. Todos ven todo; `mios` filtra lo suyo. */
-  async listar(filtros: { estado?: string; workspaceId?: string; correo?: string; mios?: boolean; limite?: number }) {
+  async listar(filtros: {
+    estado?: string;
+    workspaceId?: string;
+    correo?: string;
+    mios?: boolean;
+    buscar?: string;
+    pagina?: number;
+    limite?: number;
+  }) {
     const query: Record<string, unknown> = {};
     if (filtros.estado && filtros.estado !== "todos") query.estado = filtros.estado;
     if (filtros.workspaceId && Types.ObjectId.isValid(filtros.workspaceId)) {
       query.workspaceId = new Types.ObjectId(filtros.workspaceId);
     }
-    if (filtros.mios && filtros.correo) query.responsableEmail = filtros.correo.toLowerCase();
+    // "Míos" incluye lo que me toca por tema y lo que me asignaron a dedo.
+    if (filtros.mios && filtros.correo) {
+      const correo = filtros.correo.toLowerCase();
+      query.$or = [{ responsableEmail: correo }, { "asignadoA.email": correo }];
+    }
+    if (filtros.buscar?.trim()) {
+      // Por nombre del cliente o por lo que dijo: buscar "parrilla" tiene que encontrarlo.
+      const texto = filtros.buscar.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const re = new RegExp(texto, "i");
+      const condicion = [{ workspaceName: re }, { "cliente.nombre": re }, { frase: re }];
+      query.$and = [...((query.$and as unknown[]) ?? []), { $or: condicion }];
+    }
 
-    const [incidentes, abiertos] = await Promise.all([
-      models.incidentes.find(query).sort({ estado: 1, createdAt: -1 }).limit(Math.min(filtros.limite ?? 50, 200)).lean(),
+    const limite = Math.min(Math.max(filtros.limite ?? 20, 1), 100);
+    const pagina = Math.max(filtros.pagina ?? 1, 1);
+    const [incidentes, total, abiertos] = await Promise.all([
+      models.incidentes
+        .find(query)
+        .sort({ estado: 1, createdAt: -1 })
+        .skip((pagina - 1) * limite)
+        .limit(limite)
+        .lean(),
+      models.incidentes.countDocuments(query),
       models.incidentes.countDocuments({ estado: "abierto" }),
     ]);
-    return { incidentes, abiertos };
+    return { incidentes, abiertos, total, pagina, paginas: Math.max(1, Math.ceil(total / limite)) };
+  }
+
+  /** Quiénes pueden hacerse cargo: el equipo interno activo. */
+  async equipo() {
+    return models.users
+      .find({ isActive: true, $or: [{ isInternal: true }, { role: "superadmin" }] })
+      .select("_id name email internalRole")
+      .sort({ name: 1 })
+      .lean();
+  }
+
+  /** Deja constancia de lo que pasó. El historial no se pisa nunca. */
+  private async anotar(
+    id: Types.ObjectId | string,
+    evento: { accion: string; porNombre: string; porUserId?: Types.ObjectId; detalle?: string }
+  ): Promise<void> {
+    await models.incidentes.updateOne({ _id: id }, { $push: { historial: { ...evento, en: new Date() } } });
+  }
+
+  /**
+   * Se lo asignamos a alguien a dedo. No es lo mismo que "tomar": aquí la
+   * coordinación decide quién se hace cargo, y a esa persona se le avisa por
+   * DM, correo y notificación.
+   */
+  async asignar(
+    id: string,
+    destinatarioId: string,
+    porUsuario: { _id: Types.ObjectId; name?: string; email?: string },
+    nota?: string
+  ) {
+    if (!Types.ObjectId.isValid(id) || !Types.ObjectId.isValid(destinatarioId)) throw new Error("INVALID_ID");
+    const destinatario = await models.users.findById(destinatarioId).select("_id name email").lean();
+    if (!destinatario) throw new Error("USUARIO_NO_ENCONTRADO");
+
+    const quien = porUsuario.name || porUsuario.email || "—";
+    const incidente = await models.incidentes.findByIdAndUpdate(
+      id,
+      {
+        $set: {
+          asignadoA: {
+            userId: destinatario._id,
+            nombre: destinatario.name || destinatario.email,
+            email: destinatario.email,
+            en: new Date(),
+            porNombre: quien,
+          },
+        },
+        $push: {
+          historial: {
+            accion: "asignado",
+            porNombre: quien,
+            porUserId: porUsuario._id,
+            detalle: `Asignado a ${destinatario.name || destinatario.email}${nota ? ` · ${nota}` : ""}`,
+            en: new Date(),
+          },
+        },
+      },
+      { new: true }
+    );
+    if (!incidente) throw new Error("NOT_FOUND");
+
+    const titulo = `📌 ${quien} te asignó el caso de ${incidente.workspaceName}`;
+    const cuerpo =
+      `${ETIQUETA[incidente.gravedad]} · “${incidente.frase}”\n\n` +
+      (incidente.recomendacion ? `Recomendación: ${incidente.recomendacion}\n` : "") +
+      (nota ? `Nota de ${quien}: ${nota}\n` : "") +
+      `\nÁbrelo aquí: ${this.link(incidente._id as Types.ObjectId)}`;
+
+    await Promise.allSettled([
+      slackService.mensajeDirecto(destinatario.email, titulo, cuerpo),
+      notificationService.create(destinatario._id as Types.ObjectId, "cliente_en_riesgo", titulo, cuerpo.slice(0, 500), {
+        workspaceId: incidente.workspaceId,
+      }),
+      resendService.sendSolicitudClienteEmail({
+        to: [destinatario.email],
+        tema: "incidente asignado",
+        workspaceName: incidente.workspaceName,
+        clienteNombre: incidente.cliente?.nombre || incidente.workspaceName,
+        mensaje: cuerpo,
+        asunto: titulo,
+        encabezado: titulo,
+      }),
+    ]);
+    return incidente;
   }
 
   /** Uno solo, para cuando se entra por el link del correo o del DM. */
@@ -195,7 +320,18 @@ class IncidentesService {
     if (!Types.ObjectId.isValid(id)) throw new Error("INVALID_ID");
     const incidente = await models.incidentes.findOneAndUpdate(
       { _id: new Types.ObjectId(id), estado: "abierto" },
-      { $set: { estado: "tomado", tomadoPor: { userId: usuario._id, nombre: usuario.name || usuario.email || "—", en: new Date() } } },
+      {
+        $set: { estado: "tomado", tomadoPor: { userId: usuario._id, nombre: usuario.name || usuario.email || "—", en: new Date() } },
+        $push: {
+          historial: {
+            accion: "tomado",
+            porNombre: usuario.name || usuario.email || "—",
+            porUserId: usuario._id,
+            detalle: "Se hizo cargo del caso",
+            en: new Date(),
+          },
+        },
+      },
       { new: true }
     );
     if (!incidente) throw new Error("NOT_FOUND");
@@ -219,6 +355,15 @@ class IncidentesService {
           estado: "cerrado",
           cerradoPor: { userId: usuario._id, nombre: usuario.name || usuario.email || "—", en: new Date() },
           ...(nota ? { nota: nota.slice(0, 2000) } : {}),
+        },
+        $push: {
+          historial: {
+            accion: "cerrado",
+            porNombre: usuario.name || usuario.email || "—",
+            porUserId: usuario._id,
+            detalle: nota ? nota.slice(0, 2000) : "Cerrado sin nota",
+            en: new Date(),
+          },
         },
       },
       { new: true }

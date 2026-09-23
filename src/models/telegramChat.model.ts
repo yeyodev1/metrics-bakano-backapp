@@ -70,6 +70,8 @@ export interface ITelegramChat extends Document {
     ref: string;
     inicio?: Date;
     motivo?: string;
+    /** La IA decidió que dirección tiene que enterarse. */
+    avisarDireccion?: boolean;
     resumen: string;
     creadoEn: Date;
   };
@@ -142,7 +144,7 @@ const TelegramChatSchema = new Schema<ITelegramChat>(
       default: undefined,
     },
     cambioPendiente: {
-      type: { accion: String, ref: String, inicio: Date, motivo: String, resumen: String, creadoEn: Date },
+      type: { accion: String, ref: String, inicio: Date, motivo: String, avisarDireccion: Boolean, resumen: String, creadoEn: Date },
       default: undefined,
     },
     revisionGuiones: {
