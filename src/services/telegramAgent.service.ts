@@ -2,6 +2,7 @@ import { z } from "zod";
 import models from "../models";
 import type { ITelegramChat } from "../models/telegramChat.model";
 import { EQUIPO_ATENCION, equipoAtencionService, type TemaAtencion } from "./equipoAtencion.service";
+import { contenidoClienteService } from "./contenidoCliente.service";
 import { atencionClienteService, fechaEcuador, type DatosCliente } from "./atencionCliente.service";
 import { onboardingBotService } from "./onboardingBot.service";
 import { citasClienteService } from "./citasCliente.service";
@@ -279,7 +280,7 @@ class TelegramAgentService {
     if (uso("verMisCitas", "verHorariosParaMover", "reprogramarCita", "cancelarCita", "avisarCambioSobreLaHora")) {
       botones.push([{ text: "🗓️ Ver mis citas", callback_data: "citas:ver" }]);
     }
-    if (uso("verHorariosProduccion", "agendarProduccion", "verProducciones")) {
+    if (uso("verHorariosProduccion", "agendarProduccion", "verProducciones", "verReservaDeContenido")) {
       botones.push([{ text: "🎬 Mis producciones", callback_data: "menu:produccion" }]);
     }
     if (uso("verGuionesParaRevisar", "verGuiones", "verGuion", "anotarCorreccion", "verBorradorRevision", "enviarRevisionGuiones")) {
@@ -427,6 +428,7 @@ Producciones (grabaciones):
 - Si todavía no puede agendar, explica la regla con naturalidad y dile desde qué fecha puede.
 - El cliente es UNO SOLO: nunca le agendes dos cosas a la misma hora, aunque sean con personas distintas del equipo. Los horarios que te devuelven las herramientas ya vienen filtrados; si aun así te sale "ya_tiene_esa_hora", dile qué cita tiene a esa hora y con quién, y ofrécele otro horario o mover la que ya tiene.
 - Mover una producción no cambia la regla: la nueva fecha también tiene que respetar los 2 meses desde la última grabación.
+- GRABAMOS HASTA QUEDARNOS SIN CONTENIDO. La producción no se agenda "porque toca cada 2 meses": se agenda antes de quedarnos sin guiones por grabar. Usa verReservaDeContenido cuando se hable de producción, contenido o videos; si seAcaba viene en true, díselo claro y empújalo a cerrar fecha ya, que ahí la espera entre producciones no aplica.
 - NO HAY PRODUCCIÓN SIN PLANIFICACIÓN. Dilo siempre que se hable de grabar: los guiones de lo que vamos a grabar tienen que estar escritos y aprobados por él ANTES de la grabación. Si su planificación está vacía, dile que ya avisaste a su equipo de contenido y a Genesis Benalcazar para que los preparen, y pásale el link de su planificación.
 - Y para que lo que grabemos llegue a sus clientes hace falta el CRM: si todavía no hizo su sesión de Configuración de CRM y Metrics con David Robles, dile que la agende. Sin eso, los videos no tienen a dónde llevar a la gente.
 
@@ -708,6 +710,27 @@ Reglas:
           return r.ok
             ? { ok: true, cuando: r.cuando, con: r.responsable, correo: def.responsable.email, llevarListo: def.requisitos }
             : { ok: false, motivo: r.motivo, link: def.link };
+        },
+      },
+
+      verReservaDeContenido: {
+        description:
+          "Cuánto contenido le queda al cliente: guiones escritos por grabar, piezas en edición y listas para publicar, y si ya tiene producción agendada.",
+        inputSchema: z.object({}),
+        execute: async () => {
+          const r = await contenidoClienteService.reserva(chat.workspaceId!);
+          const seAcaba = contenidoClienteService.seAcaba(r);
+          return {
+            guionesPorGrabar: r.porGrabar,
+            enEdicion: r.enEdicion,
+            listosParaPublicar: r.listosParaPublicar,
+            nivel: r.nivel,
+            proximaProduccion: r.proximaProduccion ? fechaEcuador(r.proximaProduccion) : null,
+            seAcaba,
+            siguiente: seAcaba
+              ? "Dile que se está acabando su contenido y que cierren fecha de producción ya, sin esperar. Ofrécele horarios."
+              : "Cuéntaselo con naturalidad si viene al caso.",
+          };
         },
       },
 

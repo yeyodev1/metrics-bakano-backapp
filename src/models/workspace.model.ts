@@ -151,6 +151,8 @@ export interface IWorkspace extends Document {
   resources?: IResource[];
   onboardingStatus?: IOnboardingStatus;
   onboardingSesiones?: IOnboardingSesiones;
+  /** Ultimo aviso de "se te acaba el contenido", para no repetirlo cada dia. */
+  avisoContenidoEn?: Date;
   /** Correo de arranque del onboarding (el que manda al bot de Telegram). */
   onboardingBienvenidaEnviadaEn?: Date;
   /**
@@ -342,6 +344,7 @@ const WorkspaceSchema = new Schema<IWorkspace>(
       },
       default: undefined,
     },
+    avisoContenidoEn: { type: Date, default: null },
     onboardingBienvenidaEnviadaEn: {
       type: Date,
       default: null,

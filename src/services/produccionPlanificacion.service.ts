@@ -6,6 +6,9 @@ import { notificationService } from "./notification.service";
 import { equipoAtencionService } from "./equipoAtencion.service";
 import { fechaEcuador } from "./atencionCliente.service";
 import { SESIONES_ONBOARDING } from "./onboardingSesiones.service";
+import { contenidoClienteService } from "./contenidoCliente.service";
+import { telegramService } from "./telegram.service";
+import { equipoAtencionService as equipoAtencion } from "./equipoAtencion.service";
 
 /**
  * Una produccion sin planificacion no sirve.
@@ -25,6 +28,13 @@ const ROLES_GUIONES = ["content_manager", "community_manager", "copywriter"];
 /** Se insiste desde dos semanas antes: antes de eso todavia hay tiempo de sobra. */
 const VENTANA_PRESION_DIAS = 14;
 const CADA_MS = 20 * 3_600_000;
+/**
+ * Cuantos clientes se avisan por corrida. Hoy 63 de 101 entornos estan sin
+ * guiones por grabar: mandarlos todos el primer dia seria un correo que nadie
+ * abre y 63 clientes escribiendo a la vez. Se atienden los mas urgentes
+ * primero y el resto entra en las corridas siguientes.
+ */
+const MAX_AVISOS_POR_CORRIDA = 12;
 
 export interface EstadoPlanificacion {
   tienePlanificacion: boolean;
@@ -164,6 +174,87 @@ class ProduccionPlanificacionService {
       insistidas++;
     }
     return { revisadas: producciones.length, insistidas };
+  }
+
+  /**
+   * Clientes que se estan quedando sin guiones por grabar y no tienen
+   * grabacion en el calendario. Se le avisa al cliente por su chat (con el
+   * boton para agendar) y se presiona al equipo. Una vez al dia.
+   */
+  async avisarContenidoQueSeAcaba(): Promise<{ revisados: number; avisados: number; enCola: number }> {
+    const entornos = await models.workspaces.find({ isActive: true }).select("name avisoContenidoEn").lean();
+
+    // Primero se mide todo y se ordena por urgencia: el que esta en cero va
+    // antes que el que todavia tiene ocho guiones escritos.
+    const candidatos: { w: any; reserva: Awaited<ReturnType<typeof contenidoClienteService.reserva>> }[] = [];
+    for (const w of entornos as any[]) {
+      const reserva = await contenidoClienteService.reserva(w._id).catch(() => null);
+      if (!reserva || !contenidoClienteService.seAcaba(reserva)) continue;
+      const ultimo = w.avisoContenidoEn ? new Date(w.avisoContenidoEn).getTime() : 0;
+      if (Date.now() - ultimo < CADA_MS) continue;
+      candidatos.push({ w, reserva });
+    }
+    candidatos.sort((a, b) => a.reserva.porGrabar - b.reserva.porGrabar);
+    const tanda = candidatos.slice(0, MAX_AVISOS_POR_CORRIDA);
+    const enCola = candidatos.length - tanda.length;
+    if (enCola) console.log(`[Contenido] ${enCola} entorno(s) quedan para la próxima corrida`);
+    let avisados = 0;
+
+    for (const { w, reserva } of tanda) {
+
+      const urgente = reserva.nivel === "sin_contenido";
+      const titulo = `${urgente ? "🚨" : "⏳"} ${w.name} ${urgente ? "se quedó sin guiones por grabar" : `solo tiene ${reserva.porGrabar} guiones por grabar`}`;
+      const detalle =
+        (urgente
+          ? "Ya se grabó todo lo que estaba escrito y no tiene ninguna producción agendada.\n\n"
+          : `Le quedan ${reserva.porGrabar} guiones por grabar y no tiene producción agendada.\n\n`) +
+        `En cola: ${reserva.enEdicion} en edición y ${reserva.listosParaPublicar} listos para publicar.\n\n` +
+        "Grabamos hasta quedarnos sin contenido: hay que escribir los guiones nuevos y cerrar fecha de producción con el cliente.\n\n" +
+        `Planificación: ${APP_URL}/app/workspaces/${w._id}/planning`;
+
+      const { correos, usuarios } = await this.destinatarios();
+      const produccion = equipoAtencion.correos("produccion");
+      const todos = [...new Set([...correos, ...produccion])];
+      await Promise.allSettled([
+        slackService.avisarEquipo({ titulo, detalle, correos: todos }),
+        ...todos.map((c) => slackService.mensajeDirecto(c, titulo, detalle)),
+        ...usuarios.map((u) => notificationService.create(u._id, "produccion_agendada", titulo, detalle, { workspaceId: w._id })),
+        resendService.sendSolicitudClienteEmail({
+          to: todos,
+          tema: "se acaba el contenido",
+          workspaceName: w.name,
+          clienteNombre: w.name,
+          mensaje: detalle,
+          asunto: titulo,
+          encabezado: titulo,
+        }),
+      ]);
+
+      // Y al cliente, por su chat: es su contenido el que se apaga.
+      const chats = await models.telegramChats.find({ workspaceId: w._id, estado: "listo" }).select("chatId").lean();
+      for (const chat of chats as any[]) {
+        await telegramService
+          .sendMessage(
+            chat.chatId,
+            (urgente
+              ? "🎬 <b>Ya grabamos todo lo que estaba escrito</b>\n\nNo te quedan guiones por grabar, así que cuando salga lo que está en edición no habrá nada más que publicar."
+              : `🎬 <b>Se está acabando tu contenido</b>\n\nTe quedan ${reserva.porGrabar} guiones por grabar.`) +
+              `\n\nEn cola tienes ${reserva.enEdicion} en edición y ${reserva.listosParaPublicar} listos para publicar.\n\n` +
+              "Grabamos hasta quedarnos sin contenido, así que lo mejor es cerrar fecha ya: mientras antes grabemos, antes vuelves a tener videos saliendo 💪\n\n" +
+              "Tu equipo ya está avisado para preparar los guiones nuevos.",
+            [
+              [{ text: "🎬 Agendar mi producción", callback_data: "ag:produccion" }],
+              [{ text: "📋 Ver mi planificación", url: `${APP_URL}/app/workspaces/${w._id}/planning` }],
+              [{ text: "📋 Ver menú", callback_data: "menu:ver" }],
+            ]
+          )
+          .catch((error: any) => console.error("[Contenido] aviso al cliente:", error?.message || error));
+      }
+
+      await models.workspaces.updateOne({ _id: w._id }, { $set: { avisoContenidoEn: new Date() } });
+      avisados++;
+    }
+    return { revisados: entornos.length, avisados, enCola };
   }
 
   /** Lo que se le dice al cliente cuando acaba de agendar su produccion. */

@@ -7,6 +7,7 @@ import { notificationService } from "./notification.service";
 import { ghlService } from "./ghl.service";
 import { slackService } from "./slack.service";
 import { crmProductionSyncService } from "./crmProductionSync.service";
+import { contenidoClienteService, type ReservaContenido } from "./contenidoCliente.service";
 import { produccionPlanificacionService } from "./produccionPlanificacion.service";
 import { CALENDARIOS_PRODUCCION, EQUIPO_ATENCION, equipoAtencionService, type TemaAtencion } from "./equipoAtencion.service";
 
@@ -70,6 +71,10 @@ export interface EstadoProduccion {
   habilitadaDesde?: Date;
   /** true si la regla de los meses corre la fecha, no solo la anticipacion. */
   esperar?: boolean;
+  /** Cuanto le queda por grabar: es lo que decide si hay que grabar ya. */
+  reserva?: ReservaContenido | null;
+  /** Se quedo sin guiones por grabar: la espera entre producciones no aplica. */
+  sinContenido?: boolean;
 }
 
 export type ResultadoProduccion =
@@ -186,13 +191,20 @@ class AtencionClienteService {
     ]);
     if (proxima) return { puedeAgendar: false, proxima: proxima.date, ultima: ultima?.date };
 
-    const porRegla = ultima ? sumarMeses(ultima.date, MESES_ENTRE_PRODUCCIONES) : ahora;
+    // La espera entre producciones existe para no grabar de mas. Si ya no
+    // queda nada escrito por grabar, esperar es justo lo contrario de lo que
+    // hace falta: se levanta la regla y se graba cuanto antes.
+    const reserva = await contenidoClienteService.reserva(workspaceId).catch(() => null);
+    const sinContenido = reserva ? contenidoClienteService.seAcaba(reserva) : false;
+    const porRegla = ultima && !sinContenido ? sumarMeses(ultima.date, MESES_ENTRE_PRODUCCIONES) : ahora;
     const minimo = ahora.getTime() + ANTICIPACION_PRODUCCION_MS;
     return {
       puedeAgendar: true,
       ultima: ultima?.date,
       habilitadaDesde: new Date(Math.max(porRegla.getTime(), minimo)),
       esperar: porRegla.getTime() > minimo,
+      reserva,
+      sinContenido,
     };
   }
 
