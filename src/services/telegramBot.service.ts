@@ -1037,22 +1037,22 @@ export class TelegramBotService {
       if (urgente) urgentes++;
       lineas.push(
         `<b>${n}.</b> 🗓️ <b>${escaparHtml(cita.etiqueta)}</b>\n     ${fechaEcuador(cita.inicio)}\n     con ${escaparHtml(cita.con)}` +
-          (urgente ? "\n     ⏰ falta menos de 2 días: ya no la puedes cambiar solo, la coordinamos contigo" : "")
+          (urgente ? "\n     ⏰ falta menos de 2 días: la cambio igual, pero aviso a todo el equipo" : "")
       );
       // Hasta dos días antes la cambia él. Más cerca, el botón avisa al equipo.
       botones.push([
-        { text: `🔄 Mover ${n}`, callback_data: `cc:${urgente ? "u:m" : "m"}:${cita.ref}` },
-        { text: `✖️ Cancelar ${n}`, callback_data: `cc:${urgente ? "u:c" : "c"}:${cita.ref}` },
+        { text: `🔄 Mover ${n}`, callback_data: `cc:m:${cita.ref}` },
+        { text: `✖️ Cancelar ${n}`, callback_data: `cc:c:${cita.ref}` },
       ]);
     });
     botones.push([{ text: "📋 Volver al menú", callback_data: "menu:ver" }]);
 
     const cierre =
       "Toca el número de la que quieras mover o cancelar 👇\n\n" +
-      "ℹ️ <b>Mover o cancelar por tu cuenta se puede hasta 2 días antes.</b> Si falta menos, igual toca el botón: le aviso a todo el equipo de esa cita y lo coordinan contigo.\n\n" +
+      "ℹ️ <b>Lo ideal es avisar con más de 2 días.</b> Si falta menos, igual te la cambio, solo que le aviso a todo el equipo de esa cita para que reacomoden su día.\n\n" +
       `Y revisa tu planificación para que no se te cruce nada 👉 ${APP_URL}/app/workspaces/${chat.workspaceId}/planning` +
       (urgentes
-        ? `\n\n⏰ ${urgentes === 1 ? "Una está" : `${urgentes} están`} dentro de esos 2 días.`
+        ? `\n\n⏰ ${urgentes === 1 ? "Una está" : `${urgentes} están`} dentro de esos 2 días: ${urgentes === 1 ? "esa la cambio" : "esas las cambio"} avisando a todo el equipo.`
         : "");
     await telegramService.sendMessage(chat.chatId, `Estas son tus citas 👇\n\n${lineas.join("\n\n")}\n\n${cierre}`, botones);
   }
@@ -1083,7 +1083,6 @@ export class TelegramBotService {
   private async mostrarHorariosParaMover(chat: ITelegramChat, ref: string): Promise<void> {
     const { cita, horarios, motivo } = await citasClienteService.horariosParaMover(chat, ref);
     if (!cita) return this.mostrarCitas(chat);
-    if (motivo === "sobre_la_hora") return this.avisarCambioSobreLaHora(chat, ref, "mover");
     if (!horarios.length) {
       await telegramService.sendMessage(
         chat.chatId,
@@ -1098,6 +1097,9 @@ export class TelegramBotService {
     await telegramService.sendMessage(
       chat.chatId,
       `Tu <b>${escaparHtml(cita.etiqueta.toLowerCase())}</b> está para el <b>${fechaEcuador(cita.inicio)}</b>.` +
+        (citasClienteService.esUrgente(cita)
+          ? "\n\n⏰ Es en menos de 2 días: te la muevo igual, solo que le aviso a todo el equipo de esa cita para que reacomoden su día."
+          : "") +
         "\n\nElige la nueva fecha 👇",
       botones
     );
@@ -1114,7 +1116,6 @@ export class TelegramBotService {
       inicio: cambio.inicio?.toISOString(),
     });
     if (!r.ok) {
-      if (r.motivo === "sobre_la_hora") return this.avisarCambioSobreLaHora(chat, cambio.ref, cambio.accion === "cancelar" ? "cancelar" : "mover");
       const correos = "correos" in r && r.correos?.length ? ` Escríbele a ${escaparHtml(r.correos.join(" o "))}.` : "";
       const texto =
         r.motivo === "horario_no_disponible"
