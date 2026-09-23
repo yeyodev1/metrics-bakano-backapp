@@ -7,6 +7,7 @@ import { notificationService } from "./notification.service";
 import { ghlService } from "./ghl.service";
 import { slackService } from "./slack.service";
 import { crmProductionSyncService } from "./crmProductionSync.service";
+import { produccionPlanificacionService } from "./produccionPlanificacion.service";
 import { CALENDARIOS_PRODUCCION, EQUIPO_ATENCION, equipoAtencionService, type TemaAtencion } from "./equipoAtencion.service";
 
 export const TZ = "America/Guayaquil";
@@ -72,7 +73,7 @@ export interface EstadoProduccion {
 }
 
 export type ResultadoProduccion =
-  | { ok: true; cuando: string }
+  | { ok: true; cuando: string; planificacion?: { tienePlanificacion: boolean; guiones: number; listaParaCliente: boolean } | null }
   | { ok: false; motivo: "sin_calendario" | "en_curso" | "ya_agendada" | "antes_de_tiempo" | "ocupado" | "error" };
 
 function sumarMeses(fecha: Date, meses: number): Date {
@@ -289,7 +290,25 @@ class AtencionClienteService {
           encabezado: `${cliente.entorno} agendó su producción`,
         });
       }
-      return { ok: true, cuando };
+
+      // La produccion y su planificacion son lo mismo visto de dos lados: el
+      // equipo de guiones y Genesis se enteran ahora, no la semana de grabar.
+      const produccion = await produccionPlanificacionService
+        .produccionDe(chat.workspaceId!, inicio)
+        .catch(() => null);
+      await produccionPlanificacionService
+        .avisarNuevaProduccion({
+          workspaceId: chat.workspaceId!,
+          entorno: cliente.entorno,
+          cliente: cliente.nombre,
+          cuando: inicio,
+          planningId: produccion?._id as any,
+        })
+        .catch((error: any) => console.error("[Atención] aviso de planificación:", error?.message || error));
+
+      const planificacion = produccion ? await produccionPlanificacionService.estado(produccion._id as any).catch(() => null) : null;
+      return { ok: true, cuando, planificacion };
+
     } finally {
       await this.soltarCandado(chat);
     }

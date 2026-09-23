@@ -36,6 +36,8 @@ export interface IPlanning extends Document {
    * calendario mostraba la fecha, pero nadie sabia si ya se grabo.
    */
   cumplida: boolean;
+  /** Ultimo aviso al equipo de que esta produccion sigue sin guiones. */
+  avisoPlanificacionEn?: Date;
   cumplidaEn?: Date;
   cumplidaPorId?: Types.ObjectId;
   cumplidaPorNombre?: string;
@@ -95,6 +97,7 @@ const PlanningSchema = new Schema<IPlanning>(
       default: undefined,
     },
     cumplida: { type: Boolean, default: false },
+    avisoPlanificacionEn: { type: Date },
     cumplidaEn: { type: Date },
     cumplidaPorId: { type: Schema.Types.ObjectId, ref: "User" },
     cumplidaPorNombre: { type: String, trim: true },

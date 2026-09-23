@@ -64,6 +64,26 @@ cronRouter.get("/publicidad", async (req: Request, res: Response) => {
   }
 });
 
+// GET /api/cron/produccion-planificacion — todos los dias (13:40 UTC = 08:40
+// Ecuador). Insiste con las producciones de las proximas 2 semanas que siguen
+// sin guiones: no puede haber produccion sin planificacion.
+cronRouter.get("/produccion-planificacion", async (req: Request, res: Response) => {
+  const secret = process.env.CRON_SECRET;
+  if (!secret || req.headers["authorization"] !== `Bearer ${secret}`) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  try {
+    const { produccionPlanificacionService } = await import("../services/produccionPlanificacion.service");
+    const r = await produccionPlanificacionService.presionarPendientes();
+    console.log(`[Cron] Producción sin planificación — revisadas: ${r.revisadas}, insistidas: ${r.insistidas}`);
+    res.status(200).json(r);
+  } catch (error: any) {
+    console.error("[Cron] Producción sin planificación:", error?.message || error);
+    res.status(500).json({ error: error?.message || "error" });
+  }
+});
+
 // GET /api/cron/resumen-mensual — el dia 1 (14:40 UTC = 09:40 Ecuador).
 // Le manda a cada cliente el cierre del mes anterior contra su meta.
 cronRouter.get("/resumen-mensual", async (req: Request, res: Response) => {
