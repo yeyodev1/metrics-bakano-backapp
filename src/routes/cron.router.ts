@@ -5,6 +5,25 @@ import { runMetaMetricsSync } from "../crons/metaMetrics.cron";
 
 const cronRouter = Router();
 
+// GET /api/cron/resumen-mensual — el dia 1 (14:40 UTC = 09:40 Ecuador).
+// Le manda a cada cliente el cierre del mes anterior contra su meta.
+cronRouter.get("/resumen-mensual", async (req: Request, res: Response) => {
+  const secret = process.env.CRON_SECRET;
+  if (!secret || req.headers["authorization"] !== `Bearer ${secret}`) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  try {
+    const { resumenMensualService } = await import("../services/resumenMensual.service");
+    const r = await resumenMensualService.enviar();
+    console.log(`[Cron] Resumen mensual — enviados: ${r.enviados}`);
+    res.status(200).json(r);
+  } catch (error: any) {
+    console.error("[Cron] Resumen mensual:", error?.message || error);
+    res.status(500).json({ error: error?.message || "error" });
+  }
+});
+
 // GET /api/cron/facturacion-telegram — una vez al dia (14:10 UTC = 09:10 Ecuador).
 // Le recuerda por el chat a cada cliente que no registro su facturacion, y a
 // los 3 dias seguidos avisa al equipo. Solo clientes: los chats del equipo

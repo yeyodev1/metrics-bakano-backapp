@@ -41,6 +41,10 @@
       "schedule": "*/30 * * * *"
     },
     {
+      "path": "/api/cron/resumen-mensual",
+      "schedule": "40 14 1 * *"
+    },
+    {
       "path": "/api/cron/facturacion-telegram",
       "schedule": "10 14 * * *"
     },
