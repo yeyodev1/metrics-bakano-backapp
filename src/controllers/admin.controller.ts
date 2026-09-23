@@ -125,6 +125,27 @@ export async function createInternalUser(req: AuthRequest, res: Response, next: 
   }
 }
 
+export async function updateInternalUser(req: AuthRequest, res: Response, next: NextFunction) {
+  try {
+    const userId = req.params["userId"] as string;
+    const { internalRole, name, isActive } = req.body ?? {};
+    const user = await workspaceService.updateInternalUser(userId, { internalRole, name, isActive });
+    res.status(HttpStatusCode.Ok).send({ message: "Equipo actualizado.", user });
+    return;
+  } catch (error: any) {
+    if (error.message === "NOT_FOUND" || error.message === "INVALID_ID") {
+      res.status(HttpStatusCode.NotFound).send({ message: "Esa persona no está en el equipo interno." });
+      return;
+    }
+    if (error.message === "NOTHING_TO_UPDATE") {
+      res.status(HttpStatusCode.BadRequest).send({ message: "No mandaste nada que cambiar." });
+      return;
+    }
+    console.error("updateInternalUser error:", error);
+    next(error);
+  }
+}
+
 export async function deleteInternalUser(req: AuthRequest, res: Response, next: NextFunction) {
   try {
     const requestingUserId = req.user!._id.toString();

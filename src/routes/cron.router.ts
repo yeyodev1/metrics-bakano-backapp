@@ -5,6 +5,42 @@ import { runMetaMetricsSync } from "../crons/metaMetrics.cron";
 
 const cronRouter = Router();
 
+// GET /api/cron/incidente-prueba — a mano, para comprobar que el aviso a
+// Genesis (correo, Slack y notificacion en Metrics) sale de verdad.
+cronRouter.get("/incidente-prueba", async (req: Request, res: Response) => {
+  const secret = process.env.CRON_SECRET;
+  if (!secret || req.headers["authorization"] !== `Bearer ${secret}`) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  try {
+    const models = (await import("../models")).default;
+    const { incidentesService } = await import("../services/incidentes.service");
+    const nombre = (req.query["entorno"] as string) || "pruebas de diego reyes";
+    const workspace = await models.workspaces.findOne({ name: nombre }).select("_id name").lean();
+    if (!workspace) {
+      res.status(404).json({ error: `No existe el entorno "${nombre}"` });
+      return;
+    }
+    const id = await incidentesService.abrir({
+      workspaceId: workspace._id as any,
+      workspaceName: workspace.name,
+      gravedad: "angustiado",
+      tema: "atencion",
+      cliente: { nombre: "Cliente de prueba" },
+      frase: "PRUEBA · esto es un incidente de prueba para verificar el aviso, no hay ningún cliente molesto",
+      motivo: "Prueba del sistema de incidentes",
+      recomendacion: "No hay que hacer nada: es una prueba. Ciérralo desde Metrics cuando lo veas.",
+      mensajeCompleto: "Mensaje de prueba enviado a propósito para comprobar que el aviso llega.",
+    });
+    console.log(`[Cron] Incidente de prueba creado: ${id}`);
+    res.status(200).json({ incidenteId: id, link: id ? incidentesService.link(id) : null });
+  } catch (error: any) {
+    console.error("[Cron] incidente de prueba:", error?.message || error);
+    res.status(500).json({ error: error?.message || "error" });
+  }
+});
+
 // GET /api/cron/publicidad — lunes (14:20 UTC = 09:20 Ecuador).
 // Avisa al equipo si un cliente lleva 20 dias con los mismos anuncios y le
 // cuenta al cliente cada 3 semanas que estamos anunciando.

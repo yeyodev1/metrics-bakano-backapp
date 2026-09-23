@@ -3,7 +3,7 @@ import { authMiddleware } from "../middlewares/auth.middleware";
 import { superadminMiddleware } from "../middlewares/superadmin.middleware";
 import {
   listSuperadmins, createSuperadmin, deleteSuperadmin,
-  listInternalUsers, createInternalUser, deleteInternalUser,
+  listInternalUsers, createInternalUser, updateInternalUser, deleteInternalUser,
   getApiKey, generateApiKey, revokeApiKey,
 } from "../controllers/admin.controller";
 import { listCrmCalendars, runCrmProductionSync } from "../controllers/crmProduction.controller";
@@ -19,6 +19,7 @@ adminRouter.delete("/superadmins/:userId", deleteSuperadmin);
 
 adminRouter.get("/internal-users", listInternalUsers);
 adminRouter.post("/internal-users", createInternalUser);
+adminRouter.patch("/internal-users/:userId", updateInternalUser);
 adminRouter.delete("/internal-users/:userId", deleteInternalUser);
 
 // Produccion desde el CRM: ver calendarios amarrados y forzar la sincronizacion

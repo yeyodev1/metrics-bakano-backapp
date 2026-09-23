@@ -737,6 +737,30 @@ export class WorkspaceService {
     return withoutPassword;
   }
 
+  /**
+   * Cambia el rol o el nombre de alguien del equipo. Antes esto solo se podia
+   * arreglar tocando la base: si a alguien lo ascendian de asistente a editor,
+   * Metrics seguia mostrando el rol viejo.
+   */
+  async updateInternalUser(
+    targetUserId: string,
+    payload: { internalRole?: string; name?: string; isActive?: boolean }
+  ) {
+    if (!Types.ObjectId.isValid(targetUserId)) throw new Error("INVALID_ID");
+    const cambios: Record<string, unknown> = {};
+    if (payload.internalRole !== undefined) cambios["internalRole"] = payload.internalRole;
+    if (payload.name !== undefined) cambios["name"] = payload.name.trim();
+    if (payload.isActive !== undefined) cambios["isActive"] = payload.isActive;
+    if (!Object.keys(cambios).length) throw new Error("NOTHING_TO_UPDATE");
+
+    const user = await models.users
+      .findOneAndUpdate({ _id: targetUserId, isInternal: true }, { $set: cambios }, { new: true })
+      .select("-password")
+      .lean();
+    if (!user) throw new Error("NOT_FOUND");
+    return user;
+  }
+
   async deleteInternalUser(requestingUserId: string, targetUserId: string) {
     if (!Types.ObjectId.isValid(targetUserId)) throw new Error("INVALID_ID");
     if (requestingUserId === targetUserId) throw new Error("CANNOT_DELETE_SELF");
