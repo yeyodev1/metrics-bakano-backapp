@@ -25,6 +25,8 @@ export interface ITelegramChat extends Document {
 
   /** Correo escrito mientras se espera el codigo. Se borra al vincular. */
   correoPendiente?: string;
+  /** Otro correo escrito mientras esperaba el codigo: se confirma antes de cambiarlo. */
+  correoPropuesto?: string;
   /** Hash del codigo, nunca el codigo: quien lea la base no puede usarlo. */
   codigoHash?: string;
   codigoExpira?: Date;
@@ -102,6 +104,7 @@ const TelegramChatSchema = new Schema<ITelegramChat>(
     },
 
     correoPendiente: { type: String, lowercase: true, trim: true },
+    correoPropuesto: { type: String, lowercase: true, trim: true },
     codigoHash: { type: String, select: false },
     codigoExpira: { type: Date },
     codigoEnviadoEn: { type: Date },

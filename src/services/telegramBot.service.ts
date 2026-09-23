@@ -404,8 +404,8 @@ export class TelegramBotService {
     }
   }
 
-  private async recibirCorreo(chat: ITelegramChat, texto: string): Promise<void> {
-    const correo = texto.toLowerCase();
+  private async recibirCorreo(chat: ITelegramChat, texto: string, confirmado = false): Promise<void> {
+    const correo = texto.toLowerCase().trim();
     if (!CORREO_RE.test(correo)) {
       await telegramService.sendMessage(
         chat.chatId,
@@ -418,7 +418,29 @@ export class TelegramBotService {
       return;
     }
 
-    if (chat.codigoEnviadoEn && Date.now() - chat.codigoEnviadoEn.getTime() < REENVIO_SEGUNDOS * 1000) {
+    // Escribio OTRO correo mientras esperaba el codigo: casi siempre es que se
+    // equivoco en el primero (una letra de diferencia). No se cambia a ciegas,
+    // pero tampoco se ignora: se le pregunta cual es el bueno.
+    if (!confirmado && chat.estado === "esperando_codigo" && chat.correoPendiente && correo !== chat.correoPendiente) {
+      chat.correoPropuesto = correo;
+      await chat.save();
+      await telegramService.sendMessage(
+        chat.chatId,
+        "Ojo, para no equivocarme 🙌\n\n" +
+          `El código lo mandé a <b>${escaparHtml(chat.correoPendiente)}</b>\n` +
+          `y ahora me escribiste <b>${escaparHtml(correo)}</b>.\n\n` +
+          "Cuál es el bueno?",
+        [
+          [{ text: "✅ El nuevo, mándalo ahí", callback_data: "mail:ok" }],
+          [{ text: "↩️ El primero estaba bien", callback_data: "mail:no" }],
+        ]
+      );
+      return;
+    }
+
+    // El limite de reenvio es por correo: si esta corrigiendo el suyo, no se
+    // le puede decir "ya te mande uno" y dejarlo esperando un minuto.
+    if (correo === chat.correoPendiente && chat.codigoEnviadoEn && Date.now() - chat.codigoEnviadoEn.getTime() < REENVIO_SEGUNDOS * 1000) {
       await telegramService.sendMessage(
         chat.chatId,
         "Ya te mandé un código hace un momentito! 📬 Revisa tu bandeja (y el spam, por si acaso). Si no llega, espera un minuto y vuelve a escribir tu correo."
@@ -430,6 +452,7 @@ export class TelegramBotService {
     const usuario = await models.users.findOne({ email: correo, isActive: true }).select("name email").lean();
 
     chat.correoPendiente = correo;
+    chat.correoPropuesto = undefined;
     chat.codigoHash = hashCodigo(chat.chatId, codigo);
     chat.codigoExpira = new Date(Date.now() + CODIGO_MINUTOS * 60_000);
     chat.codigoEnviadoEn = new Date();
@@ -510,6 +533,25 @@ export class TelegramBotService {
 
   // ── Botones ────────────────────────────────────────────────────────────────
   private async onBoton(chat: ITelegramChat, data: string): Promise<void> {
+    // Corregir el correo pasa ANTES de estar vinculado: si no, el boton
+    // reiniciaba el login y el cliente volvia al punto de partida.
+    if (data === "mail:ok") {
+      const nuevo = chat.correoPropuesto;
+      chat.correoPropuesto = undefined;
+      await chat.save();
+      if (!nuevo) return this.reiniciar(chat, PEDIR_CORREO);
+      return this.recibirCorreo(chat, nuevo, true);
+    }
+    if (data === "mail:no") {
+      const anterior = chat.correoPendiente;
+      chat.correoPropuesto = undefined;
+      await chat.save();
+      await telegramService.sendMessage(
+        chat.chatId,
+        `Listo, seguimos con <b>${escaparHtml(anterior || "tu correo")}</b> 👌\n\nEscríbeme aquí el código de 6 números que te llegó.`
+      );
+      return;
+    }
     if (!chat.userId) return this.reiniciar(chat, PEDIR_CORREO);
 
     if (data.startsWith("ws:")) return this.elegirEntorno(chat, data.slice(3));
