@@ -47,7 +47,24 @@ const BLOQUEO_AGENDA_MS = 60_000;
  */
 const MESES_ENTRE_PRODUCCIONES = Number(process.env.PRODUCCION_MESES_ENTRE) > 0 ? Number(process.env.PRODUCCION_MESES_ENTRE) : 2;
 // El cliente necesita tiempo para revisar guiones antes de grabar (48 h de correcciones).
-const ANTICIPACION_PRODUCCION_MS = 48 * 3_600_000;
+/**
+ * Dias de margen para agendar una produccion, contados desde mañana.
+ *
+ * Grabar necesita preparacion: guiones aprobados, recursos listos y la agenda
+ * de Karen y Jean cuadrada. Con 48 horas el equipo llegaba corriendo, asi que
+ * la primera fecha posible son cinco dias contados desde mañana: si hoy es 24
+ * y mañana es 25, el primer horario que se ofrece es el 30.
+ */
+const DIAS_MINIMOS_PRODUCCION = 5;
+
+/** Primera fecha en que se puede grabar, a las 00:00 de Ecuador. */
+export function desdeParaProduccion(ahora = new Date()): Date {
+  // Ecuador es UTC-5 todo el año: las 00:00 de allá son las 05:00 UTC.
+  const hoyEc = new Date(ahora.getTime() - 5 * 3_600_000);
+  const inicio = Date.UTC(hoyEc.getUTCFullYear(), hoyEc.getUTCMonth(), hoyEc.getUTCDate(), 5, 0, 0);
+  // +1 por mañana y +DIAS_MINIMOS_PRODUCCION por el margen.
+  return new Date(inicio + (DIAS_MINIMOS_PRODUCCION + 1) * 86_400_000);
+}
 const VENTANA_PRODUCCION_DIAS = 30;
 
 export interface DatosCliente {
@@ -197,7 +214,7 @@ class AtencionClienteService {
     const reserva = await contenidoClienteService.reserva(workspaceId).catch(() => null);
     const sinContenido = reserva ? contenidoClienteService.seAcaba(reserva) : false;
     const porRegla = ultima && !sinContenido ? sumarMeses(ultima.date, MESES_ENTRE_PRODUCCIONES) : ahora;
-    const minimo = ahora.getTime() + ANTICIPACION_PRODUCCION_MS;
+    const minimo = desdeParaProduccion(ahora).getTime();
     return {
       puedeAgendar: true,
       ultima: ultima?.date,
