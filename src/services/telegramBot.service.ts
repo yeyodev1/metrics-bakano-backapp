@@ -9,6 +9,7 @@ import { onboardingBotService } from "./onboardingBot.service";
 import { produccionPlanificacionService } from "./produccionPlanificacion.service";
 import { contenidoClienteService } from "./contenidoCliente.service";
 import { recorridoClienteService } from "./recorridoCliente.service";
+import { CAMPOS_CONTRATO, ETIQUETA_CONTRATO, PREGUNTA_CONTRATO, contratoChatService, type CampoContrato } from "./contratoChat.service";
 import { perfilClienteService } from "./perfilCliente.service";
 import { CAMPOS_MARCA, OPCIONES_MARCA, PREGUNTA_MARCA, onboardingDatosService } from "./onboardingDatos.service";
 import { citasClienteService } from "./citasCliente.service";
@@ -324,6 +325,20 @@ export class TelegramBotService {
 
         // Le pedimos el link o el número donde cae la venta: eso se lee antes
         // que la IA, si no se pierde en la conversación y nunca queda guardado.
+        // Datos del contrato: se piden por aqui y son obligatorios antes de
+        // poder firmar, asi que se leen antes que cualquier otra cosa.
+        if (chat.datoEsperado?.campo?.startsWith("contrato:") && chat.workspaceId && texto.trim()) {
+          const campo = chat.datoEsperado.campo.slice(9) as CampoContrato;
+          const r = await contratoChatService.guardar(chat, campo, texto.trim());
+          if (r.ok) {
+            chat.datoEsperado = undefined;
+            await chat.save();
+            return this.preguntarSiguienteDatoContrato(chat);
+          }
+          await telegramService.sendMessage(chat.chatId, `${escaparHtml(r.motivo || "No pude guardarlo")}\n\nInténtalo de nuevo 👇`);
+          return;
+        }
+
         if (chat.datoEsperado?.campo && chat.workspaceId && texto.trim()) {
           const campo = chat.datoEsperado.campo;
           const r = await onboardingDatosService.registrarDatoMarca(chat, campo, texto.trim(), true);
@@ -663,6 +678,26 @@ export class TelegramBotService {
             : "No encontré ese archivo 😕 me lo reenvías?",
         await this.botonesDeLoQueFalta(chat)
       );
+      return;
+    }
+    if (data === "contrato:llenar") return this.preguntarSiguienteDatoContrato(chat);
+    if (data === "contrato:link") return this.mandarLinkFirma(chat);
+    if (data === "contrato:corregir") {
+      await telegramService.sendMessage(
+        chat.chatId,
+        "¿Cuál corrijo?",
+        CAMPOS_CONTRATO.map((c) => [{ text: ETIQUETA_CONTRATO[c], callback_data: `contrato:campo:${c}` }]).concat([
+          [{ text: "📋 Volver al menú", callback_data: "menu:ver" }],
+        ])
+      );
+      return;
+    }
+    if (data.startsWith("contrato:campo:")) {
+      const campo = data.slice(15) as CampoContrato;
+      if (!CAMPOS_CONTRATO.includes(campo)) return this.mandarLinkFirma(chat);
+      chat.datoEsperado = { campo: `contrato:${campo}`, pedidoEn: new Date() };
+      await chat.save();
+      await telegramService.sendMessage(chat.chatId, PREGUNTA_CONTRATO[campo]);
       return;
     }
     if (data === "datos:contar") return this.preguntarSiguienteDato(chat);
@@ -1081,6 +1116,60 @@ export class TelegramBotService {
   }
 
   /**
+   * El contrato se llena aquí, de a un dato por vez. Es obligatorio: sin esos
+   * datos no hay contrato que firmar, y llenarlos en un formulario web era
+   * justo donde se caía el proceso.
+   */
+  private async preguntarSiguienteDatoContrato(chat: ITelegramChat): Promise<void> {
+    if (!chat.workspaceId) return this.mostrarMenu(chat);
+    if (await contratoChatService.firmado(chat.workspaceId)) {
+      chat.datoEsperado = undefined;
+      await chat.save();
+      await telegramService.sendMessage(chat.chatId, "Tu contrato ya está firmado ✅ No hay nada más que hacer por aquí.", [
+        [{ text: "🚀 Ver mi onboarding", callback_data: "menu:onboarding" }],
+        [{ text: "📋 Volver al menú", callback_data: "menu:ver" }],
+      ]);
+      return;
+    }
+
+    const faltan = await contratoChatService.faltantes(chat.workspaceId);
+    if (!faltan.length) return this.mandarLinkFirma(chat);
+
+    const campo = faltan[0]!;
+    chat.datoEsperado = { campo: `contrato:${campo}`, pedidoEn: new Date() };
+    await chat.save();
+
+    const restantes = faltan.length - 1;
+    await telegramService.sendMessage(
+      chat.chatId,
+      PREGUNTA_CONTRATO[campo] +
+        (restantes ? `\n\n<i>Después de esta quedan ${restantes}.</i>` : "\n\n<i>Es el último dato.</i>")
+    );
+  }
+
+  /** Datos completos: se le manda el link que abre solo la firma. */
+  private async mandarLinkFirma(chat: ITelegramChat): Promise<void> {
+    if (!chat.workspaceId) return this.mostrarMenu(chat);
+    chat.datoEsperado = undefined;
+    await chat.save();
+
+    const resumen = await contratoChatService.resumen(chat.workspaceId);
+    const link = contratoChatService.link(chat.workspaceId);
+    await telegramService.sendMessage(
+      chat.chatId,
+      "Ya tengo todo para tu contrato ✅\n\n" +
+        `${resumen}\n\n` +
+        "Toca el botón y se te abre <b>solo la pantalla de firma</b>: lees el contrato, lo firmas y listo. " +
+        "Si algo de arriba está mal, dímelo y lo corrijo antes.",
+      [
+        [{ text: "✍️ Leer y firmar mi contrato", url: link }],
+        [{ text: "✏️ Corregir un dato", callback_data: "contrato:corregir" }],
+        [{ text: "📋 Volver al menú", callback_data: "menu:ver" }],
+      ]
+    );
+  }
+
+  /**
    * Lo que todavía le falta al cliente, como botones. Se pega al final de cada
    * confirmación: al cliente que acaba de mandar su logo hay que mostrarle lo
    * que sigue ahí mismo, no obligarlo a volver al menú a buscarlo.
@@ -1097,6 +1186,16 @@ export class TelegramBotService {
     const siguiente = estado?.sesiones.find((x) => x.sesion === estado.siguiente);
     if (siguiente) botones.push([{ text: `📅 Agendar ${siguiente.etiqueta}`, callback_data: `onb:${siguiente.sesion}` }]);
     else if (estado?.produccion.puedeAgendar) botones.push([{ text: "🎬 Agendar mi producción", callback_data: "ag:produccion" }]);
+
+    // El contrato va primero: sin firmarlo no arranca nada.
+    if (!(await contratoChatService.firmado(chat.workspaceId)) && excluir !== "contrato:llenar") {
+      const faltan = await contratoChatService.faltantes(chat.workspaceId);
+      botones.push([
+        faltan.length
+          ? { text: `📝 Llenar mi contrato (${faltan.length})`, callback_data: "contrato:llenar" }
+          : { text: "✍️ Firmar mi contrato", callback_data: "contrato:link" },
+      ]);
+    }
 
     const ACCION_POR_CHAT: Record<string, { texto: string; data: string }> = {
       archivosMarca: { texto: "📤 Mandarte mis logos", data: "sub:logo" },

@@ -139,7 +139,11 @@ export const checkOnboardingStatus = async (req: Request, res: Response, next: N
         resourcesCompleted: false,
         meetingScheduled: false,
       },
-      preNegotiatedContract: workspace.preNegotiatedContract || null
+      preNegotiatedContract: workspace.preNegotiatedContract || null,
+      // Los datos del contrato los llena el cliente por Telegram: la pantalla
+      // web solo lee, muestra y recibe la firma.
+      contractData: workspace.contractData || null,
+      workspaceName: workspace.name,
     });
   } catch (error) {
     console.error("Error in checkOnboardingStatus:", error);
