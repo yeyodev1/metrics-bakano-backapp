@@ -6,7 +6,7 @@ import { slackService } from "./slack.service";
 import { resendService } from "./resend.service";
 import { notificationService } from "./notification.service";
 import { crmProductionSyncService } from "./crmProductionSync.service";
-import { atencionClienteService, fechaEcuador } from "./atencionCliente.service";
+import { atencionClienteService, desdeParaProduccion, fechaEcuador } from "./atencionCliente.service";
 import { onboardingBotService } from "./onboardingBot.service";
 import { CALENDARIOS_PRODUCCION, EQUIPO_ATENCION, equipoAtencionService, type TemaAtencion } from "./equipoAtencion.service";
 import { ORDEN_SESIONES, SESIONES_ONBOARDING, type SesionOnboarding } from "./onboardingSesiones.service";
@@ -37,7 +37,7 @@ import { ORDEN_SESIONES, SESIONES_ONBOARDING, type SesionOnboarding } from "./on
 /** Debajo de esto el cambio es "sobre la hora": se avisa a todo el equipo de la cita. */
 const PLAZO_URGENTE_MS = 48 * 3_600_000;
 const ANTICIPACION_MS = 2 * 3_600_000;
-const ANTICIPACION_PRODUCCION_MS = 48 * 3_600_000;
+
 const VENTANA_MOVER_DIAS = 30;
 const MESES_ENTRE_PRODUCCIONES = Number(process.env.PRODUCCION_MESES_ENTRE) > 0 ? Number(process.env.PRODUCCION_MESES_ENTRE) : 2;
 const CANCELADAS = ["cancelled", "canceled", "invalid"];
@@ -274,7 +274,8 @@ class CitasClienteService {
         .lean();
       const porRegla = ultima ? sumarMeses(ultima.date, MESES_ENTRE_PRODUCCIONES).getTime() : 0;
       return {
-        desde: new Date(Math.max(porRegla, Date.now() + ANTICIPACION_PRODUCCION_MS)),
+        // Mover una produccion respeta el mismo margen que agendarla.
+        desde: new Date(Math.max(porRegla, desdeParaProduccion().getTime())),
         calendario: cita.calendarId || CALENDARIOS_PRODUCCION.standard,
       };
     }
