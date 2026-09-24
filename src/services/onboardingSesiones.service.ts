@@ -9,7 +9,13 @@
  * Telegram es el canal oficial. El bot no configura nada: enruta al cliente a
  * la reunion que toca, la agenda en el calendario del responsable y avisa.
  */
-export type SesionOnboarding = "bienvenida" | "especializacion" | "levantamiento";
+/**
+ * Las sesiones que el cliente AGENDA. La bienvenida no esta aqui a proposito:
+ * si el cliente ya esta hablando con el bot es porque la bienvenida se dio
+ * (ahi Genesis creo el entorno, sumo su correo y salio la invitacion).
+ * Ofrecerle agendarla seria pedirle que repita lo que acaba de pasar.
+ */
+export type SesionOnboarding = "especializacion" | "levantamiento";
 
 export interface DefinicionSesion {
   orden: number;
@@ -29,31 +35,22 @@ export interface DefinicionSesion {
   temas: string[];
 }
 
+/**
+ * La bienvenida no se agenda desde el bot: cuando el cliente llega al chat ya
+ * paso. Vive aqui para poder contarla en el recorrido y nombrar a Genesis.
+ */
+export const BIENVENIDA = {
+  etiqueta: "Bienvenida y creación de tu entorno",
+  emoji: "🤝",
+  responsable: { nombre: "Genesis Benalcazar", email: "gbenalcazar@bakano.ec" },
+  duracion: "15 minutos",
+  resumen:
+    "Creamos tu entorno contigo en pantalla, te damos los accesos y te dejamos conectado al bot para que sigas el proceso desde el chat.",
+};
+
 export const SESIONES_ONBOARDING: Record<SesionOnboarding, DefinicionSesion> = {
-  bienvenida: {
-    orden: 1,
-    etiqueta: "Bienvenida y creación de tu entorno",
-    emoji: "🤝",
-    responsable: { nombre: "Genesis Benalcazar", email: "gbenalcazar@bakano.ec" },
-    calendarioId: "FWL0e2jCKpbamtlj31io",
-    link: "https://api.leadconnectorhq.com/widget/bookings/project-manager",
-    duracion: "15 minutos",
-    requisitos: [
-      "Conéctate desde una computadora",
-      "Ten a la mano el correo con el que quieres entrar a metrics.bakano.ec",
-      "Ten instalado Telegram en tu celular",
-    ],
-    resumen:
-      "Creamos tu entorno contigo en pantalla, te damos los accesos y te dejamos conectado al bot para que sigas el proceso desde el chat.",
-    temas: [
-      "Creación de tu entorno en metrics.bakano.ec frente a ti",
-      "Invitación por correo a las personas de tu equipo que tendrán acceso",
-      "Conexión de tu cuenta con el bot de Telegram",
-      "Cómo es el proceso completo y qué te vamos a pedir en cada paso",
-    ],
-  },
   especializacion: {
-    orden: 2,
+    orden: 1,
     etiqueta: "Especialización con Joel",
     emoji: "📣",
     responsable: { nombre: "Joel Jimenez", email: "jjimenez@bakano.ec" },
@@ -80,7 +77,7 @@ export const SESIONES_ONBOARDING: Record<SesionOnboarding, DefinicionSesion> = {
     ],
   },
   levantamiento: {
-    orden: 3,
+    orden: 2,
     etiqueta: "Levantamiento de información con Ariana",
     emoji: "📝",
     responsable: { nombre: "Ariana Vera", email: "avera@bakano.ec" },
