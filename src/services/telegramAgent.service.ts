@@ -164,7 +164,7 @@ class TelegramAgentService {
         model: modelo(),
         system: this.instrucciones(datos, perfil, pendientes),
         messages: [...historial, { role: "user", content: texto }],
-        tools: this.registrarUso(this.herramientas(chat, texto, turno), turno.usadas),
+        tools: this.registrarUso(this.herramientas(chat, texto, turno), turno.usadas, chat),
         stopWhen: isStepCount(6),
         // Tiempo por paso en los logs: sin esto un corte a los 50 s no dice
         // si fue el modelo pensando o una herramienta lenta.
@@ -257,11 +257,16 @@ class TelegramAgentService {
   }
 
   /** Envuelve cada herramienta para saber cuales se usaron en este turno. */
-  private registrarUso(herramientas: Record<string, any>, usadas: Set<string>): Record<string, any> {
+  private registrarUso(herramientas: Record<string, any>, usadas: Set<string>, chat: ITelegramChat): Record<string, any> {
     for (const [nombre, def] of Object.entries(herramientas)) {
       const original = def.execute;
       def.execute = async (args: any, opciones: any) => {
         usadas.add(nombre);
+        // Queda registro de que herramienta resolvio la pregunta: es lo que
+        // despues dice si el bot sirve para lo que el cliente necesita.
+        models.usoBot
+          .create({ workspaceId: chat.workspaceId, userId: chat.userId, chatId: chat.chatId, accion: `ia:${nombre}`, origen: "ia", en: new Date() })
+          .catch(() => undefined);
         return original(args, opciones);
       };
     }

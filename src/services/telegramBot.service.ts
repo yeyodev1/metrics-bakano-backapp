@@ -95,6 +95,7 @@ export class TelegramBotService {
       if (!chat || chat.type !== "private" || !cq.data) return;
       const doc = await this.cargarChat(chat.id, cq.from);
       if (!(await this.esNuevo(doc, update.update_id))) return;
+      this.registrarUso(doc, cq.data, "boton");
       await this.onBoton(doc, cq.data);
       return;
     }
@@ -298,6 +299,7 @@ export class TelegramBotService {
       case "eligiendo_entorno":
         return this.pedirEntorno(chat);
       case "listo":
+        this.registrarUso(chat, "mensaje", "texto", texto);
         // Guiones con revision abierta: lo que escribe son correcciones, y esas
         // las junta la IA en el borrador en vez de reenviarlas sueltas.
         if (chat.tema === "guiones" && chat.workspaceId && (await revisionGuionesService.pendiente(chat.workspaceId))) {
@@ -576,6 +578,25 @@ export class TelegramBotService {
     const nombre = usuario.name ? `, ${escaparHtml(usuario.name.split(" ")[0])}` : "";
     await telegramService.sendMessage(chat.chatId, `Listo${nombre}! 🎉 Tu cuenta quedó conectada. Qué bueno tenerte aquí.`);
     return this.pedirEntorno(chat);
+  }
+
+  /**
+   * Queda registro de lo que el cliente hace aqui. Nunca bloquea ni rompe la
+   * respuesta: si el registro falla, el bot sigue contestando igual.
+   */
+  private registrarUso(chat: ITelegramChat, accion: string, origen: "boton" | "texto" | "ia", detalle?: string): void {
+    if (chat.estado !== "listo") return;
+    models.usoBot
+      .create({
+        workspaceId: chat.workspaceId,
+        userId: chat.userId,
+        chatId: chat.chatId,
+        accion: accion.slice(0, 120),
+        origen,
+        detalle: detalle?.slice(0, 500),
+        en: new Date(),
+      })
+      .catch((error: any) => console.error("[Uso] no se pudo registrar:", error?.message || error));
   }
 
   // ── Botones ────────────────────────────────────────────────────────────────
