@@ -46,6 +46,9 @@ export interface IUser extends Document {
   presentacionBotEnviadaEn?: Date;
   /** Cuando dio por visto el aviso del bot en Metrics. Hasta entonces se le muestra. */
   avisoBotVistoEn?: Date;
+  /** Recordatorios del bot ya enviados y cuando fue el ultimo (tope: dos semanas). */
+  presentacionBotRecordatorios?: number;
+  presentacionBotUltimoEn?: Date;
   /**
    * Recuperación de contraseña. Se guarda el hash del token, nunca el token:
    * si alguien lee la base de datos no puede usarlo para entrar a una cuenta.
@@ -135,6 +138,13 @@ export const UserSchema = new Schema<IUser>(
       type: Date,
     },
     avisoBotVistoEn: {
+      type: Date,
+    },
+    presentacionBotRecordatorios: {
+      type: Number,
+      default: 0,
+    },
+    presentacionBotUltimoEn: {
       type: Date,
     },
     // `select: false` para que ningún endpoint devuelva estos campos por error.

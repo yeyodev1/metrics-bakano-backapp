@@ -88,6 +88,45 @@ cronRouter.get("/produccion-planificacion", async (req: Request, res: Response) 
   }
 });
 
+// GET /api/cron/bot-recordatorios — a diario (15:00 UTC = 10:00 Ecuador).
+// Insiste con quien recibio el correo del bot y no lo conecto: cada 4 dias,
+// maximo 3 veces y solo durante las dos semanas siguientes.
+cronRouter.get("/bot-recordatorios", async (req: Request, res: Response) => {
+  const secret = process.env.CRON_SECRET;
+  if (!secret || req.headers["authorization"] !== `Bearer ${secret}`) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  try {
+    const { reporteBotService } = await import("../services/reporteBot.service");
+    const r = await reporteBotService.recordatorios();
+    console.log(`[Cron] Bot recordatorios — candidatos: ${r.candidatos}, enviados: ${r.enviados}`);
+    res.status(200).json(r);
+  } catch (error: any) {
+    console.error("[Cron] Bot recordatorios:", error?.message || error);
+    res.status(500).json({ error: error?.message || "error" });
+  }
+});
+
+// GET /api/cron/bot-reporte — lunes (13:20 UTC = 08:20 Ecuador).
+// Como se esta usando el bot y que conviene mejorar, a direccion.
+cronRouter.get("/bot-reporte", async (req: Request, res: Response) => {
+  const secret = process.env.CRON_SECRET;
+  if (!secret || req.headers["authorization"] !== `Bearer ${secret}`) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  try {
+    const { reporteBotService } = await import("../services/reporteBot.service");
+    const r = await reporteBotService.reporteSemanal();
+    console.log(`[Cron] Bot reporte — conectados: ${r.conectados}/${r.invitados}, activos: ${r.activos}, interacciones: ${r.interacciones}`);
+    res.status(200).json({ conectados: r.conectados, invitados: r.invitados, activos: r.activos, interacciones: r.interacciones });
+  } catch (error: any) {
+    console.error("[Cron] Bot reporte:", error?.message || error);
+    res.status(500).json({ error: error?.message || "error" });
+  }
+});
+
 // GET /api/cron/resumen-mensual — el dia 1 (14:40 UTC = 09:40 Ecuador).
 // Le manda a cada cliente el cierre del mes anterior contra su meta.
 cronRouter.get("/resumen-mensual", async (req: Request, res: Response) => {
