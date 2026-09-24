@@ -43,7 +43,7 @@ const ESTADOS: EstadoEtapa[] = ["pendiente", "en_curso", "listo", "no_aplica"];
 class RecorridoClienteService {
   /** El recorrido completo con el estado real de cada etapa. */
   async de(workspaceId: Types.ObjectId | string): Promise<{ etapas: EtapaCliente[]; actual?: EtapaRecorrido; listas: number }> {
-    const [workspace, estadoOnb, planes, produccion] = await Promise.all([
+    const [workspace, estadoOnb, planes, produccion, chatVinculado] = await Promise.all([
       models.workspaces.findById(workspaceId).select("brandProfile recorrido").lean(),
       onboardingBotService.estado(workspaceId as Types.ObjectId).catch(() => null),
       models.videoPlanning.find({ workspaceId }).select("items listaParaCliente").lean(),
@@ -52,6 +52,9 @@ class RecorridoClienteService {
         .sort({ date: -1 })
         .select("date cumplida")
         .lean(),
+      // Si el cliente ya esta en el chat, la bienvenida ocurrio: fue ahi donde
+      // Genesis creo el entorno y salio su invitacion.
+      models.telegramChats.exists({ workspaceId, estado: "listo" }),
     ]);
 
     const marcas = ((workspace as any)?.recorrido || {}) as Record<string, any>;
@@ -77,7 +80,11 @@ class RecorridoClienteService {
       if (def.seMarca === "manual") {
         estado = ESTADOS.includes(guardada?.estado) ? guardada.estado : "pendiente";
         detalle = guardada?.nota;
-      } else if (clave === "bienvenida" || clave === "especializacion" || clave === "levantamiento") {
+      } else if (clave === "bienvenida") {
+        const s = sesion("bienvenida");
+        estado = chatVinculado || s?.estado === "cumplida" ? "listo" : s?.estado === "no_aplica" ? "no_aplica" : "en_curso";
+        detalle = chatVinculado ? "Ya estás conectado al bot" : undefined;
+      } else if (clave === "especializacion" || clave === "levantamiento") {
         const s = sesion(clave);
         estado = s?.estado === "cumplida" ? "listo" : s?.estado === "no_aplica" ? "no_aplica" : s?.agendada ? "en_curso" : "pendiente";
         detalle = s?.fecha ? fechaEcuador(new Date(s.fecha)) : undefined;

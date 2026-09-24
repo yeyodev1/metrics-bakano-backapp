@@ -6,7 +6,7 @@ import { slackService } from "./slack.service";
 import { telegramService } from "./telegram.service";
 import { atencionClienteService, fechaEcuador } from "./atencionCliente.service";
 import { equipoAtencionService } from "./equipoAtencion.service";
-import { ORDEN_SESIONES, SESIONES_ONBOARDING, type SesionOnboarding } from "./onboardingSesiones.service";
+import { BIENVENIDA, ORDEN_SESIONES, SESIONES_ONBOARDING, type SesionOnboarding } from "./onboardingSesiones.service";
 
 /**
  * Progreso del onboarding visto desde adentro: cada responsable mueve su paso
@@ -17,7 +17,7 @@ import { ORDEN_SESIONES, SESIONES_ONBOARDING, type SesionOnboarding } from "./on
 export const PASOS: PasoOnboarding[] = [...ORDEN_SESIONES, "produccion"];
 
 const ETIQUETA_PASO: Record<PasoOnboarding, string> = {
-  bienvenida: SESIONES_ONBOARDING.bienvenida.etiqueta,
+  bienvenida: BIENVENIDA.etiqueta,
   especializacion: SESIONES_ONBOARDING.especializacion.etiqueta,
   levantamiento: SESIONES_ONBOARDING.levantamiento.etiqueta,
   produccion: "Primera producción",
@@ -28,7 +28,7 @@ const ETIQUETA_PASO: Record<PasoOnboarding, string> = {
 };
 
 const RESPONSABLE_PASO: Record<PasoOnboarding, string> = {
-  bienvenida: SESIONES_ONBOARDING.bienvenida.responsable.nombre,
+  bienvenida: BIENVENIDA.responsable.nombre,
   especializacion: SESIONES_ONBOARDING.especializacion.responsable.nombre,
   levantamiento: SESIONES_ONBOARDING.levantamiento.responsable.nombre,
   produccion: equipoAtencionService.nombres("produccion"),
@@ -38,7 +38,7 @@ const RESPONSABLE_PASO: Record<PasoOnboarding, string> = {
 };
 
 const CORREO_PASO: Record<PasoOnboarding, string[]> = {
-  bienvenida: [SESIONES_ONBOARDING.bienvenida.responsable.email],
+  bienvenida: [BIENVENIDA.responsable.email],
   especializacion: [SESIONES_ONBOARDING.especializacion.responsable.email],
   levantamiento: [SESIONES_ONBOARDING.levantamiento.responsable.email],
   produccion: equipoAtencionService.correos("produccion"),
