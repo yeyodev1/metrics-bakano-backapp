@@ -154,10 +154,11 @@ export class TelegramBotService {
         "Puede ser un PDF o una foto de la lista de precios. Si prefieres, <b>escríbelo en un mensaje</b> " +
         "(productos con sus precios) y yo lo guardo igual.",
     };
-    await telegramService.sendMessage(chat.chatId, instrucciones[categoria]!, [
-      [{ text: "🚀 Ver mi onboarding", callback_data: "menu:onboarding" }],
-      [{ text: "📋 Volver al menú", callback_data: "menu:ver" }],
-    ]);
+    await telegramService.sendMessage(
+      chat.chatId,
+      instrucciones[categoria]!,
+      await this.botonesDeLoQueFalta(chat, categoria === "logo" ? "sub:logo" : categoria === "catalogo" ? "sub:catalogo" : undefined)
+    );
   }
 
   /** Foto o archivo enviado al chat: se valida, se guarda y se confirma. */
@@ -231,11 +232,8 @@ export class TelegramBotService {
 
     await telegramService.sendMessage(
       chat.chatId,
-      `Listo, guardé tu <b>${ETIQUETA_CATEGORIA[r.categoria]}</b> en tu entorno ✅\n\nYa le avisé al equipo para que lo revise. Seguimos?`,
-      [
-        [{ text: "🚀 Ver mi onboarding", callback_data: "menu:onboarding" }],
-        [{ text: "📋 Volver al menú", callback_data: "menu:ver" }],
-      ]
+      `Listo, guardé tu <b>${ETIQUETA_CATEGORIA[r.categoria]}</b> en tu entorno ✅\n\nYa le avisé al equipo para que lo revise.\n\nSeguimos con lo que falta 👇`,
+      await this.botonesDeLoQueFalta(chat)
     );
   }
 
@@ -317,12 +315,9 @@ export class TelegramBotService {
           await telegramService.sendMessage(
             chat.chatId,
             guardado.ok
-              ? "Listo, guardé tu catálogo en tu entorno ✅ ya le avisé al equipo para que lo revise."
+              ? "Listo, guardé tu catálogo en tu entorno ✅ ya le avisé al equipo para que lo revise.\n\nSeguimos con lo que falta 👇"
               : "No pude guardarlo 😕 inténtalo de nuevo o mándamelo como archivo.",
-            [
-              [{ text: "🚀 Ver mi onboarding", callback_data: "menu:onboarding" }],
-              [{ text: "📋 Volver al menú", callback_data: "menu:ver" }],
-            ]
+            await this.botonesDeLoQueFalta(chat)
           );
           return;
         }
@@ -666,7 +661,7 @@ export class TelegramBotService {
           : r.motivo === "logo_no_png"
             ? `Para el logo necesito un <b>PNG</b> con fondo transparente 🙏 "${escaparHtml(r.nombre || "ese archivo")}" no lo es, así que lo dejé guardado igual. Mándame el PNG cuando puedas (con el clip 📎 → Archivo).`
             : "No encontré ese archivo 😕 me lo reenvías?",
-        [[{ text: "🚀 Ver mi onboarding", callback_data: "menu:onboarding" }], [{ text: "📋 Volver al menú", callback_data: "menu:ver" }]]
+        await this.botonesDeLoQueFalta(chat)
       );
       return;
     }
@@ -1086,6 +1081,49 @@ export class TelegramBotService {
   }
 
   /**
+   * Lo que todavía le falta al cliente, como botones. Se pega al final de cada
+   * confirmación: al cliente que acaba de mandar su logo hay que mostrarle lo
+   * que sigue ahí mismo, no obligarlo a volver al menú a buscarlo.
+   */
+  private async botonesDeLoQueFalta(chat: ITelegramChat, excluir?: string): Promise<InlineButton[][]> {
+    const botones: InlineButton[][] = [];
+    if (!chat.workspaceId) return [[{ text: "📋 Volver al menú", callback_data: "menu:ver" }]];
+
+    const [estado, pendientes] = await Promise.all([
+      onboardingBotService.estado(chat.workspaceId).catch(() => null),
+      onboardingDatosService.pendientes(chat.workspaceId).catch(() => null),
+    ]);
+
+    const siguiente = estado?.sesiones.find((x) => x.sesion === estado.siguiente);
+    if (siguiente) botones.push([{ text: `📅 Agendar ${siguiente.etiqueta}`, callback_data: `onb:${siguiente.sesion}` }]);
+    else if (estado?.produccion.puedeAgendar) botones.push([{ text: "🎬 Agendar mi producción", callback_data: "ag:produccion" }]);
+
+    const ACCION_POR_CHAT: Record<string, { texto: string; data: string }> = {
+      archivosMarca: { texto: "📤 Mandarte mis logos", data: "sub:logo" },
+      facturacion: { texto: "💵 Registrar mi facturación", data: "fact:ver" },
+      catalogo: { texto: "🏷️ Mandarte mi catálogo", data: "sub:catalogo" },
+    };
+    for (const e of (pendientes?.entregables || []).filter((x) => x.estado === "pendiente")) {
+      const accion = ACCION_POR_CHAT[e.clave];
+      if (accion && accion.data !== excluir) botones.push([{ text: accion.texto, callback_data: accion.data }]);
+    }
+
+    const faltaContar = pendientes?.datosMarcaFaltantes || [];
+    const faltaVenta = faltaContar.some((d) => d.campo === "trafficDirection" || d.campo === "trafficLink");
+    if (faltaVenta && excluir !== "venta:donde") {
+      botones.push([{ text: "🎯 Dónde capturo mis ventas", callback_data: "venta:donde" }]);
+    }
+    const otrosDatos = faltaContar.filter((d) => d.campo !== "trafficDirection" && d.campo !== "trafficLink");
+    if (otrosDatos.length && excluir !== "datos:contar") {
+      botones.push([{ text: `✍️ Contarte de mi negocio (${otrosDatos.length})`, callback_data: "datos:contar" }]);
+    }
+
+    botones.push([{ text: "🚀 Ver mi onboarding", callback_data: "menu:onboarding" }]);
+    botones.push([{ text: "📋 Volver al menú", callback_data: "menu:ver" }]);
+    return botones;
+  }
+
+  /**
    * Va preguntando los datos de marca uno por uno, en el orden del proceso, y
    * se detiene solo cuando no queda ninguno. Con botones donde la respuesta es
    * una de tres: nadie debería tener que escribir "semicasual".
@@ -1107,15 +1145,7 @@ export class TelegramBotService {
         "Listo, ya tengo los datos de tu marca ✅\n\n" +
           "Con esto Ariana escribe guiones que suenan a ti y no a cualquiera." +
           (faltaVenta ? "\n\nNos falta una sola cosa: a dónde mandamos a la gente que vea tus videos 👇" : ""),
-        faltaVenta
-          ? [
-              [{ text: "🎯 Dónde capturo mis ventas", callback_data: "venta:donde" }],
-              [{ text: "🚀 Cómo va mi onboarding", callback_data: "menu:onboarding" }],
-            ]
-          : [
-              [{ text: "🚀 Cómo va mi onboarding", callback_data: "menu:onboarding" }],
-              [{ text: "📋 Volver al menú", callback_data: "menu:ver" }],
-            ]
+        await this.botonesDeLoQueFalta(chat, "datos:contar")
       );
       return;
     }
@@ -1197,10 +1227,7 @@ export class TelegramBotService {
         ? `Tranquilo, esto lo armamos juntos 💛\n\nYa le avisé a <b>${escaparHtml(r.responsable)}</b> y lo dejan listo en <b>${escaparHtml(r.donde)}</b>. ` +
           "No lo pierdas de vista: sin ese dato los videos no tienen a dónde mandar a la gente, así que es de lo primero que vemos."
         : "Listo, lo dejo anotado y lo vemos con el equipo 💛",
-      [
-        [{ text: "🚀 Ver mi onboarding", callback_data: "menu:onboarding" }],
-        [{ text: "📋 Volver al menú", callback_data: "menu:ver" }],
-      ]
+      await this.botonesDeLoQueFalta(chat, "venta:donde")
     );
   }
 
@@ -1313,9 +1340,10 @@ export class TelegramBotService {
     }
     botones.push(
       [{ text: "✏️ Corregir este monto", callback_data: `fact:dia:${claveDia(r.dia)}` }],
-      [{ text: "📊 Ver mis métricas", callback_data: "fact:metricas" }],
-      [{ text: "📋 Volver al menú", callback_data: "menu:ver" }]
+      [{ text: "📊 Ver mis métricas", callback_data: "fact:metricas" }]
     );
+    // Y lo que siga faltando del onboarding, para no mandarlo al menú a buscarlo.
+    botones.push(...(await this.botonesDeLoQueFalta(chat, "fact:ver")));
 
     // El cierre lo escribe la IA con los números del día: una plantilla dice
     // "registré $1.250" y ya; la lectura es lo que al cliente le sirve.
