@@ -2,6 +2,7 @@ import { Router } from "express";
 import {
   login,
   getMe,
+  marcarAvisoBotVisto,
   forgotPassword,
   verifyResetToken,
   resetPassword,
@@ -12,6 +13,7 @@ const authRouter = Router();
 
 authRouter.post("/login", login);
 authRouter.get("/me", authMiddleware, getMe);
+authRouter.post("/aviso-bot-visto", authMiddleware, marcarAvisoBotVisto);
 
 // Recuperación de contraseña. Las tres son públicas por definición: quien las
 // usa es justamente alguien que no puede entrar.

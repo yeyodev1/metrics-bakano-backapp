@@ -44,6 +44,8 @@ export interface IUser extends Document {
   apiKeyCreatedAt?: Date;
   /** Cuando se le presento el bot de Telegram, para no escribirle dos veces. */
   presentacionBotEnviadaEn?: Date;
+  /** Cuando dio por visto el aviso del bot en Metrics. Hasta entonces se le muestra. */
+  avisoBotVistoEn?: Date;
   /**
    * Recuperación de contraseña. Se guarda el hash del token, nunca el token:
    * si alguien lee la base de datos no puede usarlo para entrar a una cuenta.
@@ -130,6 +132,9 @@ export const UserSchema = new Schema<IUser>(
       type: Date,
     },
     presentacionBotEnviadaEn: {
+      type: Date,
+    },
+    avisoBotVistoEn: {
       type: Date,
     },
     // `select: false` para que ningún endpoint devuelva estos campos por error.
