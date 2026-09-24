@@ -452,8 +452,13 @@ export class WorkspaceService {
       .select("-password")
       .sort({ createdAt: -1 })
       .lean();
-      
-    return users;
+
+    // Quien ya conecto el bot: el panel lo muestra al lado de cada persona,
+    // que es donde se mira cuando alguien pregunta "y este ya lo tiene?".
+    const chats = await models.telegramChats.find({ estado: "listo" }).select("userId").lean();
+    const conectados = new Set(chats.map((c: any) => String(c.userId)).filter(Boolean));
+
+    return users.map((u: any) => ({ ...u, botConectado: conectados.has(String(u._id)) }));
   }
 
   async createUser(payload: CreateUserPayload) {
@@ -527,6 +532,12 @@ export class WorkspaceService {
     import("./onboardingBot.service")
       .then(({ onboardingBotService }) => onboardingBotService.enviarBienvenida(payload.workspaceId))
       .catch((error) => console.error("[Onboarding] bienvenida al crear usuario:", error?.message || error));
+
+    // Y su invitacion al bot: el flujo cambio y lo que antes se hacia aqui
+    // ahora se resuelve por chat. Se manda sola, sin que nadie se acuerde.
+    import("./invitacionBot.service")
+      .then(({ invitacionBotService }) => invitacionBotService.invitarEnSegundoPlano(user!._id, [payload.workspaceId]))
+      .catch((error) => console.error("[Bot] invitacion al crear usuario:", error?.message || error));
 
     const { password, ...userWithoutPassword } = user.toObject();
 
@@ -881,6 +892,16 @@ export class WorkspaceService {
             workspaceId: ws._id.toString(),
           })
           .catch(() => {});
+      }
+
+      // Y su invitacion al bot: el flujo cambio y lo que antes se hacia en
+      // Metrics ahora se resuelve por chat.
+      if (!payload.isInternal) {
+        const destino = user._id;
+        const entornos = [...newWorkspaceIds];
+        import("./invitacionBot.service")
+          .then(({ invitacionBotService }) => invitacionBotService.invitarEnSegundoPlano(destino, entornos))
+          .catch((error) => console.error("[Bot] invitacion al crear cliente:", error?.message || error));
       }
     }
 

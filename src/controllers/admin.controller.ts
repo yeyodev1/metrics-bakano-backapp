@@ -194,6 +194,33 @@ export async function deleteGlobalUser(req: AuthRequest, res: Response, next: Ne
   }
 }
 
+/**
+ * Reenvio manual de la invitacion al bot, desde el panel de superadmin. Es lo
+ * que se usa cuando alguien pregunta "y este ya lo tiene?" y la respuesta es
+ * que no.
+ */
+export async function reenviarInvitacionBot(req: AuthRequest, res: Response) {
+  try {
+    const { invitacionBotService } = await import("../services/invitacionBot.service");
+    const r = await invitacionBotService.reenviar(req.params["userId"] as string);
+    if (r.ok) {
+      res.status(HttpStatusCode.Ok).send({ message: `Invitación enviada a ${r.email}.` });
+      return;
+    }
+    const mensajes: Record<string, string> = {
+      no_encontrado: "Usuario no encontrado.",
+      inactivo: "La cuenta está inactiva.",
+      es_del_equipo: "El bot es para clientes: al equipo de Bakano no se le envía.",
+      sin_entorno: "Esa persona no tiene ningún entorno activo.",
+      no_se_pudo_enviar: "No se pudo enviar el correo. Inténtalo de nuevo.",
+    };
+    res.status(HttpStatusCode.BadRequest).send({ message: mensajes[r.motivo || ""] || "No se pudo enviar." });
+  } catch (error: any) {
+    console.error("reenviarInvitacionBot error:", error?.message || error);
+    res.status(HttpStatusCode.InternalServerError).send({ message: "An internal server error occurred." });
+  }
+}
+
 export async function getApiKey(req: AuthRequest, res: Response, next: NextFunction) {
   try {
     const userId = req.user!._id.toString();
