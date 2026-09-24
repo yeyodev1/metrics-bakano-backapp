@@ -2,6 +2,7 @@ import type { Request, Response, NextFunction } from "express";
 import { HttpStatusCode } from "axios";
 import { AuthService, MIN_PASSWORD_LENGTH } from "../services/auth.service";
 import { resendService } from "../services/resend.service";
+import models from "../models";
 
 const authService = new AuthService();
 
@@ -163,6 +164,27 @@ export async function resetPassword(req: Request, res: Response, next: NextFunct
       message: "No pudimos cambiar la contraseña. Intenta de nuevo.",
     });
     return;
+  }
+}
+
+/**
+ * El cliente dio por visto el aviso del bot de Telegram. Hasta que toca ese
+ * boton, Metrics se lo sigue mostrando: un aviso que se cierra solo es un
+ * aviso que nadie leyo.
+ */
+export async function marcarAvisoBotVisto(req: Request, res: Response) {
+  try {
+    const userId = (req as any).user?._id;
+    if (!userId) {
+      res.status(HttpStatusCode.Unauthorized).send({ message: "Unauthorized." });
+      return;
+    }
+    const visto = new Date();
+    await models.users.updateOne({ _id: userId }, { $set: { avisoBotVistoEn: visto } });
+    res.status(HttpStatusCode.Ok).send({ message: "Aviso marcado como visto.", avisoBotVistoEn: visto });
+  } catch (error: any) {
+    console.error("marcarAvisoBotVisto error:", error?.message || error);
+    res.status(HttpStatusCode.InternalServerError).send({ message: "An internal server error occurred." });
   }
 }
 

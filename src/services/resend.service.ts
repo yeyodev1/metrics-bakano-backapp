@@ -1251,6 +1251,106 @@ export class ResendService {
   }
 
   /**
+   * Presentacion del bot a los clientes que ya venian usando la plataforma.
+   * La idea es una sola: lo que antes tenian que entrar a buscar a Metrics,
+   * ahora lo pueden preguntar por chat.
+   */
+  async sendPresentacionBot(params: {
+    to: string;
+    recipientName?: string;
+    workspaceName: string;
+    botUrl: string;
+    correoCliente: string;
+  }): Promise<void> {
+    const { to, recipientName, workspaceName, botUrl, correoCliente } = params;
+    const esc = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const firstName = recipientName ? esc(recipientName.split(" ")[0]) : "Hola";
+
+    const puede = [
+      ["🗓️", "Ver tus citas y moverlas o cancelarlas", "tu producción, tus sesiones y tus reuniones, sin escribirle a nadie"],
+      ["📝", "Revisar tus guiones", "cuántos hay, cuáles están listos y pedir cambios contándoselos por chat"],
+      ["🎬", "Agendar tu producción", "te muestra los horarios libres del equipo y la reserva al momento"],
+      ["💵", "Registrar tu facturación del día", "le mandas el monto por chat y él lo sube a Metrics"],
+      ["📣", "Saber qué estamos anunciando", "qué anuncios están activos y cuánto se ha invertido"],
+      ["💬", "Hablar con tu equipo", "le cuentas lo que necesitas y se lo pasa a quien le toca, al momento"],
+    ]
+      .map(
+        ([emoji, titulo, detalle]) =>
+          `<tr><td style="padding:10px 0;vertical-align:top;width:34px;font-size:20px;">${emoji}</td>` +
+          `<td style="padding:10px 0;"><p style="margin:0;font-size:15px;font-weight:700;color:#1e293b;">${titulo}</p>` +
+          `<p style="margin:2px 0 0;font-size:14px;color:#64748b;line-height:1.6;">${detalle}</p></td></tr>`
+      )
+      .join("");
+
+    const html = `<!DOCTYPE html>
+<html lang="es">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+<body style="margin:0;padding:0;background:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="padding:40px 20px;">
+    <tr><td align="center">
+      <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
+
+        ${barraMarca()}
+        <tr>
+          <td style="background:linear-gradient(135deg,#e6285c 0%,#85529c 100%);padding:32px 40px;text-align:center;">
+            <h1 style="margin:0;font-size:24px;font-weight:800;color:#ffffff;">Ahora nos escribes por Telegram</h1>
+            <p style="margin:10px 0 0;font-size:15px;color:#ffe4ec;">Sin entrar a la plataforma a buscar nada</p>
+          </td>
+        </tr>
+
+        <tr>
+          <td style="padding:32px 40px 8px;">
+            <p style="margin:0 0 16px;font-size:16px;color:#1e293b;">${firstName},</p>
+            <p style="margin:0 0 20px;font-size:15px;color:#475569;line-height:1.7;">
+              Pusimos a trabajar un asistente de Bakano en Telegram para <strong>${esc(workspaceName)}</strong>.
+              Le escribes como le escribirías a una persona y te resuelve ahí mismo lo que antes tenías
+              que entrar a buscar a metrics.bakano.ec.
+            </p>
+            <table width="100%" cellpadding="0" cellspacing="0">${puede}</table>
+          </td>
+        </tr>
+
+        <tr>
+          <td style="padding:8px 40px 24px;">
+            <div style="background:#f8fafc;border:1.5px solid #e2e8f0;border-radius:12px;padding:20px;">
+              <p style="margin:0 0 10px;font-size:15px;font-weight:700;color:#1e293b;">Cómo entras, en 30 segundos</p>
+              <p style="margin:0;font-size:14px;color:#475569;line-height:1.8;">
+                1. Abres el chat con el botón de abajo.<br/>
+                2. Le escribes tu correo: <strong>${esc(correoCliente)}</strong><br/>
+                3. Te llega un código de 6 números a ese correo y lo escribes en el chat. Listo.
+              </p>
+            </div>
+          </td>
+        </tr>
+
+        <tr>
+          <td style="padding:0 40px 32px;text-align:center;">
+            <a href="${botUrl}" style="display:inline-block;background:linear-gradient(135deg,#e6285c 0%,#85529c 100%);color:#ffffff;text-decoration:none;padding:16px 40px;border-radius:12px;font-size:16px;font-weight:700;">Abrir el chat en Telegram</a>
+            <p style="margin:14px 0 0;font-size:13px;color:#94a3b8;">Metrics sigue igual de disponible: el chat es para no tener que entrar.</p>
+          </td>
+        </tr>
+
+        <tr>
+          <td style="background:#f8fafc;padding:16px 40px;border-top:1px solid #e2e8f0;text-align:center;">
+            <p style="margin:0;color:#94a3b8;font-size:12px;">Enviado por <strong>Bakano Metrics</strong>.<br/>Si algo no te cuadra, escríbenos a soporte@bakano.ec</p>
+          </td>
+        </tr>
+
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+
+    await this.client.emails.send({
+      from: this.from,
+      to,
+      subject: `${esc(workspaceName)}: ahora puedes hablar con Bakano por Telegram`,
+      html,
+    });
+  }
+
+  /**
    * Arranque del onboarding: le dice al cliente que todo se maneja por el bot
    * de Telegram y le deja los links de las tres sesiones tecnicas.
    */
