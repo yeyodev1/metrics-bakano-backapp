@@ -1,12 +1,15 @@
 /**
- * Onboarding del cliente: las tres sesiones tecnicas que van antes de la
- * primera produccion (documento "Proceso de implementacion de estrategia").
+ * Onboarding del cliente, version 2026-09-24.
  *
- * Telegram es el canal oficial: el bot NO resuelve la configuracion tecnica,
- * enruta al cliente a la sesion correcta, la agenda en el calendario del
- * responsable y avisa. Cada sesion vive en su propio calendario del CRM.
+ * El proceso cambio: arranca un dia despues del pago con una bienvenida de 15
+ * minutos donde Genesis crea el entorno frente al cliente, y sigue con las
+ * reuniones de especializacion y levantamiento. La configuracion tecnica ya no
+ * es una sesion aparte con David: se resuelve dentro de la especializacion.
+ *
+ * Telegram es el canal oficial. El bot no configura nada: enruta al cliente a
+ * la reunion que toca, la agenda en el calendario del responsable y avisa.
  */
-export type SesionOnboarding = "meta" | "crm" | "estrategia";
+export type SesionOnboarding = "bienvenida" | "especializacion" | "levantamiento";
 
 export interface DefinicionSesion {
   orden: number;
@@ -16,6 +19,8 @@ export interface DefinicionSesion {
   calendarioId: string;
   /** Link publico del CRM, por si el cliente prefiere agendar desde la web. */
   link: string;
+  /** Cuanto dura, para decirselo sin que pregunte. */
+  duracion: string;
   /** Lo que el cliente necesita tener listo para esa sesion. */
   requisitos: string[];
   /** Que se resuelve en la sesion, para que el bot lo explique. */
@@ -25,13 +30,36 @@ export interface DefinicionSesion {
 }
 
 export const SESIONES_ONBOARDING: Record<SesionOnboarding, DefinicionSesion> = {
-  meta: {
+  bienvenida: {
     orden: 1,
-    etiqueta: "Conexión de cuentas Meta",
+    etiqueta: "Bienvenida y creación de tu entorno",
+    emoji: "🤝",
+    responsable: { nombre: "Genesis Benalcazar", email: "gbenalcazar@bakano.ec" },
+    calendarioId: "FWL0e2jCKpbamtlj31io",
+    link: "https://api.leadconnectorhq.com/widget/bookings/project-manager",
+    duracion: "15 minutos",
+    requisitos: [
+      "Conéctate desde una computadora",
+      "Ten a la mano el correo con el que quieres entrar a metrics.bakano.ec",
+      "Ten instalado Telegram en tu celular",
+    ],
+    resumen:
+      "Creamos tu entorno contigo en pantalla, te damos los accesos y te dejamos conectado al bot para que sigas el proceso desde el chat.",
+    temas: [
+      "Creación de tu entorno en metrics.bakano.ec frente a ti",
+      "Invitación por correo a las personas de tu equipo que tendrán acceso",
+      "Conexión de tu cuenta con el bot de Telegram",
+      "Cómo es el proceso completo y qué te vamos a pedir en cada paso",
+    ],
+  },
+  especializacion: {
+    orden: 2,
+    etiqueta: "Especialización con Joel",
     emoji: "📣",
     responsable: { nombre: "Joel Jimenez", email: "jjimenez@bakano.ec" },
     calendarioId: "GNizdekhY5SQaYTPdKPP",
     link: "https://api.leadconnectorhq.com/widget/bookings/meta-sessions",
+    duracion: "1 hora",
     requisitos: [
       "Conéctate desde una computadora",
       "Ten el usuario y la clave de la cuenta de Instagram del negocio",
@@ -39,7 +67,7 @@ export const SESIONES_ONBOARDING: Record<SesionOnboarding, DefinicionSesion> = {
       "Ten un método de pago para Meta (tarjeta de crédito o débito)",
     ],
     resumen:
-      "Portafolio comercial en Meta, fanpage, cuenta de Instagram empresarial, cuenta publicitaria, WhatsApp Business y método de pago.",
+      "Dejamos listas tus cuentas para anunciar: portafolio comercial, fanpage, Instagram empresarial, cuenta publicitaria, WhatsApp Business y método de pago.",
     temas: [
       "Importancia del portafolio comercial y cómo se maneja",
       "Configuración del portafolio comercial en Meta",
@@ -51,63 +79,204 @@ export const SESIONES_ONBOARDING: Record<SesionOnboarding, DefinicionSesion> = {
       "Configuración del método de pago en la cuenta publicitaria",
     ],
   },
-  crm: {
-    orden: 2,
-    etiqueta: "Configuración de CRM y Metrics",
-    emoji: "🗂️",
-    responsable: { nombre: "David Robles", email: "drobles@bakano.ec" },
-    calendarioId: "aaHn06pmWuNFuF7tjDST",
-    link: "https://api.leadconnectorhq.com/widget/bookings/soporte-tecnico-crm",
-    requisitos: [
-      "Conéctate desde una computadora",
-      "Ten a la mano el dispositivo con el WhatsApp Business",
-      "Deja abiertas en tu computadora las cuentas de Facebook e Instagram del negocio",
-    ],
-    resumen: "Conexión del CRM con tus cuentas y configuración de tu entorno en metrics.bakano.ec.",
-    temas: [
-      "Conexión del CRM con el WhatsApp Business del negocio",
-      "Conexión con las cuentas de Facebook e Instagram",
-      "Configuración de tu entorno en metrics.bakano.ec",
-    ],
-  },
-  estrategia: {
+  levantamiento: {
     orden: 3,
-    etiqueta: "Estrategia y guiones",
+    etiqueta: "Levantamiento de información con Ariana",
     emoji: "📝",
     responsable: { nombre: "Ariana Vera", email: "avera@bakano.ec" },
     calendarioId: "JDzGl2qjoWwAk5TvBNUp",
     link: "https://api.leadconnectorhq.com/widget/bookings/arianna-reunion",
+    duracion: "1 hora",
     requisitos: [
+      "Ten claro qué quieres promocionar en las próximas semanas",
       "Ten a la mano tu catálogo y precios",
-      "Piensa en qué diferencia a tu marca y a tu producto o servicio de la competencia",
       "Si tienes videos de referencia que te gusten, tenlos listos",
     ],
     resumen:
-      "Diferenciación de tu marca, comprensión de tus servicios, ejemplos de videos y definición de la fecha de tu primera producción.",
+      "Definimos qué vamos a anunciar en las próximas semanas y levantamos todo lo que Ariana necesita para escribir tus guiones.",
     temas: [
-      "Verificar que tu empresa se diferencie de la competencia en marca y producto o servicio",
-      "Por qué importa esa diferenciación y sugerencias si todavía no la tienes",
-      "Entender tus servicios según tu vertical de negocio para la estrategia y los guiones",
-      "Definir la fecha de tu primera producción (levantamiento de avatar o grabación, según el servicio)",
-      "Ejemplos de videos de Bakano editados con IA; si no te convencen, se te piden videos de referencia para hacerlo a semejanza",
+      "Qué deseas promocionar en las siguientes semanas",
+      "Cómo se diferencia tu marca y tu producto o servicio de la competencia",
+      "Tus servicios según tu vertical de negocio, para la estrategia y los guiones",
+      "Ejemplos de videos de Bakano editados con IA y, si no te convencen, tus videos de referencia",
+      "Definición de la fecha de tu producción o levantamiento de avatar",
     ],
   },
 };
 
 /**
- * Proceso completo de implementacion (documento "Proceso de implementacion de
- * estrategia Bakano"). Es lo que el bot sabe para guiar al cliente de punta
- * a punta; las sesiones de la etapa 1 viven arriba con su calendario.
+ * El recorrido completo, de punta a punta, tal como lo ve el cliente.
+ *
+ * El cliente ve TODO: tambien lo que hace el equipo por dentro (los avatares,
+ * las escenas, la edicion). Saber que su video esta en la mesa de Javier y no
+ * "en proceso" es la diferencia entre esperar tranquilo y escribir preguntando.
+ */
+export type EtapaRecorrido =
+  | "datosMarca"
+  | "bienvenida"
+  | "especializacion"
+  | "levantamiento"
+  | "guiones"
+  | "aprobacionGuiones"
+  | "produccion"
+  | "avatares"
+  | "escenas"
+  | "edicion"
+  | "aprobacionVideos"
+  | "salidaVentas";
+
+export interface DefinicionEtapa {
+  orden: number;
+  etiqueta: string;
+  emoji: string;
+  /** Quien la mueve: el cliente, el equipo, o el propio sistema. */
+  deQuien: "cliente" | "equipo";
+  responsable?: { nombre: string; email: string };
+  /** Que pasa en esta etapa, en una linea, para el cliente. */
+  que: string;
+  /** Si la marca el equipo a mano en Metrics o se deduce de los datos. */
+  seMarca: "automatico" | "manual";
+}
+
+const ARIANA = { nombre: "Ariana Vera", email: "avera@bakano.ec" };
+const JEAN = { nombre: "Jean Ortega", email: "jortega@bakano.ec" };
+const ANGEL = { nombre: "Ángel Sánchez", email: "asanchez@bakano.ec" };
+const JAVIER = { nombre: "Javier León", email: "jleon@bakano.ec" };
+const JOEL = { nombre: "Joel Jimenez", email: "jjimenez@bakano.ec" };
+const GENESIS = { nombre: "Genesis Benalcazar", email: "gbenalcazar@bakano.ec" };
+
+export const RECORRIDO: Record<EtapaRecorrido, DefinicionEtapa> = {
+  bienvenida: {
+    orden: 1,
+    etiqueta: "Bienvenida y creación de tu entorno",
+    emoji: "🤝",
+    deQuien: "cliente",
+    responsable: GENESIS,
+    que: "15 minutos con Genesis: creamos tu entorno contigo en pantalla y te conectamos al bot.",
+    seMarca: "automatico",
+  },
+  datosMarca: {
+    orden: 2,
+    etiqueta: "Los datos de tu marca",
+    emoji: "🎨",
+    deQuien: "cliente",
+    que: "Nos cuentas de tu negocio por el chat: tipografía, vertical, ticket promedio, qué te diferencia y cómo hablas.",
+    seMarca: "automatico",
+  },
+  especializacion: {
+    orden: 3,
+    etiqueta: "Especialización con Joel",
+    emoji: "📣",
+    deQuien: "cliente",
+    responsable: JOEL,
+    que: "Dejamos listas tus cuentas de Meta para poder anunciar.",
+    seMarca: "automatico",
+  },
+  levantamiento: {
+    orden: 4,
+    etiqueta: "Levantamiento con Ariana",
+    emoji: "📝",
+    deQuien: "cliente",
+    responsable: ARIANA,
+    que: "Definimos qué vamos a promocionar y levantamos lo que hace falta para escribir tus guiones.",
+    seMarca: "automatico",
+  },
+  guiones: {
+    orden: 5,
+    etiqueta: "Creación de tus guiones",
+    emoji: "✍️",
+    deQuien: "equipo",
+    responsable: ARIANA,
+    que: "Ariana escribe los guiones de lo que vamos a grabar.",
+    seMarca: "automatico",
+  },
+  aprobacionGuiones: {
+    orden: 6,
+    etiqueta: "Tu aprobación de los guiones",
+    emoji: "✅",
+    deQuien: "cliente",
+    que: "Los revisas y nos dices qué cambiarías. Nada se graba sin tu visto bueno.",
+    seMarca: "automatico",
+  },
+  produccion: {
+    orden: 7,
+    etiqueta: "Producción y levantamiento de tu avatar",
+    emoji: "🎬",
+    deQuien: "cliente",
+    responsable: JEAN,
+    que: "La grabación: tu avatar, tus productos y los recursos que hagan falta.",
+    seMarca: "automatico",
+  },
+  avatares: {
+    orden: 8,
+    etiqueta: "Creación de tus avatares",
+    emoji: "🧬",
+    deQuien: "equipo",
+    responsable: ANGEL,
+    que: "Con lo grabado, Ángel arma tus avatares.",
+    seMarca: "manual",
+  },
+  escenas: {
+    orden: 9,
+    etiqueta: "Creación de las escenas",
+    emoji: "🎞️",
+    deQuien: "equipo",
+    responsable: ANGEL,
+    que: "Ángel monta las escenas de cada guion.",
+    seMarca: "manual",
+  },
+  edicion: {
+    orden: 10,
+    etiqueta: "Edición de tus videos",
+    emoji: "✂️",
+    deQuien: "equipo",
+    responsable: JAVIER,
+    que: "Javier arma los videos finales, listos para publicar.",
+    seMarca: "automatico",
+  },
+  aprobacionVideos: {
+    orden: 11,
+    etiqueta: "Tu aprobación de los videos",
+    emoji: "👀",
+    deQuien: "cliente",
+    que: "Los ves y los apruebas. Si algo no te cuadra, se corrige antes de salir.",
+    seMarca: "manual",
+  },
+  salidaVentas: {
+    orden: 12,
+    etiqueta: "Salida a ventas",
+    emoji: "🚀",
+    deQuien: "equipo",
+    responsable: JOEL,
+    que: "Un día después de tu aprobación, Joel pone los anuncios a circular. Vamos a cerrar ventas.",
+    seMarca: "manual",
+  },
+};
+
+export const ORDEN_RECORRIDO = (Object.keys(RECORRIDO) as EtapaRecorrido[]).sort(
+  (a, b) => RECORRIDO[a].orden - RECORRIDO[b].orden
+);
+
+/** Las etapas que el equipo marca a mano en Metrics. */
+export const ETAPAS_MANUALES = ORDEN_RECORRIDO.filter((e) => RECORRIDO[e].seMarca === "manual");
+
+/**
+ * Lo que el cliente entrega por su lado. Va aparte del recorrido porque no es
+ * una etapa que avance: son cosas que pueden llegar en cualquier momento.
  */
 export const PROCESO_ONBOARDING = {
   envios: [
     {
-      que: "Logos en PNG (fondo transparente) y tu línea gráfica, y el catálogo con precios",
-      donde: "en metrics.bakano.ec, sección Recursos de marca de tu entorno",
+      que: "Tus logos en PNG (fondo transparente) y tu línea gráfica",
+      donde: "por el chat del bot, o en metrics.bakano.ec en Recursos de marca",
+    },
+    {
+      que: "Tu catálogo con precios",
+      donde: "por el chat del bot, o en metrics.bakano.ec en Recursos de marca",
     },
     {
       que: "Tu facturación de los últimos 6 meses",
-      donde: "en metrics.bakano.ec, sección Facturación & ROAS de tu entorno",
+      donde: "por el chat del bot, o en metrics.bakano.ec en Facturación & ROAS",
     },
     {
       que: "Invitación al portafolio comercial de Meta con permisos de ADMINISTRACIÓN",
@@ -117,31 +286,39 @@ export const PROCESO_ONBOARDING = {
   etapas: [
     {
       numero: 1,
-      nombre: "Conexiones con plataformas",
+      nombre: "Arranque",
       pasos: [
-        "Onboarding en metrics.bakano.ec: subes tus datos de facturación (mínimo 6 meses de histórico), archivos e identidad de marca",
-        "Nos envías tu catálogo y precios",
-        "Sesión técnica de Meta con Joel Jimenez",
-        "Sesión técnica de CRM y Metrics con David Robles",
-        "Sesión de estrategia con Ariana Vera",
+        "Bienvenida de 15 minutos con Genesis: se crea tu entorno frente a ti",
+        "Te llega la invitación por correo para las personas con acceso",
+        "Conectas tu cuenta con el bot de Telegram",
+        "Nos cuentas los datos de tu marca por el chat",
       ],
     },
     {
       numero: 2,
-      nombre: "Producción",
+      nombre: "Especialización y estrategia",
       pasos: [
-        "Producción o levantamiento de recursos como tu avatar",
-        "Edición de los videos con IA",
-        "Entrega de los videos",
+        "Reunión de especialización con Joel Jimenez: tus cuentas listas para anunciar",
+        "Levantamiento de información con Ariana Vera: qué vamos a promocionar",
+        "Ariana escribe tus guiones y tú los apruebas",
       ],
     },
     {
       numero: 3,
-      nombre: "Campañas y ROAS",
+      nombre: "Producción",
       pasos: [
-        "Configuración de las campañas publicitarias en Meta",
-        "Activación de los anuncios (aprobados por Meta)",
-        "Revisión y estabilización del ROAS: análisis de métricas de los anuncios, ajuste y optimización de campañas y seguimiento del ROAS",
+        "Producción y levantamiento de tu avatar con Jean Ortega",
+        "Creación de avatares y escenas con Ángel Sánchez",
+        "Edición de los videos con Javier León",
+        "Tu aprobación de los videos",
+      ],
+    },
+    {
+      numero: 4,
+      nombre: "Ventas",
+      pasos: [
+        "Un día después de tu aprobación, los anuncios salen a circular (Joel Jimenez)",
+        "Seguimiento del ROAS: análisis, ajuste y optimización de las campañas",
       ],
     },
   ],
@@ -156,10 +333,14 @@ export function procesoOnboardingEnTexto(): string {
   const sesiones = (Object.keys(SESIONES_ONBOARDING) as SesionOnboarding[])
     .map((s) => {
       const d = SESIONES_ONBOARDING[s];
-      return `${d.etiqueta} con ${d.responsable.nombre} (${d.responsable.email}):\n  Requisitos: ${d.requisitos.join("; ")}\n  Temas: ${d.temas.join("; ")}\n  Link: ${d.link}`;
+      return `${d.etiqueta} con ${d.responsable.nombre} (${d.responsable.email}), ${d.duracion}:\n  Requisitos: ${d.requisitos.join("; ")}\n  Temas: ${d.temas.join("; ")}\n  Link: ${d.link}`;
     })
     .join("\n");
-  return `Envíos que pide el proceso:\n${envios}\n\n${etapas}\n\nSesiones de la etapa 1:\n${sesiones}`;
+  const recorrido = ORDEN_RECORRIDO.map((e) => {
+    const d = RECORRIDO[e];
+    return `${d.orden}. ${d.etiqueta}${d.responsable ? ` (${d.responsable.nombre})` : ""}: ${d.que}`;
+  }).join("\n");
+  return `Envíos que pide el proceso:\n${envios}\n\n${etapas}\n\nReuniones:\n${sesiones}\n\nRecorrido completo que ve el cliente:\n${recorrido}`;
 }
 
 export const ORDEN_SESIONES = (Object.keys(SESIONES_ONBOARDING) as SesionOnboarding[]).sort(

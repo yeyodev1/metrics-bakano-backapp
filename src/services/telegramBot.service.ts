@@ -8,8 +8,9 @@ import { atencionClienteService, diaEcuador, fechaEcuador, horarioCorto } from "
 import { onboardingBotService } from "./onboardingBot.service";
 import { produccionPlanificacionService } from "./produccionPlanificacion.service";
 import { contenidoClienteService } from "./contenidoCliente.service";
+import { recorridoClienteService } from "./recorridoCliente.service";
 import { perfilClienteService } from "./perfilCliente.service";
-import { onboardingDatosService } from "./onboardingDatos.service";
+import { CAMPOS_MARCA, OPCIONES_MARCA, PREGUNTA_MARCA, onboardingDatosService } from "./onboardingDatos.service";
 import { citasClienteService } from "./citasCliente.service";
 import { equipoEnTexto, DIRECCION } from "./equipoBakano.service";
 import { comoPlata, contextoParaLaIa, facturacionChatService, claveDia, nombreDia, parsearMonto } from "./facturacionChat.service";
@@ -334,21 +335,25 @@ export class TelegramBotService {
           if (r.ok) {
             chat.datoEsperado = undefined;
             await chat.save();
-            await telegramService.sendMessage(
-              chat.chatId,
-              "Listo, lo guardé en tu perfil de marca ✅\n\nCon eso ya sabemos a dónde mandar a la gente que vea tus videos.",
-              [
-                [{ text: "🚀 Ver mi onboarding", callback_data: "menu:onboarding" }],
-                [{ text: "📋 Volver al menú", callback_data: "menu:ver" }],
-              ]
-            );
-          } else {
-            await telegramService.sendMessage(
-              chat.chatId,
-              `${escaparHtml(String((r as any).motivo || "No pude guardarlo"))}\n\nMándamelo de nuevo, o si todavía no lo tienes lo vemos con el equipo 👇`,
-              [[{ text: "🤝 Todavía no lo sé", callback_data: "venta:nose" }], [{ text: "📋 Volver al menú", callback_data: "menu:ver" }]]
-            );
+            // Encadena: guardado uno, va el siguiente. Preguntar de a uno y
+            // seguir solo es lo que hace que esto se termine.
+            if (campo === "trafficLink") {
+              await telegramService.sendMessage(
+                chat.chatId,
+                "Listo, lo guardé ✅ Con eso ya sabemos a dónde mandar a la gente que vea tus videos."
+              );
+              return this.preguntarSiguienteDato(chat);
+            }
+            return this.preguntarSiguienteDato(chat);
           }
+          await telegramService.sendMessage(
+            chat.chatId,
+            `${escaparHtml(String((r as any).motivo || "No pude guardarlo"))}\n\nInténtalo de nuevo 👇`,
+            [
+              [{ text: "⏭️ Saltar por ahora", callback_data: "dm:saltar" }],
+              [{ text: "📋 Volver al menú", callback_data: "menu:ver" }],
+            ]
+          );
           return;
         }
 
@@ -665,11 +670,20 @@ export class TelegramBotService {
       );
       return;
     }
-    if (data === "datos:contar") {
-      chat.tema = undefined;
+    if (data === "datos:contar") return this.preguntarSiguienteDato(chat);
+    // dm:<campo>:<indice> — eligió una de las opciones fijas.
+    if (data.startsWith("dm:")) {
+      const [, campo, indice] = data.split(":");
+      const opcion = OPCIONES_MARCA[campo || ""]?.[Number(indice)];
+      if (!campo || !opcion) return this.preguntarSiguienteDato(chat);
+      await onboardingDatosService.registrarDatoMarca(chat, campo, opcion.valor, true);
+      return this.preguntarSiguienteDato(chat);
+    }
+    if (data === "dm:saltar") {
+      const campo = chat.datoEsperado?.campo;
+      chat.datoEsperado = undefined;
       await chat.save();
-      if (await telegramAgentService.responder(chat, "Quiero contarte de mi negocio para que lo dejes en el sistema")) return;
-      return this.mostrarMenu(chat);
+      return this.preguntarSiguienteDato(chat, campo);
     }
     if (data === "venta:donde") return this.preguntarDondeCaeLaVenta(chat);
     if (data === "venta:wh") return this.guardarDireccionVenta(chat, "WhatsApp");
@@ -1002,24 +1016,14 @@ export class TelegramBotService {
     ]);
 
     const hecha = (s: { agendada: boolean; estado?: string }) => s.estado === "cumplida" || s.estado === "no_aplica";
-    const listas = estado.sesiones.filter(hecha).length;
+    const recorrido = await recorridoClienteService.de(chat.workspaceId!).catch(() => null);
     // Una sesión cuya fecha ya pasó no se pinta como "la tienes agendada": en
     // "Mis citas" ya no aparece (ahí solo van las futuras) y el cliente veía
     // dos respuestas distintas a la misma pregunta.
-    const lineas = estado.sesiones.map((s) =>
-      hecha(s)
-        ? `✅ ${s.emoji} ${s.etiqueta}`
-        : s.pasada
-          ? `⏳ ${s.emoji} ${s.etiqueta} · fue el ${s.fecha ? fechaEcuador(s.fecha) : "día agendado"}, esperando que ${escaparHtml(s.responsable)} la cierre`
-          : s.agendada
-            ? `🗓️ ${s.emoji} ${s.etiqueta} · ${s.fecha ? fechaEcuador(s.fecha) : "agendada"}`
-            : `⬜ ${s.emoji} ${s.etiqueta}`
-    );
-    lineas.push(
-      estado.produccion.agendada
-        ? `🗓️ 🎬 Tu primera producción · ${fechaEcuador(estado.produccion.agendada)}`
-        : "⬜ 🎬 Tu primera producción"
-    );
+    // El recorrido entero, también lo que pasa dentro del equipo: saber que su
+    // video está en la mesa de Javier y no "en proceso" evita media docena de
+    // mensajes preguntando.
+    const lineas = recorrido ? [recorridoClienteService.enTexto(recorrido.etapas)] : [];
 
     // Una sola cosa por hacer ahora. El resto queda en los botones de abajo.
     const siguiente = estado.sesiones.find((s) => s.sesion === estado.siguiente);
@@ -1069,7 +1073,7 @@ export class TelegramBotService {
     const invitacionMeta = faltaEnviar.find((e) => e.clave === "invitacionMeta");
     await telegramService.sendMessage(
       chat.chatId,
-      `🚀 <b>Tu onboarding</b> · ${listas} de ${estado.sesiones.length} sesiones listas\n\n` +
+      `🚀 <b>Tu recorrido con Bakano</b> · ${recorrido?.listas ?? 0} de ${recorrido?.etapas.length ?? 12} pasos listos\n\n` +
         `${lineas.join("\n")}\n\n${ahora}` +
         (invitacionMeta
           ? `\n\n📣 Falta además invitar a <b>${escaparHtml(invitacionMeta.invitarA || "")}</b> a tu portafolio de Meta con permisos de administración. Eso se hace dentro de Meta Business y lo vemos en la sesión con Joel Jimenez.`
@@ -1077,6 +1081,66 @@ export class TelegramBotService {
         (faltaEnviar.some((e) => e.link) || faltaContar.length
           ? "\n\nTodo eso me lo puedes mandar por aquí mismo con los botones de abajo: yo lo subo a tu entorno. Si ya lo subiste tú, dímelo y le aviso al equipo."
           : ""),
+      botones
+    );
+  }
+
+  /**
+   * Va preguntando los datos de marca uno por uno, en el orden del proceso, y
+   * se detiene solo cuando no queda ninguno. Con botones donde la respuesta es
+   * una de tres: nadie debería tener que escribir "semicasual".
+   */
+  private async preguntarSiguienteDato(chat: ITelegramChat, saltar?: string): Promise<void> {
+    const pendientes = await onboardingDatosService.pendientes(chat.workspaceId!).catch(() => null);
+    const faltan = (pendientes?.datosMarcaFaltantes || [])
+      .map((d) => d.campo)
+      .filter((c) => c !== saltar && c !== "trafficDirection" && c !== "trafficLink");
+
+    if (!faltan.length) {
+      chat.datoEsperado = undefined;
+      await chat.save();
+      const faltaVenta = (pendientes?.datosMarcaFaltantes || []).some(
+        (d) => d.campo === "trafficDirection" || d.campo === "trafficLink"
+      );
+      await telegramService.sendMessage(
+        chat.chatId,
+        "Listo, ya tengo los datos de tu marca ✅\n\n" +
+          "Con esto Ariana escribe guiones que suenan a ti y no a cualquiera." +
+          (faltaVenta ? "\n\nNos falta una sola cosa: a dónde mandamos a la gente que vea tus videos 👇" : ""),
+        faltaVenta
+          ? [
+              [{ text: "🎯 Dónde capturo mis ventas", callback_data: "venta:donde" }],
+              [{ text: "🚀 Cómo va mi onboarding", callback_data: "menu:onboarding" }],
+            ]
+          : [
+              [{ text: "🚀 Cómo va mi onboarding", callback_data: "menu:onboarding" }],
+              [{ text: "📋 Volver al menú", callback_data: "menu:ver" }],
+            ]
+      );
+      return;
+    }
+
+    const campo = faltan[0]!;
+    chat.datoEsperado = { campo, pedidoEn: new Date() };
+    await chat.save();
+
+    const opciones = OPCIONES_MARCA[campo];
+    const botones: InlineButton[][] = [];
+    if (opciones) {
+      // Máximo dos por fila: con tres, Telegram recorta los nombres largos.
+      for (let i = 0; i < opciones.length; i += 2) {
+        botones.push(
+          opciones.slice(i, i + 2).map((o, j) => ({ text: o.etiqueta, callback_data: `dm:${campo}:${i + j}` }))
+        );
+      }
+    }
+    botones.push([{ text: "⏭️ Saltar por ahora", callback_data: "dm:saltar" }], [{ text: "📋 Volver al menú", callback_data: "menu:ver" }]);
+
+    const restantes = faltan.length - 1;
+    await telegramService.sendMessage(
+      chat.chatId,
+      (PREGUNTA_MARCA[campo] || `Cuéntame: ${CAMPOS_MARCA[campo]}`) +
+        (restantes ? `\n\n<i>Después de esta quedan ${restantes}.</i>` : "\n\n<i>Es la última.</i>"),
       botones
     );
   }
@@ -1590,12 +1654,12 @@ export class TelegramBotService {
     // aquí mismo y el equipo de contenido ya quedó avisado.
     const estadoOnb = await onboardingBotService.estado(chat.workspaceId!).catch(() => null);
     const crmPendiente = Boolean(
-      estadoOnb?.sesiones.find((x) => x.sesion === "crm" && x.estado !== "cumplida" && x.estado !== "no_aplica" && !x.agendada)
+      estadoOnb?.sesiones.find((x) => x.sesion === "especializacion" && x.estado !== "cumplida" && x.estado !== "no_aplica" && !x.agendada)
     );
     const botones: InlineButton[][] = [
       [{ text: "📋 Ver mi planificación", url: `${APP_URL}/app/workspaces/${chat.workspaceId}/planning` }],
     ];
-    if (crmPendiente) botones.push([{ text: `📅 Agendar con ${SESIONES_ONBOARDING.crm.responsable.nombre.split(" ")[0]}`, callback_data: "onb:crm" }]);
+    if (crmPendiente) botones.push([{ text: `📅 Agendar con ${SESIONES_ONBOARDING.especializacion.responsable.nombre.split(" ")[0]}`, callback_data: "onb:crm" }]);
     botones.push([{ text: "🗓️ Ver mis citas", callback_data: "citas:ver" }], [{ text: "📋 Volver al menú", callback_data: "menu:ver" }]);
 
     await telegramService.sendMessage(
