@@ -191,6 +191,11 @@ export interface IWorkspace extends Document {
     ultimoResumenEn?: Date;
     avisoSinDatosEn?: Date;
   };
+  /**
+   * Produccion: cada 6 meses. `excepcionHasta` es la ventana que abre el
+   * equipo cuando la estrategia pide grabar antes de tiempo.
+   */
+  produccion?: { excepcionHasta?: Date; excepcionPorNombre?: string; excepcionMotivo?: string };
   preNegotiatedContract?: any; // Stores predefined contract parameters
   contractData?: any; // Stores the final contract form and signature
   teamInfo?: {
@@ -380,6 +385,10 @@ const WorkspaceSchema = new Schema<IWorkspace>(
     },
     onboardingEntregables: {
       type: Schema.Types.Mixed,
+      default: undefined,
+    },
+    produccion: {
+      type: { excepcionHasta: Date, excepcionPorNombre: String, excepcionMotivo: String },
       default: undefined,
     },
     publicidad: {

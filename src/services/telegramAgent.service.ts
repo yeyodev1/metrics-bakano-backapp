@@ -428,12 +428,14 @@ ${procesoOnboardingEnTexto()}
 
 Producciones (grabaciones):
 - Son sesiones en un ambiente controlado para grabar las tomas del avatar del cliente y de los productos que vamos a promocionar.
-- Cada cliente puede agendar una producción cada 2 meses, contados desde la última. Si ya tiene una agendada, no puede agendar otra.
+- QUÉ ES LA PRODUCCIÓN: es la grabación para crear su AVATAR y grabar sus PRODUCTOS. No es una grabación de videos sueltos ni una sesión de contenido mensual: con ese material armamos todos los videos del periodo. Dilo así siempre que pregunte.
+- CADA CUÁNTO: una producción cada 6 MESES, contados desde la última. En la práctica, para la mayoría es una vez al año. Si ya tiene una agendada, no puede agendar otra.
+- Puede volver a grabar antes de los 6 meses si la estrategia lo pide (productos nuevos, cambio de marca, se acabó el contenido). Eso lo habilita el equipo: si lo pide, díselo así y pásale el mensaje con pasarMensajeAlEquipo.
 - Para agendar: usa verHorariosProduccion, ofrece 3 o 4 horarios y, cuando el cliente elija uno concreto, usa agendarProduccion con el valor "inicio" exacto. Confirma fecha, hora y que lo atienden ${equipoAtencionService.nombres("produccion")}.
 - Si todavía no puede agendar, explica la regla con naturalidad y dile desde qué fecha puede.
 - El cliente es UNO SOLO: nunca le agendes dos cosas a la misma hora, aunque sean con personas distintas del equipo. Los horarios que te devuelven las herramientas ya vienen filtrados; si aun así te sale "ya_tiene_esa_hora", dile qué cita tiene a esa hora y con quién, y ofrécele otro horario o mover la que ya tiene.
-- Mover una producción no cambia la regla: la nueva fecha también tiene que respetar los 2 meses desde la última grabación.
-- GRABAMOS HASTA QUEDARNOS SIN CONTENIDO. La producción no se agenda "porque toca cada 2 meses": se agenda antes de quedarnos sin guiones por grabar. Usa verReservaDeContenido cuando se hable de producción, contenido o videos; si seAcaba viene en true, díselo claro y empújalo a cerrar fecha ya, que ahí la espera entre producciones no aplica.
+- Mover una producción no cambia la regla: la nueva fecha también tiene que respetar los 6 meses desde la última grabación.
+- GRABAMOS HASTA QUEDARNOS SIN CONTENIDO. La producción no se agenda "porque toca cada 6 meses": se agenda antes de quedarnos sin guiones por grabar. Usa verReservaDeContenido cuando se hable de producción, contenido o videos; si seAcaba viene en true, díselo claro y empújalo a cerrar fecha ya, que ahí la espera entre producciones no aplica.
 - NO HAY PRODUCCIÓN SIN PLANIFICACIÓN. Dilo siempre que se hable de grabar: los guiones de lo que vamos a grabar tienen que estar escritos y aprobados por él ANTES de la grabación. Si su planificación está vacía, dile que ya avisaste a su equipo de contenido y a Genesis Benalcazar para que los preparen, y pásale el link de su planificación.
 - Y para que lo que grabemos llegue a sus clientes hace falta el CRM: si todavía no hizo su sesión de Configuración de CRM y Metrics con David Robles, dile que la agende. Sin eso, los videos no tienen a dónde llevar a la gente.
 
@@ -744,7 +746,7 @@ Reglas:
 
       verHorariosProduccion: {
         description:
-          "Dice si el cliente puede agendar su producción (una cada 2 meses desde la última; con una ya agendada no puede otra) y los horarios libres de Karen Muñoz y Jean Ortega desde la fecha permitida.",
+          "Dice si el cliente puede agendar su producción (una cada 6 meses desde la última, para crear su avatar y grabar sus productos; con una ya agendada no puede otra) y los horarios libres de Karen Muñoz y Jean Ortega desde la fecha permitida.",
         inputSchema: z.object({}),
         execute: async () => {
           const { estado, horarios: crudos } = await atencionClienteService.horariosProduccion(chat.workspaceId!);
@@ -768,7 +770,7 @@ Reglas:
 
       agendarProduccion: {
         description:
-          "Agenda la producción en el calendario de Karen Muñoz y Jean Ortega y les avisa. Úsala solo con un horario que el cliente eligió de verHorariosProduccion. El sistema vuelve a validar la regla de 2 meses.",
+          "Agenda la producción en el calendario de Karen Muñoz y Jean Ortega y les avisa. Úsala solo con un horario que el cliente eligió de verHorariosProduccion. El sistema vuelve a validar la regla de 6 meses.",
         inputSchema: z.object({
           inicio: z.string().describe("Valor 'inicio' exacto devuelto por verHorariosProduccion"),
         }),
@@ -849,7 +851,7 @@ Reglas:
 
       verHorariosParaMover: {
         description:
-          "Horarios libres para mover una cita (ref de verMisCitas). En producción respeta la regla de 2 meses desde la última grabación.",
+          "Horarios libres para mover una cita (ref de verMisCitas). En producción respeta la regla de 6 meses desde la última grabación.",
         inputSchema: z.object({ ref: z.string().describe("ref exacta de verMisCitas") }),
         execute: async ({ ref }: { ref: string }) => {
           const r = await citasClienteService.horariosParaMover(chat, ref);
