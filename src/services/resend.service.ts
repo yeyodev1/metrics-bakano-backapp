@@ -1251,6 +1251,98 @@ export class ResendService {
   }
 
   /**
+   * Como funciona la produccion: que es y cada cuanto se hace. Se manda una
+   * vez a todos los clientes, porque la regla cambio de dos meses a seis y
+   * nadie se entera de una regla que solo vive en la cabeza del equipo.
+   */
+  async sendReglaProduccion(params: {
+    to: string;
+    recipientName?: string;
+    workspaceName: string;
+    botUrl: string;
+  }): Promise<void> {
+    const { to, recipientName, workspaceName, botUrl } = params;
+    const esc = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const firstName = recipientName ? esc(recipientName.split(" ")[0]) : "Hola";
+
+    const html = `<!DOCTYPE html>
+<html lang="es">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+<body style="margin:0;padding:0;background:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="padding:40px 20px;">
+    <tr><td align="center">
+      <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
+
+        ${barraMarca()}
+        <tr>
+          <td style="background:linear-gradient(135deg,#e6285c 0%,#85529c 100%);padding:32px 40px;text-align:center;">
+            <h1 style="margin:0;font-size:24px;font-weight:800;color:#ffffff;">Tu producción, explicada</h1>
+            <p style="margin:10px 0 0;font-size:15px;color:#ffe4ec;">Qué grabamos ese día y cada cuánto se hace</p>
+          </td>
+        </tr>
+
+        <tr>
+          <td style="padding:32px 40px 8px;">
+            <p style="margin:0 0 16px;font-size:16px;color:#1e293b;">${firstName},</p>
+            <p style="margin:0 0 20px;font-size:15px;color:#475569;line-height:1.7;">
+              Queremos que quede clarísimo cómo funciona la producción de <strong>${esc(workspaceName)}</strong>,
+              porque de ahí sale todo lo que publicamos después.
+            </p>
+
+            <div style="background:#f8fafc;border:1.5px solid #e2e8f0;border-radius:12px;padding:20px;margin-bottom:16px;">
+              <p style="margin:0 0 8px;font-size:15px;font-weight:700;color:#1e293b;">🎬 Qué es la producción</p>
+              <p style="margin:0;font-size:14px;color:#475569;line-height:1.7;">
+                Es la grabación en ambiente controlado para <strong>crear tu avatar</strong> y <strong>grabar tus productos</strong>.
+                No es una sesión de videos sueltos: con ese material armamos todas tus piezas del periodo.
+              </p>
+            </div>
+
+            <div style="background:#f3edf8;border:1.5px solid #d9c7e6;border-radius:12px;padding:20px;margin-bottom:16px;">
+              <p style="margin:0 0 8px;font-size:15px;font-weight:700;color:#1e293b;">📅 Cada cuánto se hace</p>
+              <p style="margin:0;font-size:14px;color:#475569;line-height:1.7;">
+                <strong>Una producción cada 6 meses.</strong> En la práctica, para la mayoría es
+                <strong>una vez al año</strong>: mientras el material siga sirviendo, no hace falta volver a grabar.
+              </p>
+            </div>
+
+            <div style="background:#fdeef2;border:1.5px solid #f8c7d5;border-radius:12px;padding:20px;">
+              <p style="margin:0 0 8px;font-size:15px;font-weight:700;color:#1e293b;">🎯 Y si necesitas grabar antes</p>
+              <p style="margin:0;font-size:14px;color:#475569;line-height:1.7;">
+                Se puede, cuando la estrategia lo pide: productos nuevos, un cambio de marca o si se acabó el contenido.
+                Escríbele al bot, cuéntale por qué, y tu equipo lo habilita.
+              </p>
+            </div>
+          </td>
+        </tr>
+
+        <tr>
+          <td style="padding:24px 40px 32px;text-align:center;">
+            <a href="${botUrl}" style="display:inline-block;background:linear-gradient(135deg,#e6285c 0%,#85529c 100%);color:#ffffff;text-decoration:none;padding:16px 40px;border-radius:12px;font-size:16px;font-weight:700;">Hablar con el bot</a>
+            <p style="margin:14px 0 0;font-size:13px;color:#94a3b8;">Desde ahí agendas tu producción y ves cuándo te toca la siguiente.</p>
+          </td>
+        </tr>
+
+        <tr>
+          <td style="background:#f8fafc;padding:16px 40px;border-top:1px solid #e2e8f0;text-align:center;">
+            <p style="margin:0;color:#94a3b8;font-size:12px;">Enviado por <strong>Bakano Metrics</strong>.<br/>Si algo no te cuadra, escríbenos a soporte@bakano.ec</p>
+          </td>
+        </tr>
+
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+
+    await this.client.emails.send({
+      from: this.from,
+      to,
+      subject: `${esc(workspaceName)}: cómo funciona tu producción y cada cuánto se hace`,
+      html,
+    });
+  }
+
+  /**
    * Presentacion del bot a los clientes que ya venian usando la plataforma.
    * La idea es una sola: lo que antes tenian que entrar a buscar a Metrics,
    * ahora lo pueden preguntar por chat.

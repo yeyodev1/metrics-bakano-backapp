@@ -842,7 +842,7 @@ export class TelegramBotService {
         ? proximas.map((p) => `🎬 <b>${fechaEcuador(p.date)}</b>`).join("\n")
         : "🎬 No tienes ninguna producción agendada.",
       ultima ? `\nLa última fue el ${fechaEcuador(ultima.date)}${ultima.cumplida ? " y ya quedó grabada ✅" : ""}.` : "",
-      `\nGraban <b>${escaparHtml(equipoAtencionService.nombres("produccion"))}</b>: tu avatar, tus productos y los recursos que hagan falta.`,
+      `\nGraban <b>${escaparHtml(equipoAtencionService.nombres("produccion"))}</b>: <b>tu avatar</b> y <b>tus productos</b>. Se hace una cada 6 meses; con ese material salen todos tus videos del periodo.`,
       estado.reserva ? `\n${contenidoClienteService.enTexto(estado.reserva)}` : "",
       // Grabamos hasta quedarnos sin contenido: si ya no queda nada escrito
       // por grabar, no se le dice "espera al mes que viene".
@@ -1621,7 +1621,9 @@ export class TelegramBotService {
         chat.chatId,
         `${intro}🎬 Ya tienes una producción agendada para el <b>${fechaEcuador(estado.proxima!)}</b>.\n\n` +
           (estado.reserva ? `${contenidoClienteService.enTexto(estado.reserva)}\n\n` : "") +
-          "Agendamos una producción cada 2 meses, así que no puedo reservar otra por ahora.\n\n" +
+          "La producción es la grabación para crear tu <b>avatar</b> y grabar tus <b>productos</b>: con eso armamos todos tus videos del periodo. " +
+          "Por eso se hace <b>una cada 6 meses</b> y no puedo reservar otra por ahora.\n\n" +
+          "Si la estrategia pide grabar antes (productos nuevos, cambio de marca), cuéntamelo y se lo paso al equipo.\n\n" +
           "Si necesitas moverla o cancelarla, toca abajo (se puede hasta 48 horas antes). " +
           `Para otro tema de producción, cuéntame aquí y se lo paso a <b>${nombres}</b> 📩`,
         [
@@ -1644,15 +1646,19 @@ export class TelegramBotService {
       estado.sinContenido && estado.ultima
         ? "Y esto es lo importante: <b>ya grabamos todo lo que estaba escrito</b>, así que no hay que esperar nada. Mientras antes grabemos, antes vuelves a tener contenido saliendo 🎯\n\n"
         : estado.esperar && estado.ultima
-          ? `Tu última producción fue el ${fechaEcuador(estado.ultima)} y agendamos una cada 2 meses, así que te muestro horarios desde el <b>${fechaEcuador(estado.habilitadaDesde!)}</b>.\n\n`
-          : "";
+          ? `Tu última producción fue el ${fechaEcuador(estado.ultima)} y grabamos <b>una cada 6 meses</b>, así que te muestro horarios desde el <b>${fechaEcuador(estado.habilitadaDesde!)}</b>.\n\n`
+          : estado.porEstrategia
+            ? "El equipo habilitó una producción antes de tiempo porque tu estrategia lo pide 🎯\n\n"
+            : "";
     const botones = this.botonesHorarios(horarios, (h) => `prod:${Math.floor(h.getTime() / 1000)}`);
     botones.push([{ text: "✍️ Prefiero escribirles", callback_data: "menu:produccion" }]);
 
     await telegramService.sendMessage(
       chat.chatId,
       `${intro}🎬 Agendemos tu producción con <b>${nombres}</b>.\n\n` +
-        "Es la sesión en ambiente controlado para grabar las tomas de tu avatar y de los productos que vamos a promocionar.\n\n" +
+        "Es la grabación en ambiente controlado para <b>crear tu avatar</b> y <b>grabar tus productos</b>. " +
+        "Con ese material armamos todos tus videos, por eso se hace <b>una cada 6 meses</b> (para la mayoría, una vez al año). " +
+        "Si la estrategia lo pide antes —productos nuevos, cambio de marca—, el equipo la habilita.\n\n" +
         (estado.reserva ? `${contenidoClienteService.enTexto(estado.reserva)}\n\n` : "") +
         `${regla}Elige el horario que te quede mejor 👇` +
         this.avisoChoques(quitados),

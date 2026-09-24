@@ -27,7 +27,7 @@ import { ORDEN_SESIONES, SESIONES_ONBOARDING, type SesionOnboarding } from "./on
  * - Solo se tocan citas que el sistema sabe que son de ESE entorno: la
  *   produccion por su Planning, las sesiones por onboardingSesiones y las
  *   reuniones por el registro del chat. Nunca un id que venga del modelo.
- * - Mover una produccion no la cuenta como nueva: la regla de los 2 meses se
+ * - Mover una produccion no la cuenta como nueva: la regla de los 6 meses se
  *   mide contra la ultima produccion ya realizada.
  * - La confirmacion la exige el servidor, no solo el prompt: primero se
  *   propone el cambio (queda pendiente en el chat) y se ejecuta recien cuando
@@ -39,7 +39,7 @@ const PLAZO_URGENTE_MS = 48 * 3_600_000;
 const ANTICIPACION_MS = 2 * 3_600_000;
 
 const VENTANA_MOVER_DIAS = 30;
-const MESES_ENTRE_PRODUCCIONES = Number(process.env.PRODUCCION_MESES_ENTRE) > 0 ? Number(process.env.PRODUCCION_MESES_ENTRE) : 2;
+const MESES_ENTRE_PRODUCCIONES = Number(process.env.PRODUCCION_MESES_ENTRE) > 0 ? Number(process.env.PRODUCCION_MESES_ENTRE) : 6;
 const CANCELADAS = ["cancelled", "canceled", "invalid"];
 /**
  * Cuanto ocupa una cita en la agenda del cliente cuando no sabemos su fin.

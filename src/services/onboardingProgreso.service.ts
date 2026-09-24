@@ -80,12 +80,22 @@ function dias(desde?: Date): number | undefined {
 }
 
 class OnboardingProgresoService {
-  private async progresoDe(workspace: any): Promise<ProgresoEntorno> {
+  /**
+   * El avance de un entorno.
+   *
+   * `contexto` lo trae el listado ya resuelto para todos los entornos de una
+   * vez. Sin el, cada fila pedia su proxima produccion y su reserva de
+   * contenido por separado: con 83 clientes eso eran cientos de consultas y
+   * la pantalla tardaba una eternidad en abrir.
+   */
+  private async progresoDe(workspace: any, contexto?: { proxima?: Date; tieneTelegram: boolean }): Promise<ProgresoEntorno> {
     const sesiones = workspace.onboardingSesiones || {};
-    const [produccionEstado, chat] = await Promise.all([
-      atencionClienteService.estadoProduccion(workspace._id),
-      models.telegramChats.exists({ workspaceId: workspace._id, estado: "listo" }),
-    ]);
+    const [produccionEstado, chat] = contexto
+      ? [{ proxima: contexto.proxima }, contexto.tieneTelegram]
+      : await Promise.all([
+          atencionClienteService.estadoProduccion(workspace._id),
+          models.telegramChats.exists({ workspaceId: workspace._id, estado: "listo" }),
+        ]);
 
     const pasos: PasoProgreso[] = PASOS.map((paso) => {
       const s = paso === "produccion" ? sesiones.produccion : sesiones[paso as SesionOnboarding];
@@ -133,7 +143,29 @@ class OnboardingProgresoService {
       .select("name onboardingSesiones createdAt")
       .lean();
 
-    const progresos = await Promise.all(workspaces.map((w) => this.progresoDe(w)));
+    // Todo lo que las filas necesitan, en dos consultas para todos los
+    // entornos: la proxima produccion de cada uno y quien tiene Telegram.
+    const ids = workspaces.map((w) => w._id);
+    const ahora = new Date();
+    const [proximas, chats] = await Promise.all([
+      models.planning.aggregate([
+        { $match: { workspaceId: { $in: ids }, date: { $gte: ahora }, cancelada: { $ne: true }, title: { $not: /^CANCELADA/ } } },
+        { $sort: { date: 1 } },
+        { $group: { _id: "$workspaceId", date: { $first: "$date" } } },
+      ]),
+      models.telegramChats.find({ estado: "listo", workspaceId: { $in: ids } }).select("workspaceId").lean(),
+    ]);
+    const proximaPorEntorno = new Map(proximas.map((p: any) => [String(p._id), p.date as Date]));
+    const conTelegram = new Set(chats.map((c: any) => String(c.workspaceId)));
+
+    const progresos = await Promise.all(
+      workspaces.map((w) =>
+        this.progresoDe(w, {
+          proxima: proximaPorEntorno.get(String(w._id)),
+          tieneTelegram: conTelegram.has(String(w._id)),
+        })
+      )
+    );
     return progresos
       .filter((p) => (opts.soloBloqueados ? p.bloqueado : true))
       .filter((p) => (opts.soloPendientes ? p.porcentaje < 100 : true))

@@ -45,7 +45,16 @@ const BLOQUEO_AGENDA_MS = 60_000;
  * los productos a promocionar. Una cada N meses (2 por defecto) contados
  * desde la ultima; con una ya agendada no se agenda otra.
  */
-const MESES_ENTRE_PRODUCCIONES = Number(process.env.PRODUCCION_MESES_ENTRE) > 0 ? Number(process.env.PRODUCCION_MESES_ENTRE) : 2;
+/**
+ * Cada cuanto se graba.
+ *
+ * La produccion es para crear el avatar del cliente y grabar sus productos.
+ * Con ese material armamos los videos de todo el periodo, asi que no hace
+ * falta volver a grabar cada dos meses: una vez cada SEIS meses alcanza, y en
+ * la practica es una vez al año para la mayoria. Antes de los seis meses solo
+ * se graba si la estrategia lo pide, y eso lo habilita el equipo.
+ */
+const MESES_ENTRE_PRODUCCIONES = Number(process.env.PRODUCCION_MESES_ENTRE) > 0 ? Number(process.env.PRODUCCION_MESES_ENTRE) : 6;
 // El cliente necesita tiempo para revisar guiones antes de grabar (48 h de correcciones).
 /**
  * Dias de margen para agendar una produccion, contados desde mañana.
@@ -88,6 +97,10 @@ export interface EstadoProduccion {
   habilitadaDesde?: Date;
   /** true si la regla de los meses corre la fecha, no solo la anticipacion. */
   esperar?: boolean;
+  /** Cada cuantos meses se graba: hoy 6. */
+  mesesEntre?: number;
+  /** El equipo habilito una produccion antes de tiempo por estrategia. */
+  porEstrategia?: boolean;
   /** Cuanto le queda por grabar: es lo que decide si hay que grabar ya. */
   reserva?: ReservaContenido | null;
   /** Se quedo sin guiones por grabar: la espera entre producciones no aplica. */
@@ -202,9 +215,10 @@ class AtencionClienteService {
   /** Regla de agenda de produccion, calculada siempre en el servidor. */
   async estadoProduccion(workspaceId: Types.ObjectId): Promise<EstadoProduccion> {
     const ahora = new Date();
-    const [proxima, ultima] = await Promise.all([
+    const [proxima, ultima, entorno] = await Promise.all([
       models.planning.findOne({ workspaceId, date: { $gte: ahora }, title: { $not: /^CANCELADA/ }, cancelada: { $ne: true } }).sort({ date: 1 }).select("date").lean(),
       models.planning.findOne({ workspaceId, date: { $lt: ahora }, title: { $not: /^CANCELADA/ }, cancelada: { $ne: true } }).sort({ date: -1 }).select("date").lean(),
+      models.workspaces.findById(workspaceId).select("produccion").lean(),
     ]);
     if (proxima) return { puedeAgendar: false, proxima: proxima.date, ultima: ultima?.date };
 
@@ -213,13 +227,19 @@ class AtencionClienteService {
     // hace falta: se levanta la regla y se graba cuanto antes.
     const reserva = await contenidoClienteService.reserva(workspaceId).catch(() => null);
     const sinContenido = reserva ? contenidoClienteService.seAcaba(reserva) : false;
-    const porRegla = ultima && !sinContenido ? sumarMeses(ultima.date, MESES_ENTRE_PRODUCCIONES) : ahora;
+    // La excepcion por estrategia la habilita el equipo: mientras este vigente,
+    // la espera de los seis meses no aplica.
+    const excepcion = (entorno as any)?.produccion?.excepcionHasta;
+    const conExcepcion = excepcion && new Date(excepcion).getTime() > ahora.getTime();
+    const porRegla = ultima && !sinContenido && !conExcepcion ? sumarMeses(ultima.date, MESES_ENTRE_PRODUCCIONES) : ahora;
     const minimo = desdeParaProduccion(ahora).getTime();
     return {
       puedeAgendar: true,
       ultima: ultima?.date,
       habilitadaDesde: new Date(Math.max(porRegla.getTime(), minimo)),
       esperar: porRegla.getTime() > minimo,
+      mesesEntre: MESES_ENTRE_PRODUCCIONES,
+      porEstrategia: Boolean(conExcepcion),
       reserva,
       sinContenido,
     };
