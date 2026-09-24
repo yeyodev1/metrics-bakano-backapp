@@ -476,13 +476,13 @@ Reglas:
           const ahora = new Date();
           const [proximas, ultima] = await Promise.all([
             models.planning
-              .find({ workspaceId: chat.workspaceId, date: { $gte: ahora }, title: { $not: /^CANCELADA/ } })
+              .find({ workspaceId: chat.workspaceId, date: { $gte: ahora }, title: { $not: /^CANCELADA/ }, cancelada: { $ne: true } })
               .sort({ date: 1 })
               .limit(3)
               .select("title date")
               .lean(),
             models.planning
-              .findOne({ workspaceId: chat.workspaceId, date: { $lt: ahora }, title: { $not: /^CANCELADA/ } })
+              .findOne({ workspaceId: chat.workspaceId, date: { $lt: ahora }, title: { $not: /^CANCELADA/ }, cancelada: { $ne: true } })
               .sort({ date: -1 })
               .select("title date cumplida")
               .lean(),
