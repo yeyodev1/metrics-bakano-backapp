@@ -101,7 +101,11 @@ cronRouter.get("/bot-recordatorios", async (req: Request, res: Response) => {
     const { reporteBotService } = await import("../services/reporteBot.service");
     const r = await reporteBotService.recordatorios();
     console.log(`[Cron] Bot recordatorios — candidatos: ${r.candidatos}, enviados: ${r.enviados}`);
-    res.status(200).json(r);
+    // Y el contrato sin firmar: un "mas tarde" sin recordatorio no se firma nunca.
+    const { contratoChatService } = await import("../services/contratoChat.service");
+    const c = await contratoChatService.recordarPendientes();
+    console.log(`[Cron] Contratos sin firmar — revisados: ${c.revisados}, recordados: ${c.recordados}`);
+    res.status(200).json({ ...r, contratos: c });
   } catch (error: any) {
     console.error("[Cron] Bot recordatorios:", error?.message || error);
     res.status(500).json({ error: error?.message || "error" });

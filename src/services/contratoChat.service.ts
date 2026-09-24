@@ -1,6 +1,8 @@
 import { Types } from "mongoose";
 import models from "../models";
 import type { ITelegramChat } from "../models/telegramChat.model";
+import { telegramService } from "./telegram.service";
+import { slackService } from "./slack.service";
 
 /**
  * El contrato se llena por el chat y se firma en una sola pantalla.
@@ -35,6 +37,11 @@ export const ETIQUETA_CONTRATO: Record<CampoContrato, string> = {
 };
 
 const CORREO_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+
+/** Se recuerda una vez al dia. */
+const CADA_MS = 20 * 3_600_000;
+/** A los tres recordatorios sin firmar, el equipo se entera. */
+const AVISAR_AL_EQUIPO_DESDE = 3;
 
 class ContratoChatService {
   /** Lo que ya tiene guardado del contrato, aunque no lo haya firmado. */
@@ -85,6 +92,78 @@ class ContratoChatService {
   /** El link que abre solo la pantalla de firma. */
   link(workspaceId: Types.ObjectId | string): string {
     return `${APP_URL}/onboarding/${workspaceId}`;
+  }
+
+  /**
+   * Le recuerda al cliente que su contrato sigue sin firmar.
+   *
+   * Un "mas tarde" sin recordatorio es un contrato que no se firma nunca: el
+   * cliente cierra el chat y el tema se muere ahi. Se insiste una vez al dia,
+   * cambiando el tono, y al tercer recordatorio el equipo se entera.
+   */
+  async recordarPendientes(): Promise<{ revisados: number; recordados: number }> {
+    const entornos = await models.workspaces
+      .find({ isActive: true, "onboardingStatus.contractSubmitted": { $ne: true } })
+      .select("name contractData")
+      .lean();
+
+    let recordados = 0;
+    for (const w of entornos as any[]) {
+      const chats = await models.telegramChats.find({ workspaceId: w._id, estado: "listo" }).select("chatId").lean();
+      if (!chats.length) continue;
+
+      const datos = (w.contractData || {}) as Record<string, any>;
+      const ultimo = datos.ultimoRecordatorioEn ? new Date(datos.ultimoRecordatorioEn).getTime() : 0;
+      if (Date.now() - ultimo < CADA_MS) continue;
+
+      const veces = Number(datos.recordatorios || 0) + 1;
+      const faltan = CAMPOS_CONTRATO.filter((c) => !String(datos[c] ?? "").trim());
+      const link = this.link(w._id);
+
+      const texto = faltan.length
+        ? (veces === 1
+            ? "📝 Te quedó pendiente tu contrato.\n\nSon cuatro datos y los llenamos aquí mismo, en un minuto."
+            : veces < AVISAR_AL_EQUIPO_DESDE
+              ? `📝 Seguimos sin tu contrato: faltan ${faltan.length} datos.\n\nSin el contrato firmado no podemos arrancar con tus guiones ni con tu producción.`
+              : "📝 Tu contrato sigue sin llenarse y ya van varios días.\n\nEs lo único que nos frena para empezar. Si algo te está trabando, dímelo y lo resolvemos ahora.")
+        : (veces === 1
+            ? "✍️ Ya tengo todos tus datos: solo falta tu firma.\n\nSe abre, lo lees y lo firmas con el dedo. Dos minutos."
+            : veces < AVISAR_AL_EQUIPO_DESDE
+              ? "✍️ Tu contrato sigue sin firmar.\n\nEs el único paso que falta para arrancar: sin eso no empiezan tus guiones ni tu producción."
+              : "✍️ Tu contrato lleva días esperando tu firma.\n\nNo podemos avanzar sin eso. Si prefieres que alguien te acompañe a firmarlo, dímelo y te llamamos.");
+
+      const botones = faltan.length
+        ? [[{ text: `📝 Llenar mi contrato (${faltan.length})`, callback_data: "contrato:llenar" }], [{ text: "📋 Ver menú", callback_data: "menu:ver" }]]
+        : [[{ text: "✍️ Leer y firmar ahora", url: link }], [{ text: "📋 Ver menú", callback_data: "menu:ver" }]];
+
+      for (const chat of chats as any[]) {
+        await telegramService
+          .sendMessage(chat.chatId, texto, botones as any)
+          .catch((error: any) => console.error("[Contrato] recordatorio:", error?.message || error));
+      }
+
+      await models.workspaces.updateOne(
+        { _id: w._id },
+        { $set: { "contractData.ultimoRecordatorioEn": new Date(), "contractData.recordatorios": veces } }
+      );
+      recordados++;
+
+      if (veces === AVISAR_AL_EQUIPO_DESDE) {
+        await slackService
+          .avisarEquipo({
+            titulo: `📝 ${w.name} lleva ${veces} recordatorios y no firma su contrato`,
+            detalle:
+              (faltan.length
+                ? `Todavía le faltan datos: ${faltan.join(", ")}.`
+                : "Tiene todos los datos cargados y no entra a firmar.") +
+              `\n\nLink de firma: ${link}`,
+            correos: ["gbenalcazar@bakano.ec"],
+          })
+          .catch(() => undefined);
+      }
+    }
+
+    return { revisados: entornos.length, recordados };
   }
 
   /** Resumen de lo cargado, para confirmarlo antes de mandar el link. */
