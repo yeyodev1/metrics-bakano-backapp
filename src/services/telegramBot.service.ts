@@ -736,11 +736,14 @@ export class TelegramBotService {
 
   /** Cuántos guiones hay, en qué estado, y el link para verlos en Metrics. */
   private async mostrarGuiones(chat: ITelegramChat): Promise<void> {
+    // Aquí SÍ entran las producciones canceladas: los guiones escritos no se
+    // van con la fecha. Si se movió o se canceló la grabación, el cliente
+    // igual tiene que poder revisar lo que Ariana ya escribió.
     const entradas = await models.planning
-      .find({ workspaceId: chat.workspaceId, title: { $not: /^CANCELADA/ }, cancelada: { $ne: true } })
+      .find({ workspaceId: chat.workspaceId })
       .sort({ date: -1 })
-      .limit(3)
-      .select("_id date title")
+      .limit(6)
+      .select("_id date title cancelada")
       .lean();
     const planes = entradas.length
       ? await models.videoPlanning
@@ -757,7 +760,7 @@ export class TelegramBotService {
       if (!total) continue;
       const aprobados = (plan?.items || []).filter((i: any) => i.clienteAprobacion === "APROBADO").length;
       lineas.push(
-        `📝 <b>${total} guiones</b> · producción del ${fechaEcuador(e.date)}\n` +
+        `📝 <b>${total} guiones</b> · producción del ${fechaEcuador(e.date)}${(e as any).cancelada ? " (grabación cancelada)" : ""}\n` +
           `     ${aprobados} aprobados · ${plan?.listaParaCliente ? "listos para tu revisión" : "en preparación"}`
       );
       if (plan?.listaParaCliente) {
