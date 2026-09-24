@@ -259,7 +259,7 @@ class ProduccionPlanificacionService {
 
   /** Lo que se le dice al cliente cuando acaba de agendar su produccion. */
   textoParaElCliente(estado: EstadoPlanificacion | null, workspaceId: Types.ObjectId | string, faltaCrm: boolean): string {
-    const crm = SESIONES_ONBOARDING.crm;
+    const crm = SESIONES_ONBOARDING.especializacion;
     return (
       "\n\n📋 <b>Toda producción necesita su planificación</b>: los guiones de lo que vamos a grabar tienen que estar listos y aprobados por ti <b>antes</b> de la grabación. " +
       (estado?.guiones

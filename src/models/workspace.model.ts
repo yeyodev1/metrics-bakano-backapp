@@ -33,6 +33,16 @@ export interface IBrandProfile {
   problemaResuelto?: string;
   trafficDirection?: "WHATSAPP" | "GHL";
   trafficLink: string;
+  /**
+   * Datos que pide el proceso nuevo (2026-09-24). Los cuenta el cliente por el
+   * chat, uno por uno: sin ellos los guiones salen genericos.
+   */
+  tipografiaTitulos?: string;
+  tipografiaTextos?: string;
+  /** Monto o rango: "45 dolares", "entre 30 y 80". */
+  ticketPromedio?: string;
+  porQueTeCompran?: string;
+  halagoComun?: string;
   archivos: IBrandProfileFile[];
   segmentosMercado?: ISegmentoMercado[];
   canalesDetail?: string[];
@@ -94,6 +104,11 @@ export interface ISesionOnboarding {
 }
 
 export interface IOnboardingSesiones {
+  bienvenida?: ISesionOnboarding;
+  especializacion?: ISesionOnboarding;
+  levantamiento?: ISesionOnboarding;
+  /** Claves del proceso anterior (Meta/CRM/Estrategia). Se conservan: el
+   *  historial de quien ya paso por ahi no se borra por cambiar el proceso. */
   meta?: ISesionOnboarding;
   crm?: ISesionOnboarding;
   estrategia?: ISesionOnboarding;
@@ -151,6 +166,11 @@ export interface IWorkspace extends Document {
   resources?: IResource[];
   onboardingStatus?: IOnboardingStatus;
   onboardingSesiones?: IOnboardingSesiones;
+  /**
+   * Etapas del recorrido que marca el equipo a mano (avatares, escenas,
+   * aprobacion de videos, salida a ventas). Las demas se deducen de los datos.
+   */
+  recorrido?: Record<string, { estado: "pendiente" | "en_curso" | "listo" | "no_aplica"; en?: Date; porNombre?: string; nota?: string }>;
   /** Ultimo aviso de "se te acaba el contenido", para no repetirlo cada dia. */
   avisoContenidoEn?: Date;
   /** Correo de arranque del onboarding (el que manda al bot de Telegram). */
@@ -260,6 +280,11 @@ const BrandProfileSchema = new Schema(
       enum: ["WHATSAPP", "GHL"],
     },
     trafficLink: { type: String, trim: true, default: "" },
+    tipografiaTitulos: { type: String, trim: true },
+    tipografiaTextos: { type: String, trim: true },
+    ticketPromedio: { type: String, trim: true },
+    porQueTeCompran: { type: String, trim: true },
+    halagoComun: { type: String, trim: true },
     archivos: { type: [BrandProfileFileSchema], default: [] },
     segmentosMercado: { type: [SegmentoMercadoSchema], default: [] },
     canalesDetail: { type: [String], default: [] },
@@ -338,12 +363,16 @@ const WorkspaceSchema = new Schema<IWorkspace>(
     },
     onboardingSesiones: {
       type: {
+        bienvenida: { type: SesionOnboardingSchema, default: undefined },
+        especializacion: { type: SesionOnboardingSchema, default: undefined },
+        levantamiento: { type: SesionOnboardingSchema, default: undefined },
         meta: { type: SesionOnboardingSchema, default: undefined },
         crm: { type: SesionOnboardingSchema, default: undefined },
         estrategia: { type: SesionOnboardingSchema, default: undefined },
       },
       default: undefined,
     },
+    recorrido: { type: Schema.Types.Mixed, default: undefined },
     avisoContenidoEn: { type: Date, default: null },
     onboardingBienvenidaEnviadaEn: {
       type: Date,

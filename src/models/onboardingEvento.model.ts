@@ -6,7 +6,19 @@ import type { EstadoSesionOnboarding } from "./workspace.model";
  * cuando, a que estado y por que. El estado actual vive en el workspace; aqui
  * queda la historia, que es lo que permite responder "por que no avanzo esto".
  */
-export type PasoOnboarding = "meta" | "crm" | "estrategia" | "produccion";
+/**
+ * Pasos del onboarding. Los tres primeros son el proceso nuevo; meta, crm y
+ * estrategia son los del anterior y se conservan para no perder el historial
+ * de los clientes que pasaron por ahi.
+ */
+export type PasoOnboarding =
+  | "bienvenida"
+  | "especializacion"
+  | "levantamiento"
+  | "produccion"
+  | "meta"
+  | "crm"
+  | "estrategia";
 
 export interface IOnboardingEvento extends Document {
   workspaceId: Types.ObjectId;

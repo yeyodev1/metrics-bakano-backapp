@@ -65,20 +65,73 @@ export const ENTREGABLES: Record<
   },
 };
 
-/** Campos del perfil de marca que el cliente puede contar por chat. */
+/**
+ * Campos del perfil de marca que el cliente cuenta por chat, en el orden del
+ * proceso (documento del 24/09/2026). El orden importa: es el que sigue el
+ * bot cuando lo va preguntando uno por uno.
+ */
 export const CAMPOS_MARCA: Record<string, string> = {
+  tipografiaTitulos: "La tipografía de sus títulos",
+  tipografiaTextos: "La tipografía de sus textos",
+  vertical: "Su vertical de negocio",
   descripcion: "Qué hace el negocio",
   tipoNegocio: "Si vende productos o servicios",
-  vertical: "Rubro o industria",
   productosServicios: "Qué productos o servicios vende",
-  publicoObjetivo: "A quién le vende",
-  propuestaValor: "Qué lo diferencia de la competencia",
-  problemaResuelto: "Qué problema le resuelve a su cliente",
-  tono: "Cómo le gusta comunicarse",
+  ticketPromedio: "Su ticket promedio de venta, o el rango",
+  porQueTeCompran: "Por qué le compra su cliente",
+  propuestaValor: "Qué lo hace diferente de su competencia",
+  halagoComun: "El halago más común de sus clientes satisfechos",
+  tono: "Su estilo de comunicación",
   // Donde cae la venta. Sin esto los videos no tienen a donde mandar a la
   // gente: es el dato que define si la pauta va a WhatsApp o a la agenda.
   trafficDirection: "Dónde captura la venta: WhatsApp o GHL/Agenda",
   trafficLink: "El link o el número de WhatsApp al que llegan sus clientes",
+};
+
+/**
+ * Opciones fijas. Donde la respuesta es una de estas, el bot pone botones: el
+ * cliente no tiene que escribir "semicasual" ni acordarse de como se llamaba
+ * la tipografia.
+ */
+export const OPCIONES_MARCA: Record<string, { etiqueta: string; valor: string }[]> = {
+  tipografiaTitulos: [
+    { etiqueta: "Anton", valor: "Anton" },
+    { etiqueta: "Helvetica", valor: "Helvetica" },
+    { etiqueta: "Playfair", valor: "Playfair" },
+  ],
+  tipografiaTextos: [
+    { etiqueta: "Nunito", valor: "Nunito" },
+    { etiqueta: "Poppins", valor: "Poppins" },
+    { etiqueta: "Montserrat", valor: "Montserrat" },
+  ],
+  tipoNegocio: [
+    { etiqueta: "Productos", valor: "PRODUCTOS" },
+    { etiqueta: "Servicios", valor: "SERVICIOS" },
+  ],
+  tono: [
+    { etiqueta: "Profesional", valor: "profesional" },
+    { etiqueta: "Semicasual", valor: "semicasual" },
+    { etiqueta: "Casual", valor: "casual" },
+  ],
+};
+
+/** Lo que el bot pregunta para cada campo, con sus palabras. */
+export const PREGUNTA_MARCA: Record<string, string> = {
+  tipografiaTitulos:
+    "Empecemos por lo visual 🎨\n\n¿Qué <b>tipografía</b> usas para tus <b>títulos</b>?\n\nSi ya tienes una, mándame el archivo o escríbeme cómo se llama. Si no, elige una de estas y la usamos:",
+  tipografiaTextos:
+    "¿Y para los <b>textos y subtítulos</b>?\n\nIgual: mándame la tuya o elige una 👇",
+  vertical: "¿Cuál es tu <b>vertical de negocio</b>? Por ejemplo: restaurante, clínica dental, tienda de ropa, inmobiliaria…",
+  descripcion: "Cuéntame en dos o tres líneas: <b>¿qué hace tu negocio?</b>",
+  tipoNegocio: "¿Vendes <b>productos</b> o <b>servicios</b>?",
+  productosServicios: "Descríbeme <b>tu producto o servicio</b>: qué es, qué incluye, cómo lo entregas.",
+  ticketPromedio:
+    "¿Cuál es tu <b>ticket promedio de venta</b>?\n\nSi no lo tienes exacto, dame un rango. Por ejemplo: “unos 45 dólares” o “entre 30 y 80”.",
+  porQueTeCompran: "¿<b>Por qué te compra</b> tu cliente? Con tus palabras, no la versión de folleto.",
+  propuestaValor:
+    "¿Qué te hace <b>diferente de tu competencia</b>?\n\nPor ejemplo: la velocidad de entrega, la calidad, los resultados que consigues…",
+  halagoComun: "¿Cuál es el <b>halago más común</b> que te hacen tus clientes satisfechos?",
+  tono: "Por último: ¿cómo te gusta <b>comunicarte</b> con tus clientes?",
 };
 
 /**
@@ -140,7 +193,25 @@ class OnboardingDatosService {
       return { ok: false as const, motivo: "ya_tiene_valor", actual, siguiente: "Pregúntale si quiere reemplazarlo; si dice que sí, vuelve a llamar con reemplazar=true." };
     }
     let limpio = String(valor || "").trim().slice(0, 1500);
-    if (campo === "trafficDirection") {
+    if (campo === "tono") {
+      // El proceso define tres estilos. Lo que escriba se acomoda a uno de
+      // ellos: guardar "formal pero cercano" no le sirve a quien escribe.
+      const v = limpio.toLowerCase();
+      limpio = /semi|intermedi|mezcla/.test(v)
+        ? "semicasual"
+        : /casual|cercan|informal|amig/.test(v)
+          ? "casual"
+          : /profes|formal|serio|corporat/.test(v)
+            ? "profesional"
+            : "";
+      if (!limpio) return { ok: false as const, motivo: "Elige uno de los tres: profesional, semicasual o casual." };
+    } else if (campo === "tipografiaTitulos" || campo === "tipografiaTextos") {
+      if (limpio.length < 2) return { ok: false as const, motivo: "Dime el nombre de la tipografía o elige una de las opciones." };
+      limpio = limpio.slice(0, 80);
+    } else if (campo === "ticketPromedio") {
+      if (!/\d/.test(limpio)) return { ok: false as const, motivo: "Necesito un número o un rango. Por ejemplo: “45 dólares” o “entre 30 y 80”." };
+      limpio = limpio.slice(0, 120);
+    } else if (campo === "trafficDirection") {
       const v = limpio.toLowerCase();
       limpio = /whats|wpp|wasap/.test(v) ? "WHATSAPP" : /ghl|agenda|calendar|crm|cita/.test(v) ? "GHL" : "";
       if (!limpio) return { ok: false as const, motivo: "trafficDirection debe ser WhatsApp o GHL/Agenda" };

@@ -17,24 +17,34 @@ import { ORDEN_SESIONES, SESIONES_ONBOARDING, type SesionOnboarding } from "./on
 export const PASOS: PasoOnboarding[] = [...ORDEN_SESIONES, "produccion"];
 
 const ETIQUETA_PASO: Record<PasoOnboarding, string> = {
-  meta: SESIONES_ONBOARDING.meta.etiqueta,
-  crm: SESIONES_ONBOARDING.crm.etiqueta,
-  estrategia: SESIONES_ONBOARDING.estrategia.etiqueta,
+  bienvenida: SESIONES_ONBOARDING.bienvenida.etiqueta,
+  especializacion: SESIONES_ONBOARDING.especializacion.etiqueta,
+  levantamiento: SESIONES_ONBOARDING.levantamiento.etiqueta,
   produccion: "Primera producción",
+  // Proceso anterior: se conservan para leer el historial.
+  meta: "Conexión de cuentas Meta",
+  crm: "Configuración de CRM y Metrics",
+  estrategia: "Estrategia y guiones",
 };
 
 const RESPONSABLE_PASO: Record<PasoOnboarding, string> = {
-  meta: SESIONES_ONBOARDING.meta.responsable.nombre,
-  crm: SESIONES_ONBOARDING.crm.responsable.nombre,
-  estrategia: SESIONES_ONBOARDING.estrategia.responsable.nombre,
+  bienvenida: SESIONES_ONBOARDING.bienvenida.responsable.nombre,
+  especializacion: SESIONES_ONBOARDING.especializacion.responsable.nombre,
+  levantamiento: SESIONES_ONBOARDING.levantamiento.responsable.nombre,
   produccion: equipoAtencionService.nombres("produccion"),
+  meta: "Joel Jimenez",
+  crm: "David Robles",
+  estrategia: "Ariana Vera",
 };
 
 const CORREO_PASO: Record<PasoOnboarding, string[]> = {
-  meta: [SESIONES_ONBOARDING.meta.responsable.email],
-  crm: [SESIONES_ONBOARDING.crm.responsable.email],
-  estrategia: [SESIONES_ONBOARDING.estrategia.responsable.email],
+  bienvenida: [SESIONES_ONBOARDING.bienvenida.responsable.email],
+  especializacion: [SESIONES_ONBOARDING.especializacion.responsable.email],
+  levantamiento: [SESIONES_ONBOARDING.levantamiento.responsable.email],
   produccion: equipoAtencionService.correos("produccion"),
+  meta: ["jjimenez@bakano.ec"],
+  crm: ["drobles@bakano.ec"],
+  estrategia: ["avera@bakano.ec"],
 };
 
 export interface PasoProgreso {
