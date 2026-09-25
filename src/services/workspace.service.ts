@@ -971,6 +971,17 @@ export class WorkspaceService {
           })
           .catch(() => {});
       }
+
+      // Sumar a alguien a un entorno cuenta igual que darlo de alta: si es
+      // cliente, sus accesos salen ahora. Ninguno de los dos repite envios.
+      if (!user.isInternal) {
+        await Promise.allSettled([
+          import("./invitacionBot.service").then(({ invitacionBotService }) =>
+            invitacionBotService.invitar(user._id, newWorkspaceIds)
+          ),
+          import("./bakanology.service").then(({ bakanologyService }) => bakanologyService.alDarDeAlta(user._id)),
+        ]);
+      }
     }
 
     const { password, ...withoutPassword } = user.toObject();
