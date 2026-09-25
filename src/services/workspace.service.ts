@@ -535,13 +535,15 @@ export class WorkspaceService {
 
     // Y su invitacion al bot: el flujo cambio y lo que antes se hacia aqui
     // ahora se resuelve por chat. Se manda sola, sin que nadie se acuerde.
-    import("./invitacionBot.service")
-      .then(({ invitacionBotService }) => invitacionBotService.invitarEnSegundoPlano(user!._id, [payload.workspaceId]))
+    await import("./invitacionBot.service")
+      .then(({ invitacionBotService }) => invitacionBotService.invitar(user!._id, [payload.workspaceId]))
       .catch((error) => console.error("[Bot] invitacion al crear usuario:", error?.message || error));
 
-    // Y su acceso a Bakanology: contratar incluye la academia.
-    import("./bakanology.service")
-      .then(({ bakanologyService }) => bakanologyService.enSegundoPlano(user!._id))
+    // Y su acceso a Bakanology: contratar incluye la academia. Se ESPERA: en
+    // Vercel una promesa suelta se pierde cuando la funcion responde, y asi
+    // hubo altas que nunca recibieron su acceso.
+    await import("./bakanology.service")
+      .then(({ bakanologyService }) => bakanologyService.alDarDeAlta(user!._id))
       .catch((error) => console.error("[Bakanology] al crear usuario:", error?.message || error));
 
     const { password, ...userWithoutPassword } = user.toObject();
@@ -904,11 +906,11 @@ export class WorkspaceService {
       if (!payload.isInternal) {
         const destino = user._id;
         const entornos = [...newWorkspaceIds];
-        import("./invitacionBot.service")
-          .then(({ invitacionBotService }) => invitacionBotService.invitarEnSegundoPlano(destino, entornos))
+        await import("./invitacionBot.service")
+          .then(({ invitacionBotService }) => invitacionBotService.invitar(destino, entornos))
           .catch((error) => console.error("[Bot] invitacion al crear cliente:", error?.message || error));
-        import("./bakanology.service")
-          .then(({ bakanologyService }) => bakanologyService.enSegundoPlano(destino))
+        await import("./bakanology.service")
+          .then(({ bakanologyService }) => bakanologyService.alDarDeAlta(destino))
           .catch((error) => console.error("[Bakanology] al crear cliente:", error?.message || error));
       }
     }
