@@ -11,6 +11,7 @@ import { AYUDA_CAMPO_MARCA, CAMPOS_MARCA, ENTREGABLES, onboardingDatosService } 
 import { metricasClienteService } from "./metricasCliente.service";
 import { claveDia, contextoParaLaIa, facturacionChatService, comoPlata } from "./facturacionChat.service";
 import { publicidadClienteService } from "./publicidadCliente.service";
+import { pagosClienteService } from "./pagosCliente.service";
 import { fueraDeHorario, incidentesService } from "./incidentes.service";
 import { equipoParaLaIa, WHATSAPP_DIRECCION } from "./equipoBakano.service";
 import { CATEGORIAS_GUION, revisionGuionesService } from "./revisionGuiones.service";
@@ -301,6 +302,9 @@ class TelegramAgentService {
     if (uso("verFacturacionPendiente", "registrarFacturacion", "verMetricas")) {
       botones.push([{ text: "💵 Mi facturación del día", callback_data: "fact:ver" }]);
     }
+    if (uso("verMisPagos", "generarLinkDePago")) {
+      botones.push([{ text: "💳 Mis pagos", callback_data: "pago:ver" }]);
+    }
     if (uso("verHorariosLibres", "agendarReunion")) {
       botones.push([{ text: "📅 Agendar una reunión", callback_data: "menu:agendar" }]);
     }
@@ -410,6 +414,12 @@ Preguntas de facturación (esto lo respondes siempre, nunca lo derives):
 - Si falta registrar días, dilo y ofrécele registrarlos ahí mismo por el chat.
 - Si hay meta del mes, di en qué porcentaje va o quedó. Si no hay meta, no la inventes ni la menciones.
 - Cuenta el resultado en positivo. Si el mes quedó por debajo de la meta, dilo de frente, sin dramatizar, y cierra con que este mes tomamos acción en eso.
+
+Pagos a Bakano (su suscripción; no confundir con su facturación del día, que son sus ventas):
+- Si pregunta cuánto debe, si está al día, por su factura, o cómo pagar a Bakano, usa verMisPagos y contéstale con el monto y el mes.
+- Si quiere pagar, genera el link con generarLinkDePago (una factura por vez, la más antigua primero) y pásale el link tal cual. Se paga con tarjeta y queda registrado solo.
+- Si prefiere transferencia, dile que puede subir el comprobante en metrics.bakano.ec, en su facturación, o pasarle el mensaje a su equipo.
+- Habla de plata con naturalidad y respeto: facilitas el pago, no cobras. Nunca amenaces con pausar ni hables de la desactivación. Si reclama un cobro o dice que ya pagó, no discutas: pásale el mensaje al equipo.
 
 Facturación del día:
 - El cliente puede registrar su facturación por aquí: si te dice un monto ("ayer vendí 450", "hoy hice 1.250"), regístralo con registrarFacturacion y confírmale el total del día.
@@ -1061,6 +1071,32 @@ Reglas:
                 siguiente: "Confirma lo registrado y cierra con una lectura corta del número usando el contexto.",
               }
             : r;
+        },
+      },
+
+      verMisPagos: {
+        description:
+          "Lo que el cliente le debe a Bakano por su suscripción: saldo pendiente, facturas abiertas (mes, monto, si está vencida) y si puede pagar con tarjeta. Úsala cuando pregunte por pagos, su factura con Bakano o si está al día.",
+        inputSchema: z.object({}),
+        execute: async () => pagosClienteService.paraLaIa(String(chat.workspaceId)),
+      },
+
+      generarLinkDePago: {
+        description:
+          "Genera el link de pago con tarjeta (Stripe) de UNA factura abierta, tomada de verMisPagos. Cobra solo lo que falta de esa factura. Úsala cuando el cliente quiera pagar.",
+        inputSchema: z.object({
+          invoiceId: z.string().describe("invoiceId exacto de verMisPagos"),
+        }),
+        execute: async ({ invoiceId }: { invoiceId: string }) => {
+          const estado = await pagosClienteService.estado(String(chat.workspaceId), true);
+          const factura = estado.facturas.find((f) => f.id === invoiceId);
+          if (!factura) return { ok: false, motivo: "Esa factura ya no tiene saldo o no existe; vuelve a consultar verMisPagos." };
+          try {
+            const url = await pagosClienteService.link(String(chat.workspaceId), invoiceId);
+            return { ok: true, url, mes: factura.texto, monto: `$${factura.saldo.toFixed(2)}`, siguiente: "Pásale el link tal cual y dile que al terminar queda registrado solo." };
+          } catch {
+            return { ok: false, motivo: "No se pudo generar el link ahora; ofrécele pasarle el mensaje al equipo." };
+          }
         },
       },
 

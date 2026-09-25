@@ -20,6 +20,7 @@ import { archivosClienteService, ETIQUETA_CATEGORIA, type CategoriaRecurso } fro
 import { revisionGuionesService, type RevisionPendiente } from "./revisionGuiones.service";
 import { SESIONES_ONBOARDING, type SesionOnboarding } from "./onboardingSesiones.service";
 import { telegramAgentService } from "./telegramAgent.service";
+import { comoDolares, pagosClienteService } from "./pagosCliente.service";
 import { escaparHtml, telegramService, type InlineButton, type TelegramUpdate } from "./telegram.service";
 
 /**
@@ -263,6 +264,10 @@ export class TelegramBotService {
     if (esPalabraBorrarHistorial(texto)) return this.borrarHistorial(chat);
 
     if (comando === "/start") {
+      // Vuelve de pagar en Stripe (t.me/...?start=pago): se le muestra cómo quedó.
+      if (/^\/start\s+pago/i.test(texto.trim()) && chat.estado === "listo" && chat.workspaceId) {
+        return this.mostrarPagos(chat, true);
+      }
       if (chat.estado === "listo" && chat.workspaceId) {
         const nombre = chat.firstName ? `, ${escaparHtml(chat.firstName)}` : "";
         return this.mostrarMenu(chat, undefined, `Hola de nuevo${nombre}! 👋 Qué bueno verte.`);
@@ -418,7 +423,10 @@ export class TelegramBotService {
         }
         // Eligio un tema en el menu: su mensaje va directo a esa persona.
         if (chat.tema && chat.workspaceId) return this.enviarSolicitud(chat, chat.tema, texto);
-        if (chat.workspaceId && (await telegramAgentService.responder(chat, texto))) return;
+        if (chat.workspaceId && (await telegramAgentService.responder(chat, texto))) {
+          await this.avisarSaldoSiToca(chat);
+          return;
+        }
         // La IA no pudo. Antes contestaba "se me trabó" y el cliente se quedaba
         // igual que al principio: ahora se le lleva a la pantalla de lo que
         // estaba pidiendo, que es lo que habría hecho una persona.
@@ -653,6 +661,8 @@ export class TelegramBotService {
     if (data === "citas:ver") return this.mostrarCitas(chat);
     if (data === "menu:equipo") return this.mostrarEquipo(chat);
     if (data === "fact:ver") return this.mostrarFacturacion(chat);
+    if (data === "pago:ver") return this.mostrarPagos(chat);
+    if (data.startsWith("pago:f:")) return this.mandarLinkDePago(chat, data.slice(7));
     if (data.startsWith("sub:")) return this.pedirArchivo(chat, data.slice(4) as CategoriaRecurso);
     if (data === "fact:metricas") {
       chat.tema = undefined;
@@ -2042,17 +2052,33 @@ export class TelegramBotService {
   }
 
   private async mostrarMenu(chat: ITelegramChat, nombreEntorno?: string, saludo?: string): Promise<void> {
-    const nombre =
-      nombreEntorno ?? (await models.workspaces.findById(chat.workspaceId).select("name").lean())?.name ?? "tu entorno";
+    const [nombre, pagos] = await Promise.all([
+      nombreEntorno ??
+        models.workspaces
+          .findById(chat.workspaceId)
+          .select("name")
+          .lean()
+          .then((w) => w?.name ?? "tu entorno"),
+      pagosClienteService.estado(String(chat.workspaceId)),
+    ]);
+    // Con saldo pendiente, el pago va arriba del menú: es lo primero que ve.
+    const pago =
+      pagos.saldo > 0
+        ? `💳 Tienes un saldo pendiente de <b>${comoDolares(pagos.saldo)}</b> con Bakano${
+            pagos.vencidas ? ` (${pagos.vencidas === 1 ? "1 factura vencida" : `${pagos.vencidas} facturas vencidas`})` : ""
+          }. Lo puedes pagar aquí mismo 👇\n\n`
+        : "";
     await telegramService.sendMessage(
       chat.chatId,
       `${saludo ? `${saludo}\n\n` : ""}Estás en <b>${escaparHtml(nombre)}</b> 💛\n\n` +
+        pago +
         "Escríbeme como le escribirías a una persona. Por ejemplo:\n" +
         "· <i>cómo van mis guiones?</i>\n" +
         "· <i>quiero mover mi grabación al jueves</i>\n" +
         "· <i>cómo va mi facturación este mes?</i>\n\n" +
         "O toca una opción 👇",
       [
+        ...(pagos.saldo > 0 ? [[{ text: `💳 Pagar mi saldo (${comoDolares(pagos.saldo)})`, callback_data: "pago:ver" }]] : []),
         [{ text: "💵 Mi facturación del día", callback_data: "fact:ver" }],
         [{ text: "🗓️ Mis citas (mover o cancelar)", callback_data: "citas:ver" }],
         [{ text: "🚀 Cómo va mi onboarding", callback_data: "menu:onboarding" }],
@@ -2065,6 +2091,106 @@ export class TelegramBotService {
         [{ text: "🔄 Cambiar de entorno", callback_data: "menu:entorno" }],
       ]
     );
+  }
+
+  /**
+   * Lo que el cliente le debe a Bakano y un botón por factura para pagarla.
+   * volviendoDePagar: llegó desde Stripe; el webhook de finanzas puede tardar
+   * unos segundos en registrar el pago, así que se le dice.
+   */
+  private async mostrarPagos(chat: ITelegramChat, volviendoDePagar = false): Promise<void> {
+    const volver = [{ text: "📋 Volver al menú", callback_data: "menu:ver" }];
+    const pagos = await pagosClienteService.estado(String(chat.workspaceId), true);
+
+    if (!pagos.vinculado) {
+      await telegramService.sendMessage(
+        chat.chatId,
+        "Todavía no veo tu facturación con Bakano conectada aquí 🙏 Si tienes un pago pendiente, tu equipo te ayuda con eso.",
+        [[{ text: "💬 Escribirle a mi equipo", callback_data: "menu:atencion" }], volver]
+      );
+      return;
+    }
+    if (pagos.saldo === 0) {
+      await telegramService.sendMessage(
+        chat.chatId,
+        volviendoDePagar
+          ? "Recibimos tu pago, gracias 💛 Ya estás al día con Bakano ✅"
+          : "Estás al día con Bakano ✅ No tienes nada pendiente.",
+        [volver]
+      );
+      return;
+    }
+
+    const lineas = pagos.facturas.map(
+      (f) => `· ${escaparHtml(f.texto)}: <b>${comoDolares(f.saldo)}</b>${f.vencida ? " (vencida)" : ""}`
+    );
+    const intro = volviendoDePagar
+      ? "Si acabas de pagar, dame unos segundos para que se refleje y vuelve a tocar el botón 🙏\n\nPor ahora veo pendiente:"
+      : `Tienes <b>${comoDolares(pagos.saldo)}</b> pendiente con Bakano:`;
+    const botones = pagos.pagoConTarjeta
+      ? pagos.facturas.slice(0, 6).map((f) => [
+          { text: `💳 Pagar ${f.texto} · ${comoDolares(f.saldo)}`, callback_data: `pago:f:${f.id}` },
+        ])
+      : [];
+    await telegramService.sendMessage(
+      chat.chatId,
+      `${intro}\n${lineas.join("\n")}\n\n` +
+        (pagos.pagoConTarjeta
+          ? "Toca la que quieras pagar y te doy el link para hacerlo con tarjeta en un minuto 👇"
+          : "Si prefieres transferencia, sube el comprobante en <b>metrics.bakano.ec</b>, en tu facturación, o escríbele a tu equipo."),
+      [...botones, [{ text: "💬 Escribirle a mi equipo", callback_data: "menu:atencion" }], volver]
+    );
+  }
+
+  private async mandarLinkDePago(chat: ITelegramChat, invoiceId: string): Promise<void> {
+    const pagos = await pagosClienteService.estado(String(chat.workspaceId), true);
+    const factura = pagos.facturas.find((f) => f.id === invoiceId);
+    if (!factura) return this.mostrarPagos(chat);
+    try {
+      const url = await pagosClienteService.link(String(chat.workspaceId), invoiceId);
+      await telegramService.sendMessage(
+        chat.chatId,
+        `Listo 🙌 Este es tu link para pagar <b>${escaparHtml(factura.texto)}</b> (${comoDolares(factura.saldo)}) con tarjeta.\n\n` +
+          "Es un pago seguro con Stripe. Cuando termines vuelves aquí solito y queda registrado.",
+        [
+          [{ text: `💳 Pagar ${comoDolares(factura.saldo)}`, url }],
+          [{ text: "📋 Volver al menú", callback_data: "menu:ver" }],
+        ]
+      );
+    } catch (error) {
+      console.error("[Pagos] link:", (error as Error)?.message || error);
+      await telegramService.sendMessage(
+        chat.chatId,
+        "No pude generar el link ahora 😕 Inténtalo en un momento o escríbele a tu equipo y te ayudan.",
+        [[{ text: "💬 Escribirle a mi equipo", callback_data: "menu:atencion" }], [{ text: "📋 Volver al menú", callback_data: "menu:ver" }]]
+      );
+    }
+  }
+
+  /**
+   * Si tiene una factura vencida, se le recuerda con calma después de
+   * responderle, como mucho cada 3 días. Nunca al equipo interno.
+   */
+  private async avisarSaldoSiToca(chat: ITelegramChat): Promise<void> {
+    try {
+      if (!chat.workspaceId) return;
+      if (chat.avisoPagoEn && Date.now() - new Date(chat.avisoPagoEn).getTime() < 3 * 24 * 3_600_000) return;
+      const usuario = chat.userId ? await models.users.findById(chat.userId).select("isInternal role").lean() : null;
+      if (usuario?.isInternal || usuario?.role === "superadmin") return;
+      const pagos = await pagosClienteService.estado(String(chat.workspaceId));
+      if (!pagos.vencidas) return;
+
+      await models.telegramChats.updateOne({ _id: chat._id }, { $set: { avisoPagoEn: new Date() } });
+      await telegramService.sendMessage(
+        chat.chatId,
+        `Por cierto, te cuento que tienes <b>${comoDolares(pagos.saldo)}</b> pendiente con Bakano${
+          pagos.vencidas === 1 ? ", con una factura ya vencida" : `, con ${pagos.vencidas} facturas ya vencidas`
+        }. Si quieres lo dejas listo aquí mismo en un minuto 🙌`,
+        [[{ text: "💳 Ver y pagar", callback_data: "pago:ver" }]]
+      );
+    } catch (error) {
+      console.error("[Pagos] aviso:", (error as Error)?.message || error);
+    }
   }
 
   /**
