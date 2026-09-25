@@ -135,6 +135,26 @@ cronRouter.get("/bot-reporte", async (req: Request, res: Response) => {
   }
 });
 
+// GET /api/cron/insistir-onboarding — cuatro veces en el dia laboral
+// (14, 17, 20 y 23 UTC = 9am, 12pm, 3pm y 6pm de Ecuador). Empuja a quien
+// tiene su onboarding detenido por algo que solo el puede hacer.
+cronRouter.get("/insistir-onboarding", async (req: Request, res: Response) => {
+  const secret = process.env.CRON_SECRET;
+  if (!secret || req.headers["authorization"] !== `Bearer ${secret}`) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  try {
+    const { insistenciaOnboardingService } = await import("../services/insistenciaOnboarding.service");
+    const r = await insistenciaOnboardingService.insistir();
+    console.log(`[Cron] Insistencia onboarding — revisados: ${r.revisados}, avisados: ${r.avisados}, escalados: ${r.escalados}`);
+    res.status(200).json(r);
+  } catch (error: any) {
+    console.error("[Cron] Insistencia onboarding:", error?.message || error);
+    res.status(500).json({ error: error?.message || "error" });
+  }
+});
+
 // GET /api/cron/resumen-mensual — el dia 1 (14:40 UTC = 09:40 Ecuador).
 // Le manda a cada cliente el cierre del mes anterior contra su meta.
 cronRouter.get("/resumen-mensual", async (req: Request, res: Response) => {
