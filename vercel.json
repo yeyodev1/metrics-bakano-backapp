@@ -65,6 +65,10 @@
       "schedule": "20 13 * * 1"
     },
     {
+      "path": "/api/cron/insistir-onboarding",
+      "schedule": "0 14,17,20,23 * * *"
+    },
+    {
       "path": "/api/cron/onboarding-sync",
       "schedule": "10,40 * * * *"
     }

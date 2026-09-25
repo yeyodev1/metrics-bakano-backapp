@@ -171,6 +171,8 @@ export interface IWorkspace extends Document {
    * aprobacion de videos, salida a ventas). Las demas se deducen de los datos.
    */
   recorrido?: Record<string, { estado: "pendiente" | "en_curso" | "listo" | "no_aplica"; en?: Date; porNombre?: string; nota?: string }>;
+  /** Cuantas veces se le insistio con su onboarding y cuando fue la ultima. */
+  insistenciaOnboarding?: { ultimoEn?: Date; veces?: number; escaladoEn?: Date };
   /** Ultimo aviso de "se te acaba el contenido", para no repetirlo cada dia. */
   avisoContenidoEn?: Date;
   /** Correo de arranque del onboarding (el que manda al bot de Telegram). */
@@ -378,6 +380,10 @@ const WorkspaceSchema = new Schema<IWorkspace>(
       default: undefined,
     },
     recorrido: { type: Schema.Types.Mixed, default: undefined },
+    insistenciaOnboarding: {
+      type: { ultimoEn: Date, veces: Number, escaladoEn: Date },
+      default: undefined,
+    },
     avisoContenidoEn: { type: Date, default: null },
     onboardingBienvenidaEnviadaEn: {
       type: Date,
