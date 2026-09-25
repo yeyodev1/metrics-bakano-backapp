@@ -9,6 +9,7 @@ import { onboardingBotService } from "./onboardingBot.service";
 import { produccionPlanificacionService } from "./produccionPlanificacion.service";
 import { contenidoClienteService } from "./contenidoCliente.service";
 import { recorridoClienteService } from "./recorridoCliente.service";
+import { accesosClienteService, type Plataforma } from "./accesosCliente.service";
 import { CAMPOS_CONTRATO, ETIQUETA_CONTRATO, PREGUNTA_CONTRATO, contratoChatService, type CampoContrato } from "./contratoChat.service";
 import { perfilClienteService } from "./perfilCliente.service";
 import { CAMPOS_MARCA, OPCIONES_MARCA, PREGUNTA_MARCA, onboardingDatosService } from "./onboardingDatos.service";
@@ -680,6 +681,10 @@ export class TelegramBotService {
       );
       return;
     }
+    if (data === "acceso:ver") return this.mostrarAccesos(chat);
+    if (data === "acceso:metrics" || data === "acceso:bakanology") {
+      return this.recuperarContrasena(chat, data.slice(7) as Plataforma);
+    }
     if (data === "contrato:estado") return this.mostrarEstadoContrato(chat);
     if (data === "contrato:llenar") return this.preguntarSiguienteDatoContrato(chat);
     if (data === "contrato:link") return this.mandarLinkFirma(chat);
@@ -1124,6 +1129,55 @@ export class TelegramBotService {
           ? "\n\nTodo eso me lo puedes mandar por aquí mismo con los botones de abajo: yo lo subo a tu entorno. Si ya lo subiste tú, dímelo y le aviso al equipo."
           : ""),
       botones
+    );
+  }
+
+  /** Dónde entra y con qué correo, en las dos plataformas. */
+  private async mostrarAccesos(chat: ITelegramChat): Promise<void> {
+    const correo = await accesosClienteService.correoDe(chat);
+    const enlaces = accesosClienteService.enlaces();
+    await telegramService.sendMessage(
+      chat.chatId,
+      "🔑 <b>Tus accesos</b>\n\n" +
+        `Entras a las dos con el mismo correo: <b>${escaparHtml(correo || "tu correo")}</b>, pero cada una tiene su propia contraseña.\n\n` +
+        `📊 <b>Metrics</b> · tus números, tus guiones y tus archivos\n     ${enlaces.metrics}\n\n` +
+        `🎓 <b>Bakanology</b> · la academia: cómo vender, cómo hablarle a un cliente, cómo leer tus números\n     ${enlaces.bakanology}\n\n` +
+        "Si no recuerdas alguna, toca abajo y te mando el correo para crear una nueva 👇",
+      [
+        [{ text: "🔑 Recuperar la de Metrics", callback_data: "acceso:metrics" }],
+        [{ text: "🎓 Recuperar la de Bakanology", callback_data: "acceso:bakanology" }],
+        [{ text: "📋 Volver al menú", callback_data: "menu:ver" }],
+      ]
+    );
+  }
+
+  /**
+   * Le manda el correo para crear una contraseña nueva. Nunca se le dice una
+   * contraseña por el chat: no las guardamos en claro y este chat puede quedar
+   * abierto en un celular prestado.
+   */
+  private async recuperarContrasena(chat: ITelegramChat, plataforma: Plataforma): Promise<void> {
+    const nombre = plataforma === "metrics" ? "Metrics" : "Bakanology";
+    await telegramService.sendMessage(chat.chatId, `⏳ Te mando el correo de ${nombre}...`);
+    const r = await accesosClienteService.recuperar(chat, plataforma);
+    const enlaces = accesosClienteService.enlaces();
+
+    await telegramService.sendMessage(
+      chat.chatId,
+      r.ok
+        ? `Listo ✅ Te mandé a <b>${escaparHtml(r.correo || "tu correo")}</b> el link para crear tu contraseña nueva de <b>${nombre}</b>.\n\n` +
+          "Si no lo ves en unos minutos, revisa el spam. El link vence en una hora."
+        : "No pude mandarlo ahora mismo 😕 inténtalo de nuevo en un rato, o dímelo y se lo paso al equipo.",
+      [
+        [
+          {
+            text: `🔓 Entrar a ${nombre}`,
+            url: plataforma === "metrics" ? enlaces.metrics : enlaces.bakanology,
+          },
+        ],
+        [{ text: "🔑 Ver mis accesos", callback_data: "acceso:ver" }],
+        [{ text: "📋 Volver al menú", callback_data: "menu:ver" }],
+      ]
     );
   }
 
@@ -2007,6 +2061,7 @@ export class TelegramBotService {
         [{ text: "📅 Agendar una reunión", callback_data: "menu:agendar" }],
         [{ text: "💬 Escribirle a mi equipo", callback_data: "menu:atencion" }],
         [{ text: "👥 Quién es quién en Bakano", callback_data: "menu:equipo" }],
+        [{ text: "🔑 Mis accesos y contraseñas", callback_data: "acceso:ver" }],
         [{ text: "🔄 Cambiar de entorno", callback_data: "menu:entorno" }],
       ]
     );
