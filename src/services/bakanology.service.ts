@@ -14,7 +14,7 @@ import models from "../models";
  * tenia) y sale el correo con sus datos.
  */
 
-const BAKANOLOGY_API = (process.env.BAKANOLOGY_API_URL || "https://api.bakanology.com").replace(/\/$/, "");
+const BAKANOLOGY_API = (process.env.BAKANOLOGY_API_URL || "https://bakanology-backapp.vercel.app").replace(/\/$/, "");
 const CLAVE = process.env.BAKANOLOGY_KEY || "";
 const MESES = Number(process.env.BAKANOLOGY_MESES) > 0 ? Number(process.env.BAKANOLOGY_MESES) : 12;
 

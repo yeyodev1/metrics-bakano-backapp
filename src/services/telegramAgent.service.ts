@@ -3,6 +3,7 @@ import models from "../models";
 import type { ITelegramChat } from "../models/telegramChat.model";
 import { EQUIPO_ATENCION, equipoAtencionService, type TemaAtencion } from "./equipoAtencion.service";
 import { contenidoClienteService } from "./contenidoCliente.service";
+import { accesosClienteService } from "./accesosCliente.service";
 import { atencionClienteService, fechaEcuador, type DatosCliente } from "./atencionCliente.service";
 import { onboardingBotService } from "./onboardingBot.service";
 import { citasClienteService } from "./citasCliente.service";
@@ -294,6 +295,9 @@ class TelegramAgentService {
     if (uso("verOnboarding", "verPendientesOnboarding", "registrarDatoMarca", "registrarEntregable", "pedirAyudaConDato", "verHorariosOnboarding", "agendarSesionOnboarding")) {
       botones.push([{ text: "🚀 Cómo va mi onboarding", callback_data: "menu:onboarding" }]);
     }
+    if (uso("verMisAccesos", "recuperarContrasena")) {
+      botones.push([{ text: "🔑 Mis accesos y contraseñas", callback_data: "acceso:ver" }]);
+    }
     if (uso("verFacturacionPendiente", "registrarFacturacion", "verMetricas")) {
       botones.push([{ text: "💵 Mi facturación del día", callback_data: "fact:ver" }]);
     }
@@ -435,6 +439,16 @@ Producciones (grabaciones):
 - Si todavía no puede agendar, explica la regla con naturalidad y dile desde qué fecha puede.
 - El cliente es UNO SOLO: nunca le agendes dos cosas a la misma hora, aunque sean con personas distintas del equipo. Los horarios que te devuelven las herramientas ya vienen filtrados; si aun así te sale "ya_tiene_esa_hora", dile qué cita tiene a esa hora y con quién, y ofrécele otro horario o mover la que ya tiene.
 - Mover una producción no cambia la regla: la nueva fecha también tiene que respetar los 6 meses desde la última grabación.
+BAKANOLOGY (la academia):
+- Bakanology es la academia de Bakano: cursos de Estrategia Comercial, ADN de la Venta y Marketing y Ventas. Es donde aprende a vender, a hablarle a un cliente y a leer sus números.
+- VA INCLUIDA en su suscripción: mientras siga con Bakano no paga nada aparte, sin costo adicional y sin fecha de corte. Dilo así si pregunta.
+- Entra en bakanology.com con el MISMO correo de Metrics, pero con una contraseña distinta. Son dos plataformas: Metrics para sus números, guiones y archivos; Bakanology para aprender.
+
+CONTRASEÑAS:
+- Si dice que olvidó su contraseña o que no puede entrar, pregúntale de cuál de las dos y usa recuperarContrasena. Le llega el correo para crear una nueva.
+- NUNCA le digas una contraseña por el chat, ni digas que se la puedes mandar: no las tenemos en claro y este chat puede quedar abierto en un celular prestado. Lo que sí puedes es mandarle el correo de recuperación al toque.
+- Si solo pregunta con qué correo entra o dónde entra, usa verMisAccesos.
+
 - GRABAMOS HASTA QUEDARNOS SIN CONTENIDO. La producción no se agenda "porque toca cada 6 meses": se agenda antes de quedarnos sin guiones por grabar. Usa verReservaDeContenido cuando se hable de producción, contenido o videos; si seAcaba viene en true, díselo claro y empújalo a cerrar fecha ya, que ahí la espera entre producciones no aplica.
 - NO HAY PRODUCCIÓN SIN PLANIFICACIÓN. Dilo siempre que se hable de grabar: los guiones de lo que vamos a grabar tienen que estar escritos y aprobados por él ANTES de la grabación. Si su planificación está vacía, dile que ya avisaste a su equipo de contenido y a Genesis Benalcazar para que los preparen, y pásale el link de su planificación.
 - Y para que lo que grabemos llegue a sus clientes hace falta el CRM: si todavía no hizo su sesión de Configuración de CRM y Metrics con David Robles, dile que la agende. Sin eso, los videos no tienen a dónde llevar a la gente.
@@ -720,6 +734,32 @@ Reglas:
           return r.ok
             ? { ok: true, cuando: r.cuando, con: r.responsable, correo: def.responsable.email, llevarListo: def.requisitos }
             : { ok: false, motivo: r.motivo, link: def.link };
+        },
+      },
+
+      verMisAccesos: {
+        description:
+          "Con qué correo entra el cliente a Metrics y a Bakanology, y los links de las dos. No devuelve contraseñas: no las tenemos en claro.",
+        inputSchema: z.object({}),
+        execute: async () => {
+          const correo = await accesosClienteService.correoDe(chat);
+          return { correo, ...accesosClienteService.enlaces() };
+        },
+      },
+
+      recuperarContrasena: {
+        description:
+          "Le manda al cliente el correo para crear una contraseña nueva, de Metrics o de Bakanology. Úsala cuando diga que la olvidó o que no puede entrar. Nunca le digas una contraseña por el chat: no las tenemos en claro.",
+        inputSchema: z.object({ plataforma: z.enum(["metrics", "bakanology"]) }),
+        execute: async ({ plataforma }: { plataforma: "metrics" | "bakanology" }) => {
+          const r = await accesosClienteService.recuperar(chat, plataforma);
+          return r.ok
+            ? {
+                ok: true,
+                correo: r.correo,
+                siguiente: `Dile que le llegó a ${r.correo} el link para crear su contraseña nueva, que vence en una hora y que revise el spam si no lo ve.`,
+              }
+            : { ok: false, motivo: r.motivo };
         },
       },
 
