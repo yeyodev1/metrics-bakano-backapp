@@ -53,6 +53,8 @@ export interface IUser extends Document {
   avisoReglaProduccionEn?: Date;
   /** Cuando se le dijo que Bakanology va incluido en su suscripcion. */
   avisoBakanologyEn?: Date;
+  /** Cuando se le dio el acceso a la academia. Sin esto no sabriamos quien quedo afuera. */
+  accesoBakanologyEn?: Date;
   /**
    * Recuperación de contraseña. Se guarda el hash del token, nunca el token:
    * si alguien lee la base de datos no puede usarlo para entrar a una cuenta.
@@ -155,6 +157,9 @@ export const UserSchema = new Schema<IUser>(
       type: Date,
     },
     avisoBakanologyEn: {
+      type: Date,
+    },
+    accesoBakanologyEn: {
       type: Date,
     },
     // `select: false` para que ningún endpoint devuelva estos campos por error.
