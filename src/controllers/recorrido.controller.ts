@@ -34,7 +34,6 @@ export async function marcarEtapa(req: AuthRequest, res: Response) {
       const mensajes: Record<string, string> = {
         etapa_desconocida: "Esa etapa no existe.",
         estado_invalido: "Ese estado no es válido.",
-        esa_etapa_se_deduce_sola: "Esa etapa se mueve sola con los datos: no se marca a mano.",
       };
       res.status(HttpStatusCode.BadRequest).send({ message: mensajes[r.motivo || ""] || "No se pudo marcar." });
       return;

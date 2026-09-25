@@ -109,6 +109,8 @@ export const SESIONES_ONBOARDING: Record<SesionOnboarding, DefinicionSesion> = {
  * "en proceso" es la diferencia entre esperar tranquilo y escribir preguntando.
  */
 export type EtapaRecorrido =
+  | "accesos"
+  | "logueoTelegram"
   | "datosMarca"
   | "bienvenida"
   | "especializacion"
@@ -120,7 +122,8 @@ export type EtapaRecorrido =
   | "escenas"
   | "edicion"
   | "aprobacionVideos"
-  | "salidaVentas";
+  | "salidaVentas"
+  | "bakanology";
 
 export interface DefinicionEtapa {
   orden: number;
@@ -152,8 +155,25 @@ export const RECORRIDO: Record<EtapaRecorrido, DefinicionEtapa> = {
     que: "15 minutos con Genesis: creamos tu entorno contigo en pantalla y te conectamos al bot.",
     seMarca: "automatico",
   },
-  datosMarca: {
+  accesos: {
     orden: 2,
+    etiqueta: "Accesos por correo",
+    emoji: "📧",
+    deQuien: "equipo",
+    responsable: GENESIS,
+    que: "Le llegan solos: Metrics, el bot de Telegram y su cuenta de Bakanology.",
+    seMarca: "automatico",
+  },
+  logueoTelegram: {
+    orden: 3,
+    etiqueta: "Logueo en Telegram",
+    emoji: "💬",
+    deQuien: "cliente",
+    que: "Entra al bot con su correo y un código de 6 dígitos. Desde ahí todo pasa por el chat.",
+    seMarca: "automatico",
+  },
+  datosMarca: {
+    orden: 4,
     etiqueta: "Los datos de tu marca",
     emoji: "🎨",
     deQuien: "cliente",
@@ -161,7 +181,7 @@ export const RECORRIDO: Record<EtapaRecorrido, DefinicionEtapa> = {
     seMarca: "automatico",
   },
   especializacion: {
-    orden: 3,
+    orden: 5,
     etiqueta: "Especialización con Joel",
     emoji: "📣",
     deQuien: "cliente",
@@ -170,7 +190,7 @@ export const RECORRIDO: Record<EtapaRecorrido, DefinicionEtapa> = {
     seMarca: "automatico",
   },
   levantamiento: {
-    orden: 4,
+    orden: 6,
     etiqueta: "Levantamiento con Ariana",
     emoji: "📝",
     deQuien: "cliente",
@@ -179,7 +199,7 @@ export const RECORRIDO: Record<EtapaRecorrido, DefinicionEtapa> = {
     seMarca: "automatico",
   },
   guiones: {
-    orden: 5,
+    orden: 7,
     etiqueta: "Creación de tus guiones",
     emoji: "✍️",
     deQuien: "equipo",
@@ -188,7 +208,7 @@ export const RECORRIDO: Record<EtapaRecorrido, DefinicionEtapa> = {
     seMarca: "automatico",
   },
   aprobacionGuiones: {
-    orden: 6,
+    orden: 8,
     etiqueta: "Tu aprobación de los guiones",
     emoji: "✅",
     deQuien: "cliente",
@@ -196,7 +216,7 @@ export const RECORRIDO: Record<EtapaRecorrido, DefinicionEtapa> = {
     seMarca: "automatico",
   },
   produccion: {
-    orden: 7,
+    orden: 9,
     etiqueta: "Producción y levantamiento de tu avatar",
     emoji: "🎬",
     deQuien: "cliente",
@@ -205,7 +225,7 @@ export const RECORRIDO: Record<EtapaRecorrido, DefinicionEtapa> = {
     seMarca: "automatico",
   },
   avatares: {
-    orden: 8,
+    orden: 10,
     etiqueta: "Creación de tus avatares",
     emoji: "🧬",
     deQuien: "equipo",
@@ -214,7 +234,7 @@ export const RECORRIDO: Record<EtapaRecorrido, DefinicionEtapa> = {
     seMarca: "manual",
   },
   escenas: {
-    orden: 9,
+    orden: 11,
     etiqueta: "Creación de las escenas",
     emoji: "🎞️",
     deQuien: "equipo",
@@ -223,7 +243,7 @@ export const RECORRIDO: Record<EtapaRecorrido, DefinicionEtapa> = {
     seMarca: "manual",
   },
   edicion: {
-    orden: 10,
+    orden: 12,
     etiqueta: "Edición de tus videos",
     emoji: "✂️",
     deQuien: "equipo",
@@ -232,7 +252,7 @@ export const RECORRIDO: Record<EtapaRecorrido, DefinicionEtapa> = {
     seMarca: "automatico",
   },
   aprobacionVideos: {
-    orden: 11,
+    orden: 13,
     etiqueta: "Tu aprobación de los videos",
     emoji: "👀",
     deQuien: "cliente",
@@ -240,13 +260,21 @@ export const RECORRIDO: Record<EtapaRecorrido, DefinicionEtapa> = {
     seMarca: "manual",
   },
   salidaVentas: {
-    orden: 12,
+    orden: 14,
     etiqueta: "Salida a ventas",
     emoji: "🚀",
     deQuien: "equipo",
     responsable: JOEL,
     que: "Un día después de tu aprobación, Joel pone los anuncios a circular. Vamos a cerrar ventas.",
     seMarca: "manual",
+  },
+  bakanology: {
+    orden: 15,
+    etiqueta: "Apertura a Bakanology",
+    emoji: "🎓",
+    deQuien: "equipo",
+    que: "La academia: cómo vender, cómo hablarle a un cliente, cómo leer tus números. Va incluida.",
+    seMarca: "automatico",
   },
 };
 
