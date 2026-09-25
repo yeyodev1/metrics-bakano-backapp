@@ -171,6 +171,27 @@ class ContratoChatService {
     const datos = await this.datos(workspaceId);
     return CAMPOS_CONTRATO.map((c) => `• <b>${ETIQUETA_CONTRATO[c]}:</b> ${datos[c] || "—"}`).join("\n");
   }
+
+  /**
+   * El estado completo: que dato ya esta, cual falta y si falta la firma.
+   * Es lo que se le muestra cada vez que vuelve, para que no tenga que
+   * acordarse de por donde iba.
+   */
+  async estado(workspaceId: Types.ObjectId | string): Promise<{
+    texto: string;
+    faltan: CampoContrato[];
+    firmado: boolean;
+    completo: boolean;
+  }> {
+    const [datos, firmado] = await Promise.all([this.datos(workspaceId), this.firmado(workspaceId)]);
+    const faltan = CAMPOS_CONTRATO.filter((c) => !String(datos[c] ?? "").trim());
+    const lineas = CAMPOS_CONTRATO.map((c) => {
+      const valor = String(datos[c] ?? "").trim();
+      return valor ? `✅ <b>${ETIQUETA_CONTRATO[c]}:</b> ${valor}` : `⬜ <b>${ETIQUETA_CONTRATO[c]}:</b> falta`;
+    });
+    lineas.push(firmado ? "✅ <b>Tu firma:</b> listo" : "⬜ <b>Tu firma:</b> pendiente");
+    return { texto: lineas.join("\n"), faltan, firmado, completo: !faltan.length && firmado };
+  }
 }
 
 export const contratoChatService = new ContratoChatService();
