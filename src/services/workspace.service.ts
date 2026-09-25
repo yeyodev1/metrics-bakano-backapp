@@ -539,6 +539,11 @@ export class WorkspaceService {
       .then(({ invitacionBotService }) => invitacionBotService.invitarEnSegundoPlano(user!._id, [payload.workspaceId]))
       .catch((error) => console.error("[Bot] invitacion al crear usuario:", error?.message || error));
 
+    // Y su acceso a Bakanology: contratar incluye la academia.
+    import("./bakanology.service")
+      .then(({ bakanologyService }) => bakanologyService.enSegundoPlano(user!._id))
+      .catch((error) => console.error("[Bakanology] al crear usuario:", error?.message || error));
+
     const { password, ...userWithoutPassword } = user.toObject();
 
     // Return mapped role for frontend
@@ -902,6 +907,9 @@ export class WorkspaceService {
         import("./invitacionBot.service")
           .then(({ invitacionBotService }) => invitacionBotService.invitarEnSegundoPlano(destino, entornos))
           .catch((error) => console.error("[Bot] invitacion al crear cliente:", error?.message || error));
+        import("./bakanology.service")
+          .then(({ bakanologyService }) => bakanologyService.enSegundoPlano(destino))
+          .catch((error) => console.error("[Bakanology] al crear cliente:", error?.message || error));
       }
     }
 
