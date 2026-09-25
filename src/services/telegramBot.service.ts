@@ -680,6 +680,7 @@ export class TelegramBotService {
       );
       return;
     }
+    if (data === "contrato:estado") return this.mostrarEstadoContrato(chat);
     if (data === "contrato:llenar") return this.preguntarSiguienteDatoContrato(chat);
     if (data === "contrato:link") return this.mandarLinkFirma(chat);
     if (data === "contrato:corregir") {
@@ -1075,7 +1076,18 @@ export class TelegramBotService {
     const faltaEnviar = (pendientes?.entregables || []).filter((e) => e.estado === "pendiente");
     const faltaContar = pendientes?.datosMarcaFaltantes || [];
 
+    // El contrato manda: mientras no esté firmado, el botón sigue ahí cada vez
+    // que vuelve, y le recuerda qué dio y qué falta.
+    const contrato = await contratoChatService.estado(chat.workspaceId!).catch(() => null);
     const botones: InlineButton[][] = [];
+    if (contrato && !contrato.completo) {
+      botones.push([
+        {
+          text: contrato.faltan.length ? `📝 Mi contrato (faltan ${contrato.faltan.length})` : "✍️ Firmar mi contrato",
+          callback_data: "contrato:estado",
+        },
+      ]);
+    }
     if (siguiente) botones.push([{ text: `📅 Agendar ${siguiente.etiqueta}`, callback_data: `onb:${siguiente.sesion}` }]);
     else if (pasada) botones.push([{ text: `🔄 No se hizo, reagendar ${pasada.etiqueta}`, callback_data: `onb:${pasada.sesion}` }]);
     else if (estado.produccion.puedeAgendar) botones.push([{ text: "🎬 Agendar mi producción", callback_data: "ag:produccion" }]);
@@ -1116,6 +1128,39 @@ export class TelegramBotService {
   }
 
   /**
+   * Cómo va su contrato: qué dato ya dio, cuál falta y si falta la firma.
+   * Se le muestra cada vez que vuelve, para que no tenga que acordarse de por
+   * dónde iba ni volver a escribir lo que ya escribió.
+   */
+  private async mostrarEstadoContrato(chat: ITelegramChat): Promise<void> {
+    if (!chat.workspaceId) return this.mostrarMenu(chat);
+    const estado = await contratoChatService.estado(chat.workspaceId);
+
+    if (estado.completo) {
+      await telegramService.sendMessage(
+        chat.chatId,
+        `📝 <b>Tu contrato</b>\n\n${estado.texto}\n\nEstá todo listo ✅ No tienes que hacer nada más aquí.`,
+        [[{ text: "🚀 Ver mi onboarding", callback_data: "menu:onboarding" }], [{ text: "📋 Volver al menú", callback_data: "menu:ver" }]]
+      );
+      return;
+    }
+
+    const cierre = estado.faltan.length
+      ? `Te faltan <b>${estado.faltan.length} ${estado.faltan.length === 1 ? "dato" : "datos"}</b> y después la firma. Seguimos por donde ibas 👇`
+      : "Ya tengo todos tus datos: <b>solo falta tu firma</b>. Se abre, lo lees y lo firmas con el dedo 👇";
+
+    const botones: InlineButton[][] = [];
+    if (estado.faltan.length) {
+      botones.push([{ text: `📝 Continuar (${estado.faltan.length} por llenar)`, callback_data: "contrato:llenar" }]);
+    } else {
+      botones.push([{ text: "✍️ Leer y firmar mi contrato", url: contratoChatService.link(chat.workspaceId) }]);
+    }
+    botones.push([{ text: "✏️ Corregir un dato", callback_data: "contrato:corregir" }], [{ text: "📋 Volver al menú", callback_data: "menu:ver" }]);
+
+    await telegramService.sendMessage(chat.chatId, `📝 <b>Tu contrato</b>\n\n${estado.texto}\n\n${cierre}`, botones);
+  }
+
+  /**
    * El contrato se llena aquí, de a un dato por vez. Es obligatorio: sin esos
    * datos no hay contrato que firmar, y llenarlos en un formulario web era
    * justo donde se caía el proceso.
@@ -1153,12 +1198,12 @@ export class TelegramBotService {
     chat.datoEsperado = undefined;
     await chat.save();
 
-    const resumen = await contratoChatService.resumen(chat.workspaceId);
+    const estado = await contratoChatService.estado(chat.workspaceId);
     const link = contratoChatService.link(chat.workspaceId);
     await telegramService.sendMessage(
       chat.chatId,
       "Ya tengo todo para tu contrato ✅\n\n" +
-        `${resumen}\n\n` +
+        `${estado.texto}\n\n` +
         "Toca el botón y se te abre <b>solo la pantalla de firma</b>: lees el contrato, lo firmas y listo. " +
         "Si algo de arriba está mal, dímelo y lo corrijo antes.",
       [
@@ -1192,8 +1237,8 @@ export class TelegramBotService {
       const faltan = await contratoChatService.faltantes(chat.workspaceId);
       botones.push([
         faltan.length
-          ? { text: `📝 Llenar mi contrato (${faltan.length})`, callback_data: "contrato:llenar" }
-          : { text: "✍️ Firmar mi contrato", callback_data: "contrato:link" },
+          ? { text: `📝 Mi contrato (faltan ${faltan.length})`, callback_data: "contrato:estado" }
+          : { text: "✍️ Firmar mi contrato", callback_data: "contrato:estado" },
       ]);
     }
 
