@@ -4,6 +4,7 @@ import { fechaEcuador } from "./atencionCliente.service";
 import { onboardingBotService } from "./onboardingBot.service";
 import { CAMPOS_MARCA } from "./onboardingDatos.service";
 import { ORDEN_RECORRIDO, RECORRIDO, type EtapaRecorrido } from "./onboardingSesiones.service";
+import { telegramService } from "./telegram.service";
 
 /**
  * El recorrido del cliente, de la bienvenida a la salida a ventas.
@@ -159,6 +160,91 @@ class RecorridoClienteService {
     return { etapas, actual, listas: etapas.filter((e) => e.estado === "listo" || e.estado === "no_aplica").length };
   }
 
+  /**
+   * Le avisa al cliente que acaba de cerrar un paso.
+   *
+   * No es decoracion: el cliente que no ve avanzar su proceso escribe
+   * preguntando, o peor, se queda callado pensando que nadie esta trabajando.
+   * Cada paso cerrado se celebra UNA vez y se le dice que sigue y de quien
+   * depende.
+   */
+  async celebrar(workspaceId: Types.ObjectId | string, etapa: EtapaRecorrido): Promise<boolean> {
+    const def = RECORRIDO[etapa];
+    if (!def) return false;
+
+    const chats = await models.telegramChats.find({ workspaceId, estado: "listo" }).select("chatId").lean();
+    if (!chats.length) return false;
+
+    const { etapas } = await this.de(workspaceId);
+    const hechas = etapas.filter((e) => e.estado === "listo" || e.estado === "no_aplica").length;
+    const siguiente = etapas.find((e) => e.orden > def.orden && e.estado !== "listo" && e.estado !== "no_aplica");
+
+    const cierre = siguiente
+      ? `👉 <b>Lo que sigue:</b> ${siguiente.emoji} ${siguiente.etiqueta}` +
+        (siguiente.responsable ? ` · con <b>${siguiente.responsable}</b>` : "") +
+        `\n${siguiente.que}` +
+        (siguiente.deQuien === "cliente" ? "\n\nEsta te toca a ti: cuando quieras, me dices y lo vemos por aquí." : "\n\nDe eso nos encargamos nosotros, no tienes que hacer nada.")
+      : "Y con eso <b>terminaste tu recorrido</b> 🚀 De aquí en adelante es puro seguimiento: tus videos saliendo y tus números subiendo.";
+
+    const texto =
+      `🎉 <b>¡Listo!</b> ${def.emoji} <b>${def.etiqueta}</b>\n\n` +
+      `${def.que}\n\n` +
+      `Llevas <b>${hechas} de ${etapas.length}</b> pasos.\n\n${cierre}`;
+
+    for (const chat of chats as any[]) {
+      await telegramService
+        .sendMessage(chat.chatId, texto, [
+          [{ text: "🚀 Ver mi recorrido", callback_data: "menu:onboarding" }],
+          [{ text: "📋 Ver menú", callback_data: "menu:ver" }],
+        ])
+        .catch((error: any) => console.error("[Recorrido] felicitación:", error?.message || error));
+    }
+
+    await models.workspaces.updateOne(
+      { _id: workspaceId },
+      { $set: { [`recorrido.${etapa}.avisadoEn`]: new Date(), [`recorrido.${etapa}.avisadoComo`]: "listo" } }
+    );
+    return true;
+  }
+
+  /**
+   * Las etapas que se cierran solas (una reunion marcada en el CRM, los
+   * guiones cargados, la produccion grabada) no pasan por ningun boton: nadie
+   * las anunciaria. Esto las detecta y las celebra, una sola vez cada una.
+   */
+  async revisarYCelebrar(workspaceId: Types.ObjectId | string): Promise<number> {
+    const workspace = await models.workspaces.findById(workspaceId).select("recorrido").lean();
+    const marcas = ((workspace as any)?.recorrido || {}) as Record<string, any>;
+    const { etapas } = await this.de(workspaceId);
+
+    let avisadas = 0;
+    for (const e of etapas) {
+      if (e.estado !== "listo") continue;
+      if (marcas[e.etapa]?.avisadoComo === "listo") continue;
+      const ok = await this.celebrar(workspaceId, e.etapa);
+      if (ok) avisadas++;
+      else {
+        // Sin chat vinculado no hay a quien avisarle: se marca igual para no
+        // soltarle diez felicitaciones juntas el dia que conecte el bot.
+        await models.workspaces.updateOne(
+          { _id: workspaceId },
+          { $set: { [`recorrido.${e.etapa}.avisadoComo`]: "listo" } }
+        );
+      }
+    }
+    return avisadas;
+  }
+
+  /** Recorre todos los entornos activos. Lo llama el cron. */
+  async celebrarPendientes(): Promise<{ revisados: number; avisos: number }> {
+    const activos = await models.workspaces.find({ isActive: true }).select("_id").lean();
+    let avisos = 0;
+    for (const w of activos) {
+      avisos += await this.revisarYCelebrar(w._id as Types.ObjectId).catch(() => 0);
+    }
+    return { revisados: activos.length, avisos };
+  }
+
   /** El equipo mueve una etapa desde Metrics. Solo las que no dejan rastro solas. */
   async marcar(
     workspaceId: Types.ObjectId | string,
@@ -170,6 +256,9 @@ class RecorridoClienteService {
     if (!(etapa in RECORRIDO)) return { ok: false, motivo: "etapa_desconocida" };
     if (!ESTADOS.includes(estado)) return { ok: false, motivo: "estado_invalido" };
 
+    const previo = await models.workspaces.findById(workspaceId).select("recorrido").lean();
+    const marcaPrevia = ((previo as any)?.recorrido || {})[etapa] || {};
+
     await models.workspaces.updateOne(
       { _id: workspaceId },
       {
@@ -179,10 +268,20 @@ class RecorridoClienteService {
             en: new Date(),
             porNombre: quien.nombre,
             nota: nota?.slice(0, 500),
+            // Se conserva si ya se felicito, para no repetirlo al corregir.
+            avisadoEn: marcaPrevia.avisadoEn,
+            avisadoComo: estado === "listo" ? marcaPrevia.avisadoComo : undefined,
           },
         },
       }
     );
+
+    // Se cerro un paso: el cliente se entera al momento.
+    if (estado === "listo" && marcaPrevia.avisadoComo !== "listo") {
+      await this.celebrar(workspaceId, etapa as EtapaRecorrido).catch((error: any) =>
+        console.error("[Recorrido] no se pudo felicitar:", error?.message || error)
+      );
+    }
     return { ok: true };
   }
 

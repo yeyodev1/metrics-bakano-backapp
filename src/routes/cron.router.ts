@@ -195,6 +195,15 @@ cronRouter.get("/onboarding-sync", async (req: Request, res: Response) => {
         `cumplidas desde el CRM: ${sync.cumplidas}, bienvenidas: ${bienvenidas.enviadas}, ` +
         `sin entorno: ${sync.sinResolver.length}`
     );
+    // Y los pasos del recorrido que se cerraron solos: felicitar al dia
+    // siguiente no sirve de nada, asi que se revisa cada 30 minutos.
+    const { recorridoClienteService: recorrido } = await import("../services/recorridoCliente.service");
+    const celebrado = await recorrido.celebrarPendientes().catch((error: any) => {
+      console.error("[Cron] felicitaciones del recorrido:", error?.message || error);
+      return { revisados: 0, avisos: 0 };
+    });
+    if (celebrado.avisos) console.log(`[Cron] Recorrido — felicitaciones enviadas: ${celebrado.avisos}`);
+
     // Mismo cron (cada 30 min): se insiste por los incidentes que nadie tomó.
     const { incidentesService } = await import("../services/incidentes.service");
     const insistidos = await incidentesService.insistirPendientes().catch((error: any) => {
