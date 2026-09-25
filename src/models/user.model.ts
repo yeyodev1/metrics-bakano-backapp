@@ -51,6 +51,8 @@ export interface IUser extends Document {
   presentacionBotUltimoEn?: Date;
   /** Cuando se le explico la regla de produccion (cada 6 meses). */
   avisoReglaProduccionEn?: Date;
+  /** Cuando se le dijo que Bakanology va incluido en su suscripcion. */
+  avisoBakanologyEn?: Date;
   /**
    * Recuperación de contraseña. Se guarda el hash del token, nunca el token:
    * si alguien lee la base de datos no puede usarlo para entrar a una cuenta.
@@ -150,6 +152,9 @@ export const UserSchema = new Schema<IUser>(
       type: Date,
     },
     avisoReglaProduccionEn: {
+      type: Date,
+    },
+    avisoBakanologyEn: {
       type: Date,
     },
     // `select: false` para que ningún endpoint devuelva estos campos por error.

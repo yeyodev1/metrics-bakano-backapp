@@ -1251,6 +1251,97 @@ export class ResendService {
   }
 
   /**
+   * Bakanology va incluido mientras el cliente siga con Bakano.
+   *
+   * Se puede mandar cuando haga falta: al dar el acceso, cuando alguien
+   * pregunta si tiene que pagarlo, o para recordarle que lo tiene ahi.
+   */
+  async sendBakanologyIncluido(params: {
+    to: string;
+    recipientName?: string;
+    workspaceName: string;
+    academiaUrl: string;
+  }): Promise<void> {
+    const { to, recipientName, workspaceName, academiaUrl } = params;
+    const esc = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const firstName = recipientName ? esc(recipientName.split(" ")[0]) : "Hola";
+
+    const cursos = [
+      ["📈", "Estrategia Comercial", "Cómo se arma una oferta que la gente quiere comprar"],
+      ["🎯", "ADN de la Venta", "Cómo hablarle a un cliente sin sonar a vendedor"],
+      ["📊", "Marketing y Ventas", "Cómo leer tus números y decidir con ellos"],
+    ]
+      .map(
+        ([emoji, titulo, detalle]) =>
+          `<tr><td style="padding:9px 0;vertical-align:top;width:34px;font-size:19px;">${emoji}</td>` +
+          `<td style="padding:9px 0;"><p style="margin:0;font-size:15px;font-weight:700;color:#1e293b;">${titulo}</p>` +
+          `<p style="margin:2px 0 0;font-size:14px;color:#64748b;line-height:1.6;">${detalle}</p></td></tr>`
+      )
+      .join("");
+
+    const html = `<!DOCTYPE html>
+<html lang="es">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+<body style="margin:0;padding:0;background:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="padding:40px 20px;">
+    <tr><td align="center">
+      <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
+
+        ${barraMarca()}
+        <tr>
+          <td style="background:linear-gradient(135deg,#e6285c 0%,#85529c 100%);padding:32px 40px;text-align:center;">
+            <h1 style="margin:0;font-size:24px;font-weight:800;color:#ffffff;">Bakanology va incluido</h1>
+            <p style="margin:10px 0 0;font-size:15px;color:#ffe4ec;">Mientras estés con Bakano, no pagas nada aparte</p>
+          </td>
+        </tr>
+
+        <tr>
+          <td style="padding:32px 40px 8px;">
+            <p style="margin:0 0 16px;font-size:16px;color:#1e293b;">${firstName},</p>
+            <p style="margin:0 0 20px;font-size:15px;color:#475569;line-height:1.7;">
+              Con la suscripción de <strong>${esc(workspaceName)}</strong> tienes acceso a <strong>Bakanology</strong>,
+              nuestra academia: lo mismo que estudiamos nosotros para hacer crecer negocios como el tuyo.
+            </p>
+
+            <div style="background:#f0fdf4;border:1.5px solid #bbf7d0;border-radius:12px;padding:18px 20px;margin-bottom:20px;">
+              <p style="margin:0;font-size:15px;color:#166534;line-height:1.65;">
+                <strong>No tienes que pagarla.</strong> Mientras tengas tu suscripción con Bakano,
+                Bakanology va incluida: sin costo adicional y sin fecha de corte mientras sigas con nosotros.
+              </p>
+            </div>
+
+            <table width="100%" cellpadding="0" cellspacing="0">${cursos}</table>
+          </td>
+        </tr>
+
+        <tr>
+          <td style="padding:24px 40px 32px;text-align:center;">
+            <a href="${academiaUrl}" style="display:inline-block;background:linear-gradient(135deg,#e6285c 0%,#85529c 100%);color:#ffffff;text-decoration:none;padding:16px 40px;border-radius:12px;font-size:16px;font-weight:700;">Entrar a Bakanology</a>
+            <p style="margin:14px 0 0;font-size:13px;color:#94a3b8;">Entras con este mismo correo. Si no recuerdas tu contraseña, la creas de nuevo desde ahí.</p>
+          </td>
+        </tr>
+
+        <tr>
+          <td style="background:#f8fafc;padding:16px 40px;border-top:1px solid #e2e8f0;text-align:center;">
+            <p style="margin:0;color:#94a3b8;font-size:12px;">Enviado por <strong>Bakano Metrics</strong>.<br/>Dudas sobre la academia: bakanology@bakanology.com</p>
+          </td>
+        </tr>
+
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+
+    await this.client.emails.send({
+      from: this.from,
+      to,
+      subject: `${esc(workspaceName)}: Bakanology va incluido en tu suscripción`,
+      html,
+    });
+  }
+
+  /**
    * Como funciona la produccion: que es y cada cuanto se hace. Se manda una
    * vez a todos los clientes, porque la regla cambio de dos meses a seis y
    * nadie se entera de una regla que solo vive en la cabeza del equipo.
