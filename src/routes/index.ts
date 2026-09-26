@@ -18,6 +18,7 @@ import scriptPerformanceRouter from "./scriptPerformance.router";
 import engramRouter from "./engram.router";
 import scriptFeedbackRouter from "./scriptFeedback.router";
 import publicMetricsRouter from "./publicMetrics.router";
+import lucasRouter from "./lucas.router";
 import { onboardingRouter } from "./onboarding.router";
 import onboardingProgresoRouter from "./onboardingProgreso.router";
 import recorridoRouter from "./recorrido.router";
@@ -60,6 +61,7 @@ function routerApi(app: Application) {
   router.use("/sales-summary", salesSummaryRouter);
   router.use("/cron", cronRouter);
   router.use("/public", publicMetricsRouter);
+  router.use("/lucas", lucasRouter);
   router.use("/workspaces", resourceRouter);
   router.use("/onboarding", onboardingRouter);
   router.use("/onboarding-progreso", onboardingProgresoRouter);
