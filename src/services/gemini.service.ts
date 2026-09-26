@@ -413,7 +413,15 @@ export class GeminiService {
 - Productos/Servicios principales: ${brandProfile.productosServicios || "No especificado"}
 - Problema que resuelven: ${brandProfile.problemaResuelto || "No especificado"}
 - Dirección de tráfico: ${brandProfile.trafficDirection || "No especificado"}
-- Link de tráfico: ${brandProfile.trafficLink || "No especificado"}
+- Link de tráfico: ${brandProfile.trafficLink || "No especificado"}${
+      brandProfile.infoVentas
+        ? `\n- Precios y condiciones de venta (contados por el negocio; si mencionas un precio, usa solo estos): ${brandProfile.infoVentas}`
+        : ""
+    }${
+      brandProfile.reglasVenta?.length
+        ? `\n- Reglas de venta del negocio (no las contradigas): ${brandProfile.reglasVenta.join(" | ")}`
+        : ""
+    }
 
 VIDEO A GENERAR:
 - Número de video: ${videoItem.numero}

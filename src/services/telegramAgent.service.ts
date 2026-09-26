@@ -12,6 +12,8 @@ import { metricasClienteService } from "./metricasCliente.service";
 import { claveDia, contextoParaLaIa, facturacionChatService, comoPlata } from "./facturacionChat.service";
 import { publicidadClienteService } from "./publicidadCliente.service";
 import { pagosClienteService } from "./pagosCliente.service";
+import { crmIntegracionService, linkIntegraciones } from "./crmIntegracion.service";
+import { crmRevisionService } from "./crmRevision.service";
 import { fueraDeHorario, incidentesService } from "./incidentes.service";
 import { equipoParaLaIa, WHATSAPP_DIRECCION } from "./equipoBakano.service";
 import { CATEGORIAS_GUION, revisionGuionesService } from "./revisionGuiones.service";
@@ -310,6 +312,9 @@ class TelegramAgentService {
     if (uso("verMisPagos", "generarLinkDePago")) {
       botones.push([{ text: "💳 Mis pagos", callback_data: "pago:ver" }]);
     }
+    if (uso("verMiCrm")) {
+      botones.push([{ text: "🔌 Mi CRM", callback_data: "crm:ver" }]);
+    }
     if (uso("verHorariosLibres", "agendarReunion")) {
       botones.push([{ text: "📅 Agendar una reunión", callback_data: "menu:agendar" }]);
     }
@@ -425,6 +430,10 @@ Pagos a Bakano (su suscripción; no confundir con su facturación del día, que 
 - Si quiere pagar, genera el link con generarLinkDePago (una factura por vez, la más antigua primero) y pásale el link tal cual. Se paga con tarjeta y queda registrado solo.
 - Si prefiere transferencia, dile que puede subir el comprobante en metrics.bakano.ec, en su facturación, o pasarle el mensaje a su equipo.
 - Habla de plata con naturalidad y respeto: facilitas el pago, no cobras. Nunca amenaces con pausar ni hables de la desactivación. Si reclama un cobro o dice que ya pagó, no discutas: pásale el mensaje al equipo.
+
+Su CRM (GoHighLevel):
+- Si pregunta por sus leads, sus conversaciones de WhatsApp, sus oportunidades o su CRM, usa verMiCrm. Si está conectado, cuéntale lo que encontró la revisión diaria (con el mensaje sugerido si lo pide). Si no está conectado, explícale en una línea que al conectarlo cada mañana le avisas de las ventas casi cerradas, y pásale el link de integraciones tal cual viene.
+- Nunca le pidas el token por el chat: se pega solo en la plataforma.
 
 Facturación del día:
 - El cliente puede registrar su facturación por aquí: si te dice un monto ("ayer vendí 450", "hoy hice 1.250"), regístralo con registrarFacturacion y confírmale el total del día.
@@ -1132,6 +1141,34 @@ Reglas:
           } catch {
             return { ok: false, motivo: "No se pudo generar el link ahora; ofrécele pasarle el mensaje al equipo." };
           }
+        },
+      },
+
+      verMiCrm: {
+        description:
+          "Estado del CRM (GoHighLevel) del cliente conectado a Metrics: si está conectado, si hay WhatsApp, cuándo fue la última revisión, los hallazgos recientes de la revisión diaria (ventas casi cerradas, leads sin respuesta, oportunidades estancadas) y el link para conectarlo o reconectarlo. Úsala cuando pregunte por sus leads, conversaciones de WhatsApp, oportunidades o su CRM.",
+        inputSchema: z.object({}),
+        execute: async () => {
+          const workspaceId = String(chat.workspaceId);
+          const link = linkIntegraciones(workspaceId);
+          const crm = await crmIntegracionService.estado(workspaceId);
+          if (!crm) {
+            return {
+              conectado: false,
+              linkIntegraciones: link,
+              siguiente: "Explícale en una línea para qué sirve conectarlo y pásale el link tal cual. El token se pega en la plataforma, nunca por el chat.",
+            };
+          }
+          return {
+            conectado: crm.estado === "conectado",
+            estado: crm.estado,
+            problema: crm.ultimoError,
+            whatsapp: crm.whatsapp,
+            ultimaRevision: crm.ultimaRevision ? fechaEcuador(new Date(crm.ultimaRevision)) : null,
+            hallazgosRecientes: await crmRevisionService.recientes(workspaceId).catch(() => []),
+            linkIntegraciones: link,
+            ...(crm.estado === "error" ? { siguiente: "Dile que el token dejó de funcionar y que lo reconecte en el link." } : {}),
+          };
         },
       },
 

@@ -24,6 +24,9 @@ import { UsoBotModel } from "./usoBot.model";
 import { TelegramChatModel } from "./telegramChat.model";
 import { SoporteTicketModel } from "./soporteTicket.model";
 import { OnboardingEventoModel } from "./onboardingEvento.model";
+import { CrmIntegrationModel } from "./crmIntegration.model";
+import { CrmHallazgoModel } from "./crmHallazgo.model";
+import { CrmRevisionModel } from "./crmRevision.model";
 
 const models = {
   users: UserModel,
@@ -52,6 +55,9 @@ const models = {
   telegramChats: TelegramChatModel,
   soporteTickets: SoporteTicketModel,
   onboardingEventos: OnboardingEventoModel,
+  crmIntegrations: CrmIntegrationModel,
+  crmHallazgos: CrmHallazgoModel,
+  crmRevisiones: CrmRevisionModel,
 };
 
 export default models;
