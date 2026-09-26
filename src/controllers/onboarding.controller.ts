@@ -3,6 +3,7 @@ import { WorkspaceModel } from "../models/workspace.model";
 import { onboardingService } from "../services/onboarding.service";
 import { resendService } from "../services/resend.service";
 import cloudinary from "../config/cloudinary";
+import { BAKANO_LEGAL, CONTRATO_VERSION_ACTUAL, PAUTA_MINIMA, TITULO_CONTRATO, clausulasContrato } from "../services/contratoTexto";
 
 export const acceptVideoResponsibilities = async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -35,48 +36,28 @@ export const acceptVideoResponsibilities = async (req: Request, res: Response, n
 export const submitContract = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { workspaceId } = req.params;
-    const {
-      rucBakano,
-      nombreCliente,
-      rucCliente,
-      representanteCliente,
-      cantidadGuiones,
-      videosEntretenimiento,
-      videosVenta,
-      numeroFunnels,
-      frecuenciaSesiones,
-      valorMensual,
-      diasPago,
-      plazoMeses,
-      mesesPermanencia,
-      mensualidadesPenalidad,
-      email, // To send the contract to
-      clientSignatureBase64
-    } = req.body;
-
     const workspace = await WorkspaceModel.findById(workspaceId);
     if (!workspace) {
       return res.status(404).send({ error: "Workspace not found" });
     }
 
-    // Generate PDF
-    const pdfBuffer = await onboardingService.generateContractPDF({
-      rucBakano,
-      nombreCliente,
-      rucCliente,
-      representanteCliente,
-      cantidadGuiones,
-      videosEntretenimiento,
-      videosVenta,
-      numeroFunnels,
-      frecuenciaSesiones,
-      valorMensual,
-      diasPago,
-      plazoMeses,
-      mesesPermanencia,
-      mensualidadesPenalidad,
-      clientSignatureBase64
-    });
+    // Lo que el cliente dio por Telegram manda sobre lo que llega del
+    // navegador; la razon social de Bakano y la version las pone el servidor.
+    const guardado = (workspace.contractData || {}) as Record<string, any>;
+    const datos = {
+      ...req.body,
+      ...guardado,
+      clientSignatureBase64: req.body.clientSignatureBase64,
+      rucBakano: BAKANO_LEGAL.ruc,
+      version: CONTRATO_VERSION_ACTUAL,
+    };
+    const { email, representanteCliente } = datos;
+
+    if (!(Number(datos.presupuestoPauta) >= PAUTA_MINIMA)) {
+      return res.status(400).send({ error: `Falta la inversión mensual en pauta (mínimo $${PAUTA_MINIMA}).` });
+    }
+
+    const pdfBuffer = await onboardingService.generateContractPDF(datos);
 
     // Send email
     await resendService.sendContractEmail({
@@ -113,7 +94,7 @@ export const submitContract = async (req: Request, res: Response, next: NextFunc
       };
     }
     workspace.onboardingStatus.contractSubmitted = true;
-    workspace.contractData = { ...req.body, pdfUrl };
+    workspace.contractData = { ...datos, pdfUrl, firmadoEn: new Date() };
     await workspace.save();
 
     res.status(200).send({ message: "Contract submitted and email sent successfully." });
@@ -143,6 +124,13 @@ export const checkOnboardingStatus = async (req: Request, res: Response, next: N
       // Los datos del contrato los llena el cliente por Telegram: la pantalla
       // web solo lee, muestra y recibe la firma.
       contractData: workspace.contractData || null,
+      // El texto que se firma lo arma el servidor: asi la vista previa y el
+      // PDF no pueden decir cosas distintas.
+      contrato: {
+        titulo: TITULO_CONTRATO,
+        clausulas: clausulasContrato({ ...(workspace.preNegotiatedContract || {}), ...(workspace.contractData || {}) }),
+        bakano: BAKANO_LEGAL,
+      },
       workspaceName: workspace.name,
     });
   } catch (error) {
@@ -216,7 +204,10 @@ export const downloadContract = async (req: Request, res: Response, next: NextFu
       return;
     }
 
-    const pdfBuffer = await onboardingService.generateContractPDF(workspace.contractData);
+    const pdfBuffer = await onboardingService.generateContractPDF(workspace.contractData, {
+      firmado: Boolean(workspace.onboardingStatus?.contractSubmitted),
+      borrador: !workspace.onboardingStatus?.contractSubmitted,
+    });
 
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `inline; filename="contrato_${workspaceId}.pdf"`);

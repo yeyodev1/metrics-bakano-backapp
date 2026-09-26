@@ -698,6 +698,8 @@ export class TelegramBotService {
     if (data === "contrato:estado") return this.mostrarEstadoContrato(chat);
     if (data === "contrato:llenar") return this.preguntarSiguienteDatoContrato(chat);
     if (data === "contrato:link") return this.mandarLinkFirma(chat);
+    if (data === "contrato:ver") return this.mandarPdfContrato(chat);
+    if (data === "contrato:correo") return this.reenviarContratoAlCorreo(chat);
     if (data === "contrato:corregir") {
       await telegramService.sendMessage(
         chat.chatId,
@@ -1203,8 +1205,12 @@ export class TelegramBotService {
     if (estado.completo) {
       await telegramService.sendMessage(
         chat.chatId,
-        `📝 <b>Tu contrato</b>\n\n${estado.texto}\n\nEstá todo listo ✅ No tienes que hacer nada más aquí.`,
-        [[{ text: "🚀 Ver mi onboarding", callback_data: "menu:onboarding" }], [{ text: "📋 Volver al menú", callback_data: "menu:ver" }]]
+        `📝 <b>Tu contrato</b>\n\n${estado.texto}\n\nEstá todo listo ✅ La copia firmada está en tu correo, y si la quieres aquí, pídemela cuando quieras.`,
+        [
+          [{ text: "📄 Ver mi contrato", callback_data: "contrato:ver" }],
+          [{ text: "🚀 Ver mi onboarding", callback_data: "menu:onboarding" }],
+          [{ text: "📋 Volver al menú", callback_data: "menu:ver" }],
+        ]
       );
       return;
     }
@@ -1219,7 +1225,11 @@ export class TelegramBotService {
     } else {
       botones.push([{ text: "✍️ Leer y firmar mi contrato", url: contratoChatService.link(chat.workspaceId) }]);
     }
-    botones.push([{ text: "✏️ Corregir un dato", callback_data: "contrato:corregir" }], [{ text: "📋 Volver al menú", callback_data: "menu:ver" }]);
+    botones.push(
+      [{ text: "📄 Ver el contrato antes de firmar", callback_data: "contrato:ver" }],
+      [{ text: "✏️ Corregir un dato", callback_data: "contrato:corregir" }],
+      [{ text: "📋 Volver al menú", callback_data: "menu:ver" }]
+    );
 
     await telegramService.sendMessage(chat.chatId, `📝 <b>Tu contrato</b>\n\n${estado.texto}\n\n${cierre}`, botones);
   }
@@ -1235,6 +1245,7 @@ export class TelegramBotService {
       chat.datoEsperado = undefined;
       await chat.save();
       await telegramService.sendMessage(chat.chatId, "Tu contrato ya está firmado ✅ No hay nada más que hacer por aquí.", [
+        [{ text: "📄 Ver mi contrato", callback_data: "contrato:ver" }],
         [{ text: "🚀 Ver mi onboarding", callback_data: "menu:onboarding" }],
         [{ text: "📋 Volver al menú", callback_data: "menu:ver" }],
       ]);
@@ -1269,13 +1280,43 @@ export class TelegramBotService {
       "Ya tengo todo para tu contrato ✅\n\n" +
         `${estado.texto}\n\n` +
         "Toca el botón y se te abre <b>solo la pantalla de firma</b>: lees el contrato, lo firmas y listo. " +
-        "Si algo de arriba está mal, dímelo y lo corrijo antes.",
+        "Si prefieres leerlo antes aquí, te lo mando en PDF.\n\n" +
+        "Cuando lo firmes, te llega una copia firmada a tu correo. Si algo de arriba está mal, dímelo y lo corrijo antes.",
       [
         [{ text: "✍️ Leer y firmar mi contrato", url: link }],
+        [{ text: "📄 Ver el contrato en PDF", callback_data: "contrato:ver" }],
         [{ text: "✏️ Corregir un dato", callback_data: "contrato:corregir" }],
         [{ text: "📋 Volver al menú", callback_data: "menu:ver" }],
       ]
     );
+  }
+
+  /** El contrato en PDF, en el chat: borrador si no firmó, el firmado si ya. */
+  private async mandarPdfContrato(chat: ITelegramChat): Promise<void> {
+    if (!chat.workspaceId) return this.mostrarMenu(chat);
+    await telegramService.sendChatAction(chat.chatId, "typing").catch(() => undefined);
+    const r = await contratoChatService.enviarPdf(chat).catch((error: any) => {
+      console.error("[Contrato] PDF por Telegram:", error?.message || error);
+      return { ok: false };
+    });
+    if (!r.ok) {
+      await telegramService.sendMessage(chat.chatId, "No pude generar tu contrato ahora 😕 Inténtalo de nuevo en un momento.", [
+        [{ text: "🔁 Intentar de nuevo", callback_data: "contrato:ver" }],
+        [{ text: "📋 Volver al menú", callback_data: "menu:ver" }],
+      ]);
+    }
+  }
+
+  private async reenviarContratoAlCorreo(chat: ITelegramChat): Promise<void> {
+    const r = await contratoChatService.reenviarPorCorreo(chat).catch(() => ({ ok: false, motivo: "error" }) as { ok: boolean; motivo?: string; correo?: string });
+    const texto = r.ok
+      ? `Listo 📧 Te lo reenvié a <b>${escaparHtml(r.correo || "")}</b>. Si no lo ves, revisa el spam.`
+      : r.motivo === "reciente"
+        ? `Te lo acabo de mandar a <b>${escaparHtml(r.correo || "")}</b> 📧 Dale unos minutos y revisa el spam.`
+        : r.motivo === "sin_firmar"
+          ? "Tu contrato todavía no está firmado: te llega al correo apenas lo firmes."
+          : "No pude reenviarlo ahora 😕 Inténtalo en un momento o pídeselo a tu equipo.";
+    await telegramService.sendMessage(chat.chatId, texto, [[{ text: "📋 Volver al menú", callback_data: "menu:ver" }]]);
   }
 
   /**

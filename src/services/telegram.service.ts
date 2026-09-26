@@ -84,6 +84,25 @@ export class TelegramService {
     });
   }
 
+  /** Manda un archivo (el PDF del contrato) con un texto y botones abajo. */
+  async sendDocument(
+    chatId: number,
+    archivo: Buffer,
+    nombre: string,
+    caption?: string,
+    botones?: InlineButton[][]
+  ): Promise<void> {
+    const form = new FormData();
+    form.append("chat_id", String(chatId));
+    form.append("document", new Blob([new Uint8Array(archivo)], { type: "application/pdf" }), nombre);
+    if (caption) {
+      form.append("caption", caption.slice(0, 1024));
+      form.append("parse_mode", "HTML");
+    }
+    if (botones) form.append("reply_markup", JSON.stringify({ inline_keyboard: botones }));
+    await axios.post(`${this.api}/sendDocument`, form, { timeout: 60_000 });
+  }
+
   /** "escribiendo..." mientras la IA piensa. Dura 5 s o hasta el siguiente mensaje. */
   async sendChatAction(chatId: number, action: "typing"): Promise<void> {
     await axios.post(`${this.api}/sendChatAction`, { chat_id: chatId, action });
