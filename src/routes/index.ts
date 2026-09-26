@@ -30,6 +30,7 @@ import salesExecutiveRouter from "./salesExecutive.router";
 import agentFeedRouter from "./agentFeed.router";
 import financeIntegrationRouter from "./financeIntegration.router";
 import billingPortalRouter from "./billingPortal.router";
+import crmIntegracionRouter from "./crmIntegracion.router";
 import flagsRouter from "./flags.router";
 import driveRouter from "./drive.router";
 import internalPulseRouter from "./internalPulse.router";
@@ -69,6 +70,7 @@ function routerApi(app: Application) {
   router.use("/sales-executive", salesExecutiveRouter);
   router.use("/agent-feed", agentFeedRouter);
   router.use("/integrations/finance", financeIntegrationRouter);
+  router.use("/workspaces", crmIntegracionRouter);
   router.use("/workspaces", billingPortalRouter);
   router.use("/flags", flagsRouter);
   router.use("/drive", driveRouter);
