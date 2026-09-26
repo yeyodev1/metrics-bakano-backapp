@@ -402,4 +402,30 @@ cronRouter.get("/ghl-production-sync", async (req: Request, res: Response) => {
   }
 });
 
+// GET /api/cron/crm-cierres — todos los dias desde las 14:00 UTC (09:00
+// Ecuador) y cada 15 min hasta las 09:45. Revisa las ultimas 24 h del CRM de
+// cada cliente conectado, guarda los "cierres casi solos" y se los cuenta al
+// cliente por Telegram. Vercel corta a los 60 s: cada corrida toma los que
+// faltan hoy y la siguiente sigue donde quedo (CrmRevision del dia).
+cronRouter.get("/crm-cierres", async (req: Request, res: Response) => {
+  const secret = process.env.CRON_SECRET;
+  if (!secret || req.headers["authorization"] !== `Bearer ${secret}`) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  try {
+    const { crmRevisionService } = await import("../services/crmRevision.service");
+    const r = await crmRevisionService.correr();
+    console.log(
+      `[Cron] CRM cierres — revisados: ${r.revisados}, hallazgos: ${r.hallazgos}, avisos: ${r.avisados}, ` +
+        `pendientes para la siguiente corrida: ${r.pendientes}` +
+        (r.errores.length ? ` — errores: ${r.errores.join(" | ")}` : "")
+    );
+    res.status(200).json({ ok: true, ...r });
+  } catch (error: any) {
+    console.error("[Cron] CRM cierres:", error?.message || error);
+    res.status(500).json({ ok: false, error: error?.message || "error" });
+  }
+});
+
 export default cronRouter;
