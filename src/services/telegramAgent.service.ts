@@ -11,6 +11,7 @@ import { AYUDA_CAMPO_MARCA, CAMPOS_MARCA, ENTREGABLES, onboardingDatosService } 
 import { metricasClienteService } from "./metricasCliente.service";
 import { claveDia, contextoParaLaIa, facturacionChatService, comoPlata } from "./facturacionChat.service";
 import { publicidadClienteService } from "./publicidadCliente.service";
+import { pagosClienteService } from "./pagosCliente.service";
 import { fueraDeHorario, incidentesService } from "./incidentes.service";
 import { equipoParaLaIa, WHATSAPP_DIRECCION } from "./equipoBakano.service";
 import { CATEGORIAS_GUION, revisionGuionesService } from "./revisionGuiones.service";
@@ -26,6 +27,8 @@ import { escaparHtml, telegramService } from "./telegram.service";
 import { notificationService } from "./notification.service";
 import { resendService } from "./resend.service";
 import { slackService } from "./slack.service";
+import { contratoChatService } from "./contratoChat.service";
+import { PAUTA_MINIMA, PAUTA_TEMPORADA_ALTA } from "./contratoTexto";
 
 /**
  * La IA que conversa con el cliente por Telegram.
@@ -295,11 +298,17 @@ class TelegramAgentService {
     if (uso("verOnboarding", "verPendientesOnboarding", "registrarDatoMarca", "registrarEntregable", "pedirAyudaConDato", "verHorariosOnboarding", "agendarSesionOnboarding")) {
       botones.push([{ text: "🚀 Cómo va mi onboarding", callback_data: "menu:onboarding" }]);
     }
+    if (uso("enviarMiContrato", "reenviarContratoAlCorreo")) {
+      botones.push([{ text: "📝 Mi contrato", callback_data: "contrato:estado" }]);
+    }
     if (uso("verMisAccesos", "recuperarContrasena")) {
       botones.push([{ text: "🔑 Mis accesos y contraseñas", callback_data: "acceso:ver" }]);
     }
     if (uso("verFacturacionPendiente", "registrarFacturacion", "verMetricas")) {
       botones.push([{ text: "💵 Mi facturación del día", callback_data: "fact:ver" }]);
+    }
+    if (uso("verMisPagos", "generarLinkDePago")) {
+      botones.push([{ text: "💳 Mis pagos", callback_data: "pago:ver" }]);
     }
     if (uso("verHorariosLibres", "agendarReunion")) {
       botones.push([{ text: "📅 Agendar una reunión", callback_data: "menu:agendar" }]);
@@ -411,6 +420,12 @@ Preguntas de facturación (esto lo respondes siempre, nunca lo derives):
 - Si hay meta del mes, di en qué porcentaje va o quedó. Si no hay meta, no la inventes ni la menciones.
 - Cuenta el resultado en positivo. Si el mes quedó por debajo de la meta, dilo de frente, sin dramatizar, y cierra con que este mes tomamos acción en eso.
 
+Pagos a Bakano (su suscripción; no confundir con su facturación del día, que son sus ventas):
+- Si pregunta cuánto debe, si está al día, por su factura, o cómo pagar a Bakano, usa verMisPagos y contéstale con el monto y el mes.
+- Si quiere pagar, genera el link con generarLinkDePago (una factura por vez, la más antigua primero) y pásale el link tal cual. Se paga con tarjeta y queda registrado solo.
+- Si prefiere transferencia, dile que puede subir el comprobante en metrics.bakano.ec, en su facturación, o pasarle el mensaje a su equipo.
+- Habla de plata con naturalidad y respeto: facilitas el pago, no cobras. Nunca amenaces con pausar ni hables de la desactivación. Si reclama un cobro o dice que ya pagó, no discutas: pásale el mensaje al equipo.
+
 Facturación del día:
 - El cliente puede registrar su facturación por aquí: si te dice un monto ("ayer vendí 450", "hoy hice 1.250"), regístralo con registrarFacturacion y confírmale el total del día.
 - Si no sabes de qué día habla, usa verFacturacionPendiente y pregúntale antes de registrar. Nunca inventes el monto ni el día.
@@ -443,6 +458,12 @@ BAKANOLOGY (la academia):
 - Bakanology es la academia de Bakano: cursos de Estrategia Comercial, ADN de la Venta y Marketing y Ventas. Es donde aprende a vender, a hablarle a un cliente y a leer sus números.
 - VA INCLUIDA en su suscripción: mientras siga con Bakano no paga nada aparte, sin costo adicional y sin fecha de corte. Dilo así si pregunta.
 - Entra en bakanology.com con el MISMO correo de Metrics, pero con una contraseña distinta. Son dos plataformas: Metrics para sus números, guiones y archivos; Bakanology para aprender.
+
+CONTRATO:
+- Si pide ver, leer, revisar o que le mandes su contrato, usa enviarMiContrato: le llega el PDF aquí mismo. Puede pedirlo las veces que quiera. Si no lo firmó, es un borrador con sus datos; si ya lo firmó, es el firmado.
+- Siempre dile que la copia firmada le llega también a su correo (el que dio para el contrato). Si ya firmó y quiere que se lo mandes de nuevo al correo, usa reenviarContratoAlCorreo.
+- Lo que dice el contrato, por si pregunta: el servicio empieza al día siguiente de recibir el comprobante de pago. Se compromete a una inversión mensual en anuncios de mínimo $${PAUTA_MINIMA} sin impuestos (con menos no podemos asegurar cierres y los resultados tardan más), que crece a medida que crece su facturación; en octubre, noviembre y diciembre se recomiendan al menos $${PAUTA_TEMPORADA_ALTA}. Bakano cubre el CRM; los mensajes de WhatsApp del CRM los paga él directo a Meta. El primer mes es de exploración y lo recomendado es quedarse al menos dos meses. Si en los dos primeros meses no hay resultados, en el tercer y cuarto mes paga el 50% de los honorarios, siempre que haya mantenido su pauta y dado seguimiento a sus prospectos. Para suspender el servicio tiene que pedirlo por escrito por los canales oficiales de Bakano.
+- No activas la garantía ni cambias condiciones: si la pide o quiere suspender, pásale el mensaje al equipo con pasarMensajeAlEquipo.
 
 CONTRASEÑAS:
 - Si dice que olvidó su contraseña o que no puede entrar, pregúntale de cuál de las dos y usa recuperarContrasena. Le llega el correo para crear una nueva.
@@ -763,6 +784,30 @@ Reglas:
         },
       },
 
+      enviarMiContrato: {
+        description:
+          "Le manda al cliente su contrato en PDF por este chat: el borrador con sus datos si no lo firmó, o el firmado si ya lo firmó. Úsala cuando pida ver, leer o que le mandes su contrato.",
+        inputSchema: z.object({}),
+        execute: async () => {
+          const r = await contratoChatService.enviarPdf(chat);
+          if (!r.ok) return { ok: false, siguiente: "Dile que no pudiste generarlo ahora y que lo intente de nuevo en un momento." };
+          return {
+            ok: true,
+            firmado: r.firmado,
+            correo: r.correo || null,
+            siguiente: r.firmado
+              ? "Ya le llegó el PDF firmado aquí. Dile que esa misma copia está en su correo."
+              : "Ya le llegó el borrador aquí. Dile que lo lea con calma y que, cuando lo firme, le llega la copia firmada a su correo.",
+          };
+        },
+      },
+
+      reenviarContratoAlCorreo: {
+        description: "Le reenvía a su correo el contrato ya firmado. Solo si ya lo firmó y lo pide por correo.",
+        inputSchema: z.object({}),
+        execute: async () => contratoChatService.reenviarPorCorreo(chat),
+      },
+
       verReservaDeContenido: {
         description:
           "Cuánto contenido le queda al cliente: guiones escritos por grabar, piezas en edición y listas para publicar, y si ya tiene producción agendada.",
@@ -1061,6 +1106,32 @@ Reglas:
                 siguiente: "Confirma lo registrado y cierra con una lectura corta del número usando el contexto.",
               }
             : r;
+        },
+      },
+
+      verMisPagos: {
+        description:
+          "Lo que el cliente le debe a Bakano por su suscripción: saldo pendiente, facturas abiertas (mes, monto, si está vencida) y si puede pagar con tarjeta. Úsala cuando pregunte por pagos, su factura con Bakano o si está al día.",
+        inputSchema: z.object({}),
+        execute: async () => pagosClienteService.paraLaIa(String(chat.workspaceId)),
+      },
+
+      generarLinkDePago: {
+        description:
+          "Genera el link de pago con tarjeta (Stripe) de UNA factura abierta, tomada de verMisPagos. Cobra solo lo que falta de esa factura. Úsala cuando el cliente quiera pagar.",
+        inputSchema: z.object({
+          invoiceId: z.string().describe("invoiceId exacto de verMisPagos"),
+        }),
+        execute: async ({ invoiceId }: { invoiceId: string }) => {
+          const estado = await pagosClienteService.estado(String(chat.workspaceId), true);
+          const factura = estado.facturas.find((f) => f.id === invoiceId);
+          if (!factura) return { ok: false, motivo: "Esa factura ya no tiene saldo o no existe; vuelve a consultar verMisPagos." };
+          try {
+            const url = await pagosClienteService.link(String(chat.workspaceId), invoiceId);
+            return { ok: true, url, mes: factura.texto, monto: `$${factura.saldo.toFixed(2)}`, siguiente: "Pásale el link tal cual y dile que al terminar queda registrado solo." };
+          } catch {
+            return { ok: false, motivo: "No se pudo generar el link ahora; ofrécele pasarle el mensaje al equipo." };
+          }
         },
       },
 

@@ -1,4 +1,5 @@
 import PDFDocument from 'pdfkit';
+import { BAKANO_LEGAL, CONTRATO_VERSION_ACTUAL, TITULO_CONTRATO, clausulasContrato } from './contratoTexto';
 
 export interface IContractData {
   rucBakano: string;
@@ -16,13 +17,105 @@ export interface IContractData {
   mesesPermanencia: number;
   mensualidadesPenalidad: number;
   clientSignatureBase64?: string;
+  presupuestoPauta?: number | string;
+  /** Sin version = firmado antes de BAKANOEC SAS: se regenera con el texto de entonces. */
+  version?: number;
 }
 
 export class OnboardingService {
   /**
-   * Generates a PDF buffer based on the dynamic contract template
+   * El PDF del contrato con el texto de la version que corresponde.
+   *
+   * Un contrato firmado sin `version` se firmo con el texto anterior
+   * (NEGODELPAC): se regenera igual, para no mostrarle clausulas que no firmo.
+   * `borrador` es la vista previa sin firmar que se manda por Telegram.
    */
-  public async generateContractPDF(data: IContractData): Promise<Buffer> {
+  public async generateContractPDF(
+    data: IContractData,
+    opciones: { firmado?: boolean; borrador?: boolean } = {}
+  ): Promise<Buffer> {
+    const version = data.version ?? (opciones.firmado ? 1 : CONTRATO_VERSION_ACTUAL);
+    if (version === 1) return this.generarContratoV1(data);
+    return this.generarContrato(data, Boolean(opciones.borrador));
+  }
+
+  private generarContrato(data: IContractData, borrador: boolean): Promise<Buffer> {
+    return new Promise((resolve, reject) => {
+      try {
+        const doc = new PDFDocument({ margin: 50 });
+        const buffers: Buffer[] = [];
+        doc.on('data', buffers.push.bind(buffers));
+        doc.on('end', () => resolve(Buffer.concat(buffers)));
+
+        if (borrador) {
+          doc.font('Helvetica-Bold').fontSize(10).fillColor('#c91e4c')
+            .text('BORRADOR – SIN FIRMA. Documento de revisión, no tiene validez hasta ser firmado.', { align: 'center' });
+          doc.fillColor('black').moveDown();
+        }
+
+        doc.font('Helvetica-Bold').fontSize(14).text(TITULO_CONTRATO, { align: 'center' });
+        doc.moveDown();
+        doc.font('Helvetica').fontSize(11);
+
+        for (const c of clausulasContrato(data)) {
+          doc.text(c.titulo, { underline: true });
+          doc.text(c.texto);
+          doc.moveDown();
+        }
+
+        // La aceptacion y las firmas van juntas en una pagina: si no entran, a la siguiente.
+        if (doc.y + 240 > doc.page.height - doc.page.margins.bottom) doc.addPage();
+        else doc.moveDown();
+        doc.text('En señal de aceptación, las partes suscriben el presente contrato en dos ejemplares de igual tenor y valor legal.', { align: 'center' });
+        doc.moveDown(4);
+
+        const signatureY = doc.y;
+        const leftColX = 50;
+        const rightColX = 350;
+        const col = { width: 210, lineBreak: false } as const;
+
+        if (data.clientSignatureBase64 && !borrador) {
+          try {
+            const base64Data = data.clientSignatureBase64.replace(/^data:image\/\w+;base64,/, '');
+            doc.image(Buffer.from(base64Data, 'base64'), rightColX, signatureY - 40, { width: 150, height: 50 });
+          } catch (e) {
+            console.error("Failed to embed client signature", e);
+          }
+        }
+
+        if (!borrador) {
+          doc.font('Times-Italic').fontSize(16).fillColor('#003366');
+          doc.text('Luis Alberto Reyes', leftColX + 10, signatureY - 20);
+          doc.font('Helvetica').fontSize(8).fillColor('#666666');
+          doc.text('[FIRMADO ELECTRÓNICAMENTE]', leftColX, signatureY + 5);
+        }
+
+        doc.font('Helvetica').fontSize(11).fillColor('black');
+        doc.moveTo(leftColX, signatureY + 25).lineTo(leftColX + 200, signatureY + 25).stroke();
+        doc.moveTo(rightColX, signatureY + 25).lineTo(rightColX + 200, signatureY + 25).stroke();
+
+        const filas: [string, string, boolean][] = [
+          [BAKANO_LEGAL.representante, data.representanteCliente || '', true],
+          [BAKANO_LEGAL.razonSocial, `RUC/C.I.: ${data.rucCliente || ''}`, false],
+          [`RUC: ${BAKANO_LEGAL.ruc}`, 'EL CLIENTE', false],
+          [BAKANO_LEGAL.cargo, '', false],
+        ];
+        filas.forEach(([izq, der, negrita], i) => {
+          const y = signatureY + 32 + i * 15;
+          doc.font(negrita ? 'Helvetica-Bold' : 'Helvetica');
+          doc.text(izq, leftColX, y, col);
+          doc.text(der, rightColX, y, col);
+        });
+
+        doc.end();
+      } catch (error) {
+        reject(error);
+      }
+    });
+  }
+
+  /** Texto firmado hasta septiembre de 2026, con NEGODELPAC. No se toca. */
+  private async generarContratoV1(data: IContractData): Promise<Buffer> {
     return new Promise((resolve, reject) => {
       try {
         const doc = new PDFDocument({ margin: 50 });

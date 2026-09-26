@@ -68,6 +68,8 @@ export interface ITelegramChat extends Document {
   facturacionEsperada?: { fecha: Date; pedidoEn: Date; modo?: "pedido" | "correccion" };
   /** El bot pidió un dato del perfil de marca por escrito (ej. el link de la venta). */
   datoEsperado?: { campo: string; pedidoEn: Date };
+  /** Último aviso de saldo pendiente con Bakano: se recuerda con calma, no en cada mensaje. */
+  avisoPagoEn?: Date;
   /** Cambio de cita propuesto y esperando que el cliente lo confirme. */
   cambioPendiente?: {
     accion: "cancelar" | "reprogramar";
@@ -152,6 +154,7 @@ const TelegramChatSchema = new Schema<ITelegramChat>(
       type: { campo: String, pedidoEn: Date },
       default: undefined,
     },
+    avisoPagoEn: { type: Date },
     cambioPendiente: {
       type: { accion: String, ref: String, inicio: Date, motivo: String, avisarDireccion: Boolean, resumen: String, creadoEn: Date },
       default: undefined,
