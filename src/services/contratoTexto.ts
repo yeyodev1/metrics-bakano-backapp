@@ -9,7 +9,11 @@
  * texto que firmo (ver onboarding.service, que guarda la version 1 tal cual).
  */
 
-export const CONTRATO_VERSION_ACTUAL = 2;
+/**
+ * 3 (2026-09-28): se agrega la cláusula de canales de comunicación (Telegram,
+ * 24/7). Los firmados en la 2 se siguen generando sin ella.
+ */
+export const CONTRATO_VERSION_ACTUAL = 3;
 
 export const BAKANO_LEGAL = {
   razonSocial: "BAKANOEC SAS",
@@ -39,6 +43,8 @@ export interface DatosContrato {
   numeroFunnels?: number;
   frecuenciaSesiones?: string;
   diasPago?: number;
+  /** Versión con la que se firmó. Sin ella, la vigente. */
+  version?: number;
 }
 
 export const TITULO_CONTRATO =
@@ -251,5 +257,14 @@ La falta de cualquiera de estas condiciones provocará la cancelación inmediata
       texto:
         "BAKANO se reserva el derecho de verificar la gestión comercial de EL CLIENTE a través de las plataformas y herramientas tecnológicas pactadas. Si se demuestra que BAKANO cumplió con la generación de prospectos, pero estos no se convirtieron en cierres comerciales debido a demoras en el contacto, deficiente atención, inacción operativa o incumplimiento de procesos internos por parte de EL CLIENTE, la garantía quedará automáticamente anulada, debiendo EL CLIENTE abonar la mensualidad regular completa correspondiente.",
     },
+    ...((d.version ?? CONTRATO_VERSION_ACTUAL) >= 3
+      ? [
+          {
+            titulo: "VIGÉSIMA TERCERA.- CANALES DE COMUNICACIÓN:",
+            texto:
+              "La comunicación entre las partes se realizará por los canales digitales oficiales de BAKANO, principalmente Telegram, a través de su asistente @BakanoAgencyBot, disponible las 24 horas del día, los 7 días de la semana. Por ese canal EL CLIENTE podrá hacer consultas, enviar solicitudes, archivos y aprobaciones, agendar sesiones y dar seguimiento al servicio. Las solicitudes que requieran intervención del equipo de BAKANO serán canalizadas a la persona responsable. Los mensajes enviados por estos canales tendrán la validez de comunicación escrita entre las partes.",
+          },
+        ]
+      : []),
   ];
 }
