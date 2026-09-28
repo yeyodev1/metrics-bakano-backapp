@@ -1168,6 +1168,61 @@ export class ResendService {
   }
 
   /**
+   * Qué accesos damos y cómo se entra a cada uno: Metrics, el bot de Bakano,
+   * Lucas y Bakanology. Informativo: sirve antes de crear la cuenta, porque
+   * todo se activa con el mismo correo cuando se crea su entorno.
+   */
+  async sendAccesosBakano(params: { to: string; nombre?: string; bcc?: string[] }): Promise<{ id?: string }> {
+    const saludo = params.nombre?.trim() ? `Hola ${params.nombre.trim().split(" ")[0]},` : "Hola,";
+    const bloque = (titulo: string, que: string, como: string, boton: string, url: string) => `
+            <tr><td style="padding:0 40px 18px;">
+              <table width="100%" cellpadding="0" cellspacing="0" style="background:#faf9fc;border:1px solid #eceaf1;border-radius:12px;">
+                <tr><td style="padding:18px 20px;">
+                  <p style="margin:0 0 6px;font-size:16px;font-weight:800;color:#191423;">${titulo}</p>
+                  <p style="margin:0 0 8px;font-size:14px;color:#475569;line-height:1.6;">${que}</p>
+                  <p style="margin:0 0 14px;font-size:13px;color:#64748b;line-height:1.6;"><strong>Cómo entras:</strong> ${como}</p>
+                  <a href="${url}" style="display:inline-block;background:linear-gradient(135deg,#e6285c 0%,#85529c 100%);background-color:#e6285c;color:#ffffff;text-decoration:none;padding:10px 20px;border-radius:9px;font-size:14px;font-weight:700;">${boton}</a>
+                </td></tr>
+              </table>
+            </td></tr>`;
+    const html = `<!DOCTYPE html>
+<html lang="es">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+<body style="margin:0;padding:0;background:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="padding:40px 20px;">
+    <tr><td align="center">
+      <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
+        ${barraMarca()}
+        <tr><td style="padding:32px 40px 20px;">
+          <p style="margin:0 0 14px;font-size:16px;color:#1e293b;">${saludo}</p>
+          <p style="margin:0 0 12px;font-size:15px;color:#475569;line-height:1.7;">Te contamos todo lo que tienes con Bakano y cómo entras a cada cosa. Todo funciona con <strong>un mismo correo</strong>: el que registremos en tu entorno.</p>
+          <p style="margin:0;font-size:15px;color:#475569;line-height:1.7;">Los accesos se activan cuando creamos tu entorno con ese correo; desde ahí te llega tu usuario y contraseña.</p>
+        </td></tr>
+        ${bloque("Metrics · tu plataforma", "Tu entorno con Bakano: planificación de contenido, guiones para aprobar, tus videos, facturación y resultados, perfil de marca y recursos (logos, catálogo).", "en metrics.bakano.ec con tu correo y la contraseña que te enviamos. Si la olvidas, usa \"Olvidé mi contraseña\".", "Ir a Metrics", "https://metrics.bakano.ec")}
+        ${bloque("Bot de Bakano en Telegram", "Tu canal directo con el equipo, disponible 24/7: agendas tus sesiones y tu producción, revisas y apruebas guiones, envías archivos, recibes avisos y le pasas mensajes a la persona que corresponde.", "escribe a @BakanoAgencyBot y te pide el correo con el que entras a Metrics; te llega un código a ese correo y quedas conectado.", "Abrir el bot de Bakano", "https://t.me/BakanoAgencyBot")}
+        ${bloque("Lucas · tu asistente de ventas en Telegram", "Le pasas las conversaciones de WhatsApp con tus clientes y te dice qué responder para cerrar la venta, qué tan cerca estás de cerrar y cuándo mandar tus datos de pago, respetando las reglas de tu negocio.", "escribe a @LucasByBakanoBot. Si ya usas el bot de Bakano te reconoce solo; si no, te pide tu correo de Metrics y te manda un código.", "Abrir Lucas", "https://t.me/LucasByBakanoBot")}
+        ${bloque("Bakanology · academia", "Cursos y material para vender más por redes, incluido mientras sigas con Bakano.", "en bakanology.com con tu mismo correo. La contraseña de la academia es distinta a la de Metrics: si no la tienes, entra a \"Olvidé mi contraseña\" o pídesela al bot de Bakano.", "Ir a Bakanology", "https://bakanology.com")}
+        <tr><td style="padding:6px 40px 28px;">
+          <p style="margin:0 0 6px;font-size:14px;color:#64748b;line-height:1.6;">¿Dudas con algún acceso? Escríbenos por el bot de Bakano en Telegram y te ayudamos.</p>
+          <p style="margin:14px 0 0;font-size:15px;color:#1e293b;font-weight:600;">El equipo de Bakano</p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+    const { data, error } = await this.client.emails.send({
+      from: "Bakano <team@bakano.ec>",
+      to: params.to,
+      ...(params.bcc?.length ? { bcc: params.bcc } : {}),
+      subject: "Tus accesos con Bakano: Metrics, Telegram y Bakanology",
+      html,
+    });
+    if (error) throw new Error(error.message);
+    return { id: data?.id };
+  }
+
+  /**
    * El contrato modelo, antes de cerrar la venta: un enlace para leerlo en la
    * web (y descargarlo), sin datos del cliente ni firma. Desde team@bakano.ec.
    */
