@@ -20,6 +20,7 @@ import scriptFeedbackRouter from "./scriptFeedback.router";
 import publicMetricsRouter from "./publicMetrics.router";
 import lucasRouter from "./lucas.router";
 import { onboardingRouter } from "./onboarding.router";
+import contratoRouter from "./contrato.router";
 import onboardingProgresoRouter from "./onboardingProgreso.router";
 import recorridoRouter from "./recorrido.router";
 import { resourceRouter } from "./resource.router";
@@ -65,6 +66,7 @@ function routerApi(app: Application) {
   router.use("/lucas", lucasRouter);
   router.use("/workspaces", resourceRouter);
   router.use("/onboarding", onboardingRouter);
+  router.use("/contrato", contratoRouter);
   router.use("/onboarding-progreso", onboardingProgresoRouter);
   router.use("/recorrido", recorridoRouter);
   router.use("/evaluations", evaluationRouter);

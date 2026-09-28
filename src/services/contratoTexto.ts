@@ -45,6 +45,8 @@ export interface DatosContrato {
   diasPago?: number;
   /** Versión con la que se firmó. Sin ella, la vigente. */
   version?: number;
+  /** Solo el contrato modelo: qué mostrar en lugar del monto de pauta. */
+  pautaModelo?: string;
 }
 
 export const TITULO_CONTRATO =
@@ -62,7 +64,7 @@ export function clausulasContrato(d: DatosContrato): Clausula[] {
   const ruc = d.rucCliente || PENDIENTE;
   const representante = d.representanteCliente || PENDIENTE;
   const pauta = Number(d.presupuestoPauta);
-  const pautaTexto = pauta >= PAUTA_MINIMA ? formatoDolares(pauta) : PENDIENTE;
+  const pautaTexto = pauta >= PAUTA_MINIMA ? formatoDolares(pauta) : d.pautaModelo || PENDIENTE;
 
   const alcance = d.cantidadGuiones
     ? `A. Motor de Contenido de Conversión

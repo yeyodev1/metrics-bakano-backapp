@@ -3,6 +3,7 @@ import jwt from "jsonwebtoken";
 import models from "../../models";
 import { resendService } from "../../services/resend.service";
 import { correoBloqueado } from "../../utils/contactosBloqueados";
+import { LINK_CONTRATO_MODELO } from "../../services/contratoModelo.service";
 import { estadoEntorno, resolverCliente, type ToolMcp } from "./base";
 
 /** Da tiempo a abrir la prueba en el correo y leerla con calma. */
@@ -110,6 +111,31 @@ export const toolsCorreos: ToolMcp[] = [
         else enviados.push(correo);
       }
       return { asunto: d.s, enviados: enviados.length, a: enviados, ...(fallidos.length ? { fallidos } : {}) };
+    },
+  },
+  {
+    nombre: "enviar_contrato_modelo",
+    titulo: "Mandar el contrato para revisar (antes de cerrar)",
+    descripcion:
+      "Le manda a un prospecto, antes de cerrar la venta, un correo desde team@bakano.ec con el enlace para leer nuestro contrato de servicios vigente en la web (y descargarlo en PDF). Es el contrato modelo: sin datos del cliente ni firma. Puedes agregar una nota corta. Confirma el correo con quien lo pide antes de enviarlo.",
+    perfiles: ["direccion", "pm"],
+    escribe: true,
+    entrada: {
+      correo: z.string().email(),
+      nombre: z.string().max(120).optional().describe("Nombre del prospecto, para el saludo"),
+      nota: z.string().max(800).optional().describe("Mensaje corto que va antes del botón"),
+    },
+    async correr(a, u) {
+      const correo = String(a.correo).toLowerCase().trim();
+      if (await correoBloqueado(correo)) throw new Error("Ese contacto está bloqueado: no se le escribe.");
+      const r = await resendService.sendContratoParaRevisar({
+        to: correo,
+        nombre: a.nombre,
+        nota: a.nota,
+        enviadoPor: `${u.nombre} · Bakano`,
+        link: LINK_CONTRATO_MODELO,
+      });
+      return { enviado: true, a: correo, desde: "team@bakano.ec", enlace: LINK_CONTRATO_MODELO, id: r.id };
     },
   },
 ];

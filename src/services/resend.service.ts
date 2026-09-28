@@ -1168,6 +1168,56 @@ export class ResendService {
   }
 
   /**
+   * El contrato modelo, antes de cerrar la venta: un enlace para leerlo en la
+   * web (y descargarlo), sin datos del cliente ni firma. Desde team@bakano.ec.
+   */
+  async sendContratoParaRevisar(params: {
+    to: string;
+    nombre?: string;
+    nota?: string;
+    enviadoPor?: string;
+    link: string;
+    prueba?: boolean;
+  }): Promise<{ id?: string }> {
+    const escapar = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const saludo = params.nombre?.trim() ? `Hola ${escapar(params.nombre.trim().split(" ")[0])},` : "Hola,";
+    const html = `<!DOCTYPE html>
+<html lang="es">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+<body style="margin:0;padding:0;background:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="padding:40px 20px;">
+    <tr><td align="center">
+      <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
+        ${barraMarca()}
+        ${params.prueba ? `<tr><td style="background:#fef3c7;border-bottom:1px solid #fde68a;padding:12px 40px;"><p style="margin:0;font-size:13px;color:#92400e;"><strong>Correo de prueba.</strong> Así lo recibe un prospecto antes de cerrar la venta.</p></td></tr>` : ""}
+        <tr>
+          <td style="padding:32px 40px 8px;">
+            <p style="margin:0 0 16px;font-size:16px;color:#1e293b;">${saludo}</p>
+            <p style="margin:0 0 16px;font-size:15px;color:#475569;line-height:1.7;">Te compartimos nuestro contrato de servicios para que lo revises con calma antes de empezar. Es el mismo que firmarás: tus datos (nombre, RUC e inversión en anuncios) se completan al contratar.</p>
+            ${params.nota?.trim() ? `<p style="margin:0 0 16px;font-size:15px;color:#475569;line-height:1.7;">${escapar(params.nota.trim()).replace(/\n/g, "<br/>")}</p>` : ""}
+            <div style="text-align:center;margin:28px 0 24px;">
+              <a href="${params.link}" style="display:inline-block;background:linear-gradient(135deg,#e6285c 0%,#85529c 100%);background-color:#e6285c;color:#ffffff;text-decoration:none;padding:14px 36px;border-radius:10px;font-size:15px;font-weight:700;">Ver el contrato</a>
+            </div>
+            <p style="margin:0 0 8px;font-size:14px;color:#64748b;line-height:1.6;">Si tienes dudas sobre alguna cláusula, respóndenos por los canales de Bakano y te la explicamos.</p>
+            <p style="margin:16px 0 24px;font-size:15px;color:#1e293b;font-weight:600;">${escapar(params.enviadoPor?.trim() || "El equipo de Bakano")}</p>
+          </td>
+        </tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+    const { data, error } = await this.client.emails.send({
+      from: "Bakano <team@bakano.ec>",
+      to: params.to,
+      subject: `${params.prueba ? "[Prueba] " : ""}Nuestro contrato de servicios para que lo revises`,
+      html,
+    });
+    if (error) throw new Error(error.message);
+    return { id: data?.id };
+  }
+
+  /**
    * Qué pasó con un correo ya enviado, según Resend: "delivered", "bounced",
    * "opened"... null si no se pudo consultar.
    */
