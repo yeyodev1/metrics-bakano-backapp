@@ -264,6 +264,8 @@ export interface CrmHallazgoVista {
   nombre: string | null;
   telefono: string | null;
   email: string | null;
+  // El frontend lee el contacto agrupado; los campos sueltos quedan por compatibilidad.
+  contacto: { nombre: string; telefono: string; email: string };
   resumen: string;
   porQueEsCierre: string;
   queHacer: string;
@@ -283,6 +285,11 @@ export function vistaHallazgo(h: Pick<ICrmHallazgo, "_id" | "dia" | "tipo" | "ca
     nombre: h.contacto?.nombre ?? null,
     telefono: h.contacto?.telefono ?? null,
     email: h.contacto?.email ?? null,
+    contacto: {
+      nombre: h.contacto?.nombre ?? "",
+      telefono: h.contacto?.telefono ?? "",
+      email: h.contacto?.email ?? "",
+    },
     resumen: h.resumen,
     porQueEsCierre: h.porQueEsCierre,
     queHacer: h.queHacer,
