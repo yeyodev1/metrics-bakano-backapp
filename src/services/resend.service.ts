@@ -1251,6 +1251,81 @@ export class ResendService {
   }
 
   /**
+   * Enlace mágico para conectar el MCP de Bakano con Claude. Lleva el mismo
+   * código corto que se ve en la pantalla de mcp.bakano.ec: si no coinciden,
+   * alguien más pidió el acceso con este correo y no hay que tocar el botón.
+   */
+  async sendMcpMagicLink(params: {
+    to: string;
+    recipientName?: string;
+    enlace: string;
+    codigo: string;
+    cliente: string;
+    expiresInMinutes: number;
+  }): Promise<void> {
+    const { to, recipientName, enlace, codigo, cliente, expiresInMinutes } = params;
+    const firstName = recipientName ? recipientName.split(" ")[0] : "Hola";
+
+    const html = `<!DOCTYPE html>
+<html lang="es">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+<body style="margin:0;padding:0;background:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="padding:40px 20px;">
+    <tr><td align="center">
+      <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
+
+        ${barraMarca()}
+        <tr>
+          <td style="background:linear-gradient(135deg,#e6285c 0%,#85529c 100%);padding:32px 40px;text-align:center;">
+            <h1 style="margin:12px 0 0;font-size:24px;font-weight:800;color:#ffffff;">Conecta Bakano con ${cliente}</h1>
+          </td>
+        </tr>
+
+        <tr>
+          <td style="padding:32px 40px 24px;">
+            <p style="margin:0 0 20px;font-size:16px;color:#1e293b;">${firstName},</p>
+            <p style="margin:0 0 20px;font-size:15px;color:#475569;line-height:1.7;">
+              Pediste entrar al MCP del equipo de Bakano desde <strong>${cliente}</strong>. Revisa que el código sea el mismo que ves en la pantalla y toca el botón.
+            </p>
+
+            <div style="text-align:center;margin-bottom:24px;">
+              <p style="margin:0 0 20px;display:inline-block;background:#f8fafc;border:1.5px solid #e2e8f0;border-radius:12px;padding:12px 28px;font-size:26px;font-weight:800;letter-spacing:6px;color:#1e293b;">${codigo}</p>
+              <br/>
+              <a href="${enlace}" style="display:inline-block;background:linear-gradient(135deg,#e6285c 0%,#85529c 100%);color:#ffffff;text-decoration:none;padding:14px 36px;border-radius:10px;font-size:15px;font-weight:700;">
+                Sí, soy yo: conectar
+              </a>
+              <p style="margin:12px 0 0;font-size:12px;color:#94a3b8;">Vence en ${expiresInMinutes} minutos y sirve una sola vez. Puedes abrirlo desde el celular.</p>
+            </div>
+
+            <div style="background:#fef2f2;border:1.5px solid #fecaca;border-radius:12px;padding:16px 20px;">
+              <p style="margin:0;font-size:14px;color:#991b1b;line-height:1.6;">
+                <strong>¿No fuiste tú o el código no coincide?</strong> No toques el botón. Sin ese clic nadie entra con tu cuenta.
+              </p>
+            </div>
+          </td>
+        </tr>
+
+        <tr>
+          <td style="background:#f8fafc;padding:16px 40px;border-top:1px solid #e2e8f0;text-align:center;">
+            <p style="margin:0;color:#94a3b8;font-size:12px;">Solo para el equipo interno de Bakano · <a href="https://mcp.bakano.ec" style="color:#94a3b8;">mcp.bakano.ec</a></p>
+          </td>
+        </tr>
+
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+
+    await this.client.emails.send({
+      from: this.from,
+      to,
+      subject: `${codigo} · Conecta Bakano con ${cliente}`,
+      html,
+    });
+  }
+
+  /**
    * Bakanology va incluido mientras el cliente siga con Bakano.
    *
    * Se puede mandar cuando haga falta: al dar el acceso, cuando alguien
