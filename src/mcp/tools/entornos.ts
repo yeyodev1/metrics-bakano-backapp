@@ -345,4 +345,55 @@ export const toolsEntornos: ToolMcp[] = [
       return { quitado: true, persona: p.email, entorno: ref.name, cuentaBorrada: !otros };
     },
   },
+  {
+    nombre: "contrasena_persona_entorno",
+    titulo: "Crear la contraseña de alguien del entorno",
+    descripcion:
+      "Le pone una contraseña nueva a una persona de un entorno (la de antes deja de servir). Si no das una, se genera una fácil de dictar. Te la muestra para que se la pases, y con enviar_correo=true le llega además el correo de acceso con su usuario y contraseña. Confirma con quien lo pide antes. Solo superadmin.",
+    perfiles: ["direccion"],
+    soloSuperadmin: true,
+    escribe: true,
+    entrada: {
+      cliente: z.string().describe("Nombre o id del entorno"),
+      correo: z.string().email().describe("Correo de la persona"),
+      contrasena: z.string().min(8).max(64).optional().describe("Mínimo 8 caracteres. Si no se da, se genera"),
+      enviar_correo: z.boolean().optional().describe("Mandarle el correo de acceso con la contraseña"),
+    },
+    async correr(a) {
+      const ref = await resolverCliente(a.cliente);
+      const correo = String(a.correo).toLowerCase().trim();
+      const p: any = await models.users
+        .findOne({ email: correo, $or: [{ "workspaces.workspaceId": ref._id }, { workspaceId: ref._id }] })
+        .select("name email role isInternal")
+        .lean();
+      if (!p) throw new Error(`${correo} no está en ${ref.name}. Revisa con ver_personas_entorno.`);
+      if (p.role === "superadmin") throw new Error("Es superadmin: su contraseña no se cambia desde aquí.");
+      const contrasena = a.contrasena ?? contrasenaFacil();
+      await workspaceService.updateUser(String(ref._id), String(p._id), { password: contrasena }).catch(traducir);
+      let correoEnviado = false;
+      if (a.enviar_correo) {
+        if (await correoBloqueado(correo)) throw new Error("La contraseña quedó cambiada, pero ese contacto está bloqueado: no se le envía correo.");
+        await resendService.sendWelcomeEmail({ to: correo, recipientName: p.name, email: correo, password: contrasena, isInternal: p.isInternal === true });
+        correoEnviado = true;
+      }
+      return {
+        listo: true,
+        entorno: ref.name,
+        persona: `${p.name || "sin nombre"} <${correo}>`,
+        usuario: correo,
+        contrasena,
+        entraEn: "https://metrics.bakano.ec",
+        correoEnviado,
+        aviso: "La contraseña anterior ya no sirve. Compártela por un canal privado.",
+      };
+    },
+  },
 ];
+
+/** 3 bloques de 4 sin letras que se confunden (l, 1, o, 0): se dicta sin errores. */
+function contrasenaFacil(): string {
+  const letras = "abcdefghjkmnpqrstuvwxyz23456789";
+  const bytes = crypto.randomBytes(12);
+  const t = Array.from(bytes, (b) => letras[b % letras.length]).join("");
+  return `${t.slice(0, 4)}-${t.slice(4, 8)}-${t.slice(8, 12)}`;
+}

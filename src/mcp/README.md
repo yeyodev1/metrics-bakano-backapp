@@ -45,6 +45,8 @@ entornos en la plataforma es de superadmin, así que a él no le aparecen.
   nueva, contraseña aleatoria + correo de bienvenida; arranca onboarding, bot y Bakanology),
   `quitar_persona_entorno` (sin token muestra el impacto y da token; con token aplica `deleteUser`,
   que borra la cuenta si era su único entorno). Los contactos bloqueados no se agregan.
+  `contrasena_persona_entorno`: pone contraseña (dada o generada `xxxx-xxxx-xxxx`) con `updateUser`, la devuelve
+  y opcionalmente manda el correo de acceso. La auditoría guarda `***` en lugar de contraseñas.
 
 ## Correos (solo superadmin)
 
