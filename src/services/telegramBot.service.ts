@@ -4,7 +4,7 @@ import models from "../models";
 import type { ITelegramChat } from "../models/telegramChat.model";
 import { resendService } from "./resend.service";
 import { EQUIPO_ATENCION, equipoAtencionService, type TemaAtencion } from "./equipoAtencion.service";
-import { atencionClienteService, diaEcuador, fechaEcuador, horarioCorto } from "./atencionCliente.service";
+import { atencionClienteService, DIAS_ARIANA_A_PRODUCCION, diaEcuador, fechaEcuador, horarioCorto } from "./atencionCliente.service";
 import { onboardingBotService } from "./onboardingBot.service";
 import { produccionPlanificacionService } from "./produccionPlanificacion.service";
 import { contenidoClienteService } from "./contenidoCliente.service";
@@ -901,7 +901,9 @@ export class TelegramBotService {
       estado.reserva ? `\n${contenidoClienteService.enTexto(estado.reserva)}` : "",
       // Grabamos hasta quedarnos sin contenido: si ya no queda nada escrito
       // por grabar, no se le dice "espera al mes que viene".
-      estado.sinContenido
+      estado.bloqueo === "falta_ariana"
+        ? `\n👉 Tu primera producción se agenda <b>después de tu reunión con Ariana</b> (al menos ${DIAS_ARIANA_A_PRODUCCION} días después): ahí definimos qué grabamos y ella prepara tus guiones.`
+        : estado.sinContenido
         ? "\n👉 <b>Toca agendar la siguiente ya</b>: cuando salga lo que está en edición, no queda nada más que publicar."
         : estado.puedeAgendar && estado.habilitadaDesde
           ? `\nPuedes agendar la siguiente desde el ${fechaEcuador(estado.habilitadaDesde)}.`
@@ -914,6 +916,7 @@ export class TelegramBotService {
       [{ text: "📅 Ver mi calendario en Metrics", url: `${APP_URL}/app/workspaces/${chat.workspaceId}/planning` }],
     ];
     if (estado.puedeAgendar) botones.push([{ text: "🎬 Agendar mi producción", callback_data: "ag:produccion" }]);
+    else if (estado.bloqueo === "falta_ariana") botones.push([{ text: "📝 Agendar con Ariana", callback_data: "onb:levantamiento" }]);
     else if (proximas.length) botones.push([{ text: "🗓️ Mover o cancelar", callback_data: "citas:ver" }]);
     botones.push([{ text: "📋 Volver al menú", callback_data: "menu:ver" }]);
 
@@ -1490,11 +1493,26 @@ export class TelegramBotService {
   private async mostrarHorariosOnboarding(chat: ITelegramChat, sesion: SesionOnboarding, aviso?: string): Promise<void> {
     if (!(sesion in SESIONES_ONBOARDING)) return this.mostrarOnboarding(chat);
     const def = SESIONES_ONBOARDING[sesion];
-    const crudos = await onboardingBotService.horarios(sesion);
+    const crudos = await onboardingBotService.horarios(sesion, chat.workspaceId);
     const { horarios, quitados } = crudos?.length
       ? await citasClienteService.sinChoques(chat, crudos)
       : { horarios: crudos || [], quitados: 0 };
     const intro = aviso ? `${aviso}\n\n` : "";
+
+    // Ya tiene producción y no queda ningún horario de Ariana 4 días antes: hay que mover la producción.
+    const limite = await onboardingBotService.limiteAriana(sesion, chat.workspaceId);
+    if (limite && crudos && !horarios?.length) {
+      await telegramService.sendMessage(
+        chat.chatId,
+        `${intro}📝 Tu reunión con <b>Ariana</b> tiene que ser al menos <b>${DIAS_ARIANA_A_PRODUCCION} días antes de tu producción</b>, para que ella alcance a preparar tus guiones.\n\n` +
+          `Ya no quedan horarios de Ariana hasta el ${fechaEcuador(limite)}, así que lo mejor es <b>mover tu producción</b> unos días. ¿La movemos?`,
+        [
+          [{ text: "🔄 Mover mi producción", callback_data: "citas:cambiar" }],
+          [{ text: "📋 Volver al menú", callback_data: "menu:ver" }],
+        ]
+      );
+      return;
+    }
 
     if (!horarios || !horarios.length) {
       await telegramService.sendMessage(
@@ -1840,6 +1858,9 @@ export class TelegramBotService {
       if (r.motivo === "ocupado" || r.motivo === "pasado") {
         return this.mostrarHorariosOnboarding(chat, sesion, "Uy, ese horario lo tomaron justo ahora 😕");
       }
+      if (r.motivo === "muy_cerca_de_produccion") {
+        return this.mostrarHorariosOnboarding(chat, sesion, `Ese horario queda a menos de ${DIAS_ARIANA_A_PRODUCCION} días de tu producción 😕`);
+      }
       const def = SESIONES_ONBOARDING[sesion];
       await telegramService.sendMessage(
         chat.chatId,
@@ -1870,6 +1891,20 @@ export class TelegramBotService {
     const nombres = escaparHtml(equipoAtencionService.nombres("produccion"));
     const intro = aviso ? `${aviso}\n\n` : "";
 
+    if (estado.bloqueo === "falta_ariana") {
+      await telegramService.sendMessage(
+        chat.chatId,
+        `${intro}🎬 Tu producción va <b>después de tu reunión con Ariana Vera</b>.\n\n` +
+          "En esa reunión definimos qué vamos a grabar, y Ariana necesita unos días para escribir tus guiones. " +
+          `Por eso la producción se agenda al menos <b>${DIAS_ARIANA_A_PRODUCCION} días después</b> de hablar con ella.\n\n` +
+          "Agendemos primero con Ariana 👇",
+        [
+          [{ text: "📝 Agendar con Ariana", callback_data: "onb:levantamiento" }],
+          [{ text: "📋 Volver al menú", callback_data: "menu:ver" }],
+        ]
+      );
+      return;
+    }
     if (!estado.puedeAgendar) {
       chat.tema = "produccion";
       await chat.save();
@@ -1905,7 +1940,9 @@ export class TelegramBotService {
           ? `Tu última producción fue el ${fechaEcuador(estado.ultima)} y grabamos <b>una cada 6 meses</b>, así que te muestro horarios desde el <b>${fechaEcuador(estado.habilitadaDesde!)}</b>.\n\n`
           : estado.porEstrategia
             ? "El equipo habilitó una producción antes de tiempo porque tu estrategia lo pide 🎯\n\n"
-            : "";
+            : estado.porAriana
+              ? `Te muestro horarios desde el <b>${fechaEcuador(estado.porAriana)}</b>: al menos ${DIAS_ARIANA_A_PRODUCCION} días después de tu reunión con Ariana, para llegar con tus guiones listos.\n\n`
+              : "";
     const botones = this.botonesHorarios(horarios, (h) => `prod:${Math.floor(h.getTime() / 1000)}`);
     botones.push([{ text: "✍️ Prefiero escribirles", callback_data: "menu:produccion" }]);
 

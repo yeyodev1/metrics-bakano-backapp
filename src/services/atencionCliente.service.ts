@@ -76,6 +76,36 @@ export function desdeParaProduccion(ahora = new Date()): Date {
 }
 const VENTANA_PRODUCCION_DIAS = 30;
 
+/**
+ * La primera producción va al menos 4 días después de la reunión con Ariana:
+ * ahí se define qué se va a grabar, y ella necesita esos días para escribir
+ * los guiones. Antes el cliente podía agendar la producción sin haber hablado
+ * con Ariana y se llegaba a grabar sin guiones.
+ */
+export const DIAS_ARIANA_A_PRODUCCION = 4;
+
+/** 00:00 de Ecuador del día de `d` (Ecuador es UTC-5 todo el año). */
+function inicioDiaEcuador(d: Date): Date {
+  const ec = new Date(d.getTime() - 5 * 3_600_000);
+  return new Date(Date.UTC(ec.getUTCFullYear(), ec.getUTCMonth(), ec.getUTCDate(), 5, 0, 0));
+}
+
+export interface ReglaAriana {
+  /** Primera producción, sin excepción del equipo y con Ariana que aplica. */
+  aplica: boolean;
+  /** La reunión con Ariana está agendada o ya se hizo. */
+  tieneAriana: boolean;
+  fechaAriana?: Date;
+  /** Desde cuándo puede ir la producción (día de Ariana + 4, a las 00:00). */
+  produccionDesde?: Date;
+  /** Primera producción ya agendada, si la hay. */
+  produccion?: Date;
+  /** Hasta cuándo puede ir Ariana si la producción ya está agendada. */
+  arianaHasta?: Date;
+  /** La producción agendada queda a menos de 4 días de Ariana (o sin Ariana). */
+  incumple: boolean;
+}
+
 export interface DatosCliente {
   entorno: string;
   nombre: string;
@@ -105,11 +135,15 @@ export interface EstadoProduccion {
   reserva?: ReservaContenido | null;
   /** Se quedo sin guiones por grabar: la espera entre producciones no aplica. */
   sinContenido?: boolean;
+  /** Por qué no puede agendar: ya tiene una, o le falta la reunión con Ariana. */
+  bloqueo?: "ya_agendada" | "falta_ariana";
+  /** La fecha permitida la pone la reunión con Ariana (+4 días). */
+  porAriana?: Date;
 }
 
 export type ResultadoProduccion =
   | { ok: true; cuando: string; planificacion?: { tienePlanificacion: boolean; guiones: number; listaParaCliente: boolean } | null }
-  | { ok: false; motivo: "sin_calendario" | "en_curso" | "ya_agendada" | "antes_de_tiempo" | "ocupado" | "error" };
+  | { ok: false; motivo: "sin_calendario" | "en_curso" | "ya_agendada" | "falta_ariana" | "antes_de_tiempo" | "ocupado" | "error" };
 
 function sumarMeses(fecha: Date, meses: number): Date {
   const r = new Date(fecha);
@@ -213,14 +247,73 @@ class AtencionClienteService {
 
   // ── Produccion ─────────────────────────────────────────────────────────────
   /** Regla de agenda de produccion, calculada siempre en el servidor. */
+  /**
+   * La regla de Ariana para este entorno. Solo aplica a la PRIMERA producción
+   * (los que ya grabaron no vuelven a pasar por el levantamiento), y no aplica
+   * si Ariana marcó su sesión como "no aplica" o el equipo abrió una excepción.
+   */
+  async reglaAriana(workspaceId: Types.ObjectId): Promise<ReglaAriana> {
+    const ahora = new Date();
+    const [previa, proxima, entorno] = await Promise.all([
+      models.planning.exists({ workspaceId, date: { $lt: ahora }, title: { $not: /^CANCELADA/ }, cancelada: { $ne: true } }),
+      models.planning.findOne({ workspaceId, date: { $gte: ahora }, title: { $not: /^CANCELADA/ }, cancelada: { $ne: true } }).sort({ date: 1 }).select("date").lean(),
+      models.workspaces.findById(workspaceId).select("produccion onboardingSesiones.levantamiento").lean(),
+    ]);
+    const lev = (entorno as any)?.onboardingSesiones?.levantamiento;
+    const excepcion = (entorno as any)?.produccion?.excepcionHasta;
+    const conExcepcion = Boolean(excepcion && new Date(excepcion).getTime() > ahora.getTime());
+    const aplica = !previa && !conExcepcion && lev?.estado !== "no_aplica";
+    const tieneAriana = Boolean(lev?.agendada || lev?.estado === "cumplida");
+    const fechaAriana = lev?.fecha ? new Date(lev.fecha) : undefined;
+    const produccionDesde = fechaAriana ? new Date(inicioDiaEcuador(fechaAriana).getTime() + DIAS_ARIANA_A_PRODUCCION * 86_400_000) : undefined;
+    const produccion = proxima?.date ? new Date(proxima.date) : undefined;
+    // Ariana puede ir hasta el final del día que queda 4 días antes de la producción.
+    const arianaHasta = produccion ? new Date(inicioDiaEcuador(produccion).getTime() - (DIAS_ARIANA_A_PRODUCCION - 1) * 86_400_000 - 1) : undefined;
+    const incumple = Boolean(aplica && produccion && (!tieneAriana || (produccionDesde && produccion.getTime() < produccionDesde.getTime())));
+    return { aplica, tieneAriana, fechaAriana, produccionDesde, produccion, arianaHasta, incumple };
+  }
+
+  /**
+   * Si la primera producción quedó sin reunión con Ariana, o a menos de 4
+   * días de ella, avisa al equipo. Pasa cuando alguien agenda directo por el
+   * link del CRM, que no conoce la regla. No cambia ninguna cita: eso lo
+   * decide el equipo con el cliente.
+   */
+  async alertarReglaAriana(workspaceId: Types.ObjectId, contexto: string): Promise<void> {
+    try {
+      const regla = await this.reglaAriana(workspaceId);
+      if (!regla.incumple || !regla.produccion) return;
+      const w: any = await models.workspaces.findById(workspaceId).select("name").lean();
+      const nombre = w?.name || "Cliente";
+      const titulo = `Producción sin tiempo para guiones · ${nombre}`;
+      const detalle =
+        `${contexto}. La producción es el ${fechaEcuador(regla.produccion)} y ` +
+        (regla.tieneAriana && regla.fechaAriana
+          ? `la reunión con Ariana es el ${fechaEcuador(regla.fechaAriana)}: quedan menos de ${DIAS_ARIANA_A_PRODUCCION} días para los guiones.`
+          : "todavía no tiene reunión con Ariana.") +
+        ` La regla: primero Ariana y la producción al menos ${DIAS_ARIANA_A_PRODUCCION} días después. Coordinen con el cliente mover la producción o adelantar a Ariana.`;
+      const correos = [...new Set([...equipoAtencionService.correos("atencion"), ...equipoAtencionService.correos("produccion"), ...equipoAtencionService.correos("guiones")])];
+      const usuarios = await models.users.find({ email: { $in: correos }, isActive: { $ne: false } }).select("_id").lean();
+      await Promise.all([
+        ...usuarios.map((u) => notificationService.create(u._id as Types.ObjectId, "produccion_agendada", titulo, detalle, { workspaceId })),
+        slackService.avisarEquipo({ titulo, detalle, correos }).catch(() => false),
+      ]);
+    } catch (error: any) {
+      console.warn("[Regla Ariana] aviso falló:", error?.message || error);
+    }
+  }
+
   async estadoProduccion(workspaceId: Types.ObjectId): Promise<EstadoProduccion> {
     const ahora = new Date();
-    const [proxima, ultima, entorno] = await Promise.all([
+    const [proxima, ultima, entorno, ariana] = await Promise.all([
       models.planning.findOne({ workspaceId, date: { $gte: ahora }, title: { $not: /^CANCELADA/ }, cancelada: { $ne: true } }).sort({ date: 1 }).select("date").lean(),
       models.planning.findOne({ workspaceId, date: { $lt: ahora }, title: { $not: /^CANCELADA/ }, cancelada: { $ne: true } }).sort({ date: -1 }).select("date").lean(),
       models.workspaces.findById(workspaceId).select("produccion").lean(),
+      this.reglaAriana(workspaceId),
     ]);
-    if (proxima) return { puedeAgendar: false, proxima: proxima.date, ultima: ultima?.date };
+    if (proxima) return { puedeAgendar: false, bloqueo: "ya_agendada", proxima: proxima.date, ultima: ultima?.date };
+    // Primera producción: primero la reunión con Ariana.
+    if (ariana.aplica && !ariana.tieneAriana) return { puedeAgendar: false, bloqueo: "falta_ariana" };
 
     // La espera entre producciones existe para no grabar de mas. Si ya no
     // queda nada escrito por grabar, esperar es justo lo contrario de lo que
@@ -233,10 +326,12 @@ class AtencionClienteService {
     const conExcepcion = excepcion && new Date(excepcion).getTime() > ahora.getTime();
     const porRegla = ultima && !sinContenido && !conExcepcion ? sumarMeses(ultima.date, MESES_ENTRE_PRODUCCIONES) : ahora;
     const minimo = desdeParaProduccion(ahora).getTime();
+    const porAriana = ariana.aplica && ariana.produccionDesde && ariana.produccionDesde.getTime() > Math.max(porRegla.getTime(), minimo) ? ariana.produccionDesde : undefined;
     return {
       puedeAgendar: true,
       ultima: ultima?.date,
-      habilitadaDesde: new Date(Math.max(porRegla.getTime(), minimo)),
+      habilitadaDesde: new Date(Math.max(porRegla.getTime(), minimo, porAriana?.getTime() ?? 0)),
+      porAriana,
       esperar: porRegla.getTime() > minimo,
       mesesEntre: MESES_ENTRE_PRODUCCIONES,
       porEstrategia: Boolean(conExcepcion),
@@ -278,7 +373,7 @@ class AtencionClienteService {
     try {
       // La regla se vuelve a validar aqui: ni el menu ni la IA la pueden saltar.
       const estado = await this.estadoProduccion(chat.workspaceId!);
-      if (!estado.puedeAgendar) return { ok: false, motivo: "ya_agendada" };
+      if (!estado.puedeAgendar) return { ok: false, motivo: estado.bloqueo === "falta_ariana" ? "falta_ariana" : "ya_agendada" };
       if (inicio.getTime() < estado.habilitadaDesde!.getTime() - 60_000) return { ok: false, motivo: "antes_de_tiempo" };
 
       const cliente = await this.datosCliente(chat);

@@ -4,6 +4,7 @@ import { Types } from "mongoose";
 import models from "../../models";
 import { PlanningService } from "../../services/planning.service";
 import { VideoPlanningService } from "../../services/videoPlanning.service";
+import { atencionClienteService } from "../../services/atencionCliente.service";
 import type { PerfilMcp, UsuarioMcp } from "../perfiles";
 import { fecha, leerFecha, recortar, resolverCliente, type ToolMcp } from "./base";
 
@@ -55,6 +56,12 @@ async function evaluarCambio(a: any, u: UsuarioMcp) {
       bloqueos.push(`La producción se agenda con al menos ${ANTICIPACION_PRODUCCION_H} h de anticipación.`);
     }
     if (p.source === "crm") advertencias.push("Viene del CRM: se mueve también la cita en GoHighLevel.");
+    const ariana = await atencionClienteService.reglaAriana(p.workspaceId?._id).catch(() => null);
+    if (ariana?.aplica) {
+      if (!ariana.tieneAriana) advertencias.push("Es su primera producción y todavía no tiene reunión con Ariana: la regla es Ariana primero y la producción al menos 4 días después.");
+      else if (ariana.produccionDesde && nueva.getTime() < ariana.produccionDesde.getTime())
+        advertencias.push(`Queda a menos de 4 días de su reunión con Ariana (${fecha(ariana.fechaAriana)}): la producción debería ir desde el ${fecha(ariana.produccionDesde, false)} para llegar con guiones.`);
+    }
     advertencias.push("Al moverla se avisa a Ariana y a la content del cliente (in-app y correo) para que los videos estén listos para la nueva fecha.");
     const vp: any = await planningDeLaProduccion(p._id);
     if (vp?.items?.length && !vp.clienteAprobado) {

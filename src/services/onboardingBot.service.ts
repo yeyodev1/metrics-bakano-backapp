@@ -67,7 +67,7 @@ export interface EstadoOnboarding {
 
 export type ResultadoAgenda =
   | { ok: true; cuando: string; responsable: string }
-  | { ok: false; motivo: "ya_agendada" | "sin_calendario" | "ocupado" | "error" | "en_curso" | "pasado" };
+  | { ok: false; motivo: "ya_agendada" | "sin_calendario" | "ocupado" | "error" | "en_curso" | "pasado" | "muy_cerca_de_produccion" };
 
 function normalizar(texto: string): string {
   return (texto || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -115,19 +115,32 @@ class OnboardingBotService {
     };
   }
 
-  async horarios(sesion: SesionOnboarding): Promise<Date[] | null> {
+  /**
+   * Horarios libres del responsable. Con `workspaceId`, la reunión con Ariana
+   * solo se ofrece hasta 4 días antes de la primera producción ya agendada.
+   */
+  async horarios(sesion: SesionOnboarding, workspaceId?: Types.ObjectId): Promise<Date[] | null> {
     if (!ghlService.isConfigured()) return null;
     try {
       const desde = new Date(Date.now() + ANTICIPACION_MS);
-      return await ghlService.getFreeSlots(
+      const libres = await ghlService.getFreeSlots(
         SESIONES_ONBOARDING[sesion].calendarioId,
         desde,
         new Date(desde.getTime() + DIAS_AGENDA_ONBOARDING * 86_400_000)
       );
+      const hasta = await this.limiteAriana(sesion, workspaceId);
+      return hasta ? libres.filter((h) => h.getTime() <= hasta.getTime()) : libres;
     } catch (error: any) {
       console.error("[Onboarding] horarios:", error.response?.data || error.message);
       return [];
     }
+  }
+
+  /** Hasta cuándo puede ir la reunión con Ariana (null: sin límite). */
+  async limiteAriana(sesion: SesionOnboarding, workspaceId?: Types.ObjectId): Promise<Date | null> {
+    if (sesion !== "levantamiento" || !workspaceId) return null;
+    const regla = await atencionClienteService.reglaAriana(workspaceId).catch(() => null);
+    return regla?.aplica && regla.arianaHasta ? regla.arianaHasta : null;
   }
 
   /** Agenda la sesion en el calendario del responsable y avisa. */
@@ -136,6 +149,8 @@ class OnboardingBotService {
 
     const workspaceId = chat.workspaceId!;
     if (inicio.getTime() < Date.now()) return { ok: false, motivo: "pasado" };
+    const limite = await this.limiteAriana(sesion, workspaceId);
+    if (limite && inicio.getTime() > limite.getTime()) return { ok: false, motivo: "muy_cerca_de_produccion" };
     const estado = await this.estado(workspaceId);
     if (estado.sesiones.find((s) => s.sesion === sesion)?.agendada) return { ok: false, motivo: "ya_agendada" };
 
@@ -218,6 +233,10 @@ class OnboardingBotService {
         },
       }
     );
+    // La reunión con Ariana puede haber quedado pegada a una producción ya agendada.
+    if (sesion === "levantamiento") {
+      await atencionClienteService.alertarReglaAriana(workspaceId, `Se agendó la reunión con Ariana (${datos.origen === "link" ? "por el link" : "por Telegram"})`);
+    }
     // El estado lo decide el responsable si ya lo toco (bloqueada, cumplida,
     // no aplica); solo si no, pasa a "agendada".
     await models.workspaces.updateOne(

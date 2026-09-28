@@ -599,6 +599,12 @@ class CrmProductionSyncService {
     } catch (err: any) {
       console.warn("[CRM Producción] aviso falló:", err.message);
     }
+    // Agendada por el link del CRM, la regla de Ariana no se pudo aplicar: se avisa si no se cumple.
+    // Import al vuelo: atencionCliente importa este servicio.
+    if (tipo !== "cancelada") {
+      const { atencionClienteService } = await import("./atencionCliente.service");
+      await atencionClienteService.alertarReglaAriana(entry.workspaceId as Types.ObjectId, `Se ${tipo === "creada" ? "agendó" : "movió"} la producción desde el CRM`);
+    }
     // Contenido se entera siempre, con cuántos guiones hay y hasta cuándo corrige el cliente.
     await avisoContenidoProduccionService.avisar({
       entryId: entry._id as Types.ObjectId,
