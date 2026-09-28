@@ -1310,14 +1310,19 @@ export class TelegramBotService {
   }
 
   private async reenviarContratoAlCorreo(chat: ITelegramChat): Promise<void> {
-    const r = await contratoChatService.reenviarPorCorreo(chat).catch(() => ({ ok: false, motivo: "error" }) as { ok: boolean; motivo?: string; correo?: string });
+    const r = await contratoChatService.enviarPorCorreo(chat).catch(() => ({ ok: false, motivo: "error" }) as Awaited<ReturnType<typeof contratoChatService.enviarPorCorreo>>);
     const texto = r.ok
-      ? `Listo 📧 Te lo reenvié a <b>${escaparHtml(r.correo || "")}</b>. Si no lo ves, revisa el spam.`
+      ? `Listo 📧 Te lo mandé a <b>${escaparHtml(r.correo || "")}</b> desde team@bakano.ec${r.firmado ? "" : ", con el enlace para firmarlo"}. Si no lo ves en unos minutos, revisa el spam.`
       : r.motivo === "reciente"
         ? `Te lo acabo de mandar a <b>${escaparHtml(r.correo || "")}</b> 📧 Dale unos minutos y revisa el spam.`
-        : r.motivo === "sin_firmar"
-          ? "Tu contrato todavía no está firmado: te llega al correo apenas lo firmes."
-          : "No pude reenviarlo ahora 😕 Inténtalo en un momento o pídeselo a tu equipo.";
+        : r.motivo === "sin_correo"
+          ? "No tengo un correo tuyo para el contrato. Escríbeme a qué correo te lo mando."
+          : "No pude mandarlo ahora 😕 Ya le avisé a tu equipo para que te lo envíe.";
+    if (!r.ok && r.motivo === "error") {
+      await atencionClienteService
+        .enviarMensaje(chat, "atencion", `[Aviso del bot] No salió el correo con el contrato${r.correo ? ` a ${r.correo}` : ""}. Mándaselo a mano.`)
+        .catch(() => {});
+    }
     await telegramService.sendMessage(chat.chatId, texto, [[{ text: "📋 Volver al menú", callback_data: "menu:ver" }]]);
   }
 
