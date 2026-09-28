@@ -43,6 +43,16 @@ export interface IBrandProfile {
   ticketPromedio?: string;
   porQueTeCompran?: string;
   halagoComun?: string;
+  /**
+   * Lo que el negocio le cuenta a Lucas (el agente de ventas por WhatsApp):
+   * precios y condiciones, cómo cobra y reglas de venta. Es la misma
+   * información en Metrics y en Lucas: se edita en cualquiera de los dos.
+   */
+  infoVentas?: string;
+  datosPago?: string;
+  reglasVenta?: string[];
+  ventasActualizadoEn?: Date;
+  ventasFuente?: "lucas" | "metrics";
   archivos: IBrandProfileFile[];
   segmentosMercado?: ISegmentoMercado[];
   canalesDetail?: string[];
@@ -292,6 +302,11 @@ const BrandProfileSchema = new Schema(
     ticketPromedio: { type: String, trim: true },
     porQueTeCompran: { type: String, trim: true },
     halagoComun: { type: String, trim: true },
+    infoVentas: { type: String, trim: true },
+    datosPago: { type: String, trim: true },
+    reglasVenta: { type: [String], default: undefined },
+    ventasActualizadoEn: { type: Date },
+    ventasFuente: { type: String, enum: ["lucas", "metrics"] },
     archivos: { type: [BrandProfileFileSchema], default: [] },
     segmentosMercado: { type: [SegmentoMercadoSchema], default: [] },
     canalesDetail: { type: [String], default: [] },

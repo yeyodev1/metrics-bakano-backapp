@@ -21,6 +21,7 @@ import { revisionGuionesService, type RevisionPendiente } from "./revisionGuione
 import { SESIONES_ONBOARDING, type SesionOnboarding } from "./onboardingSesiones.service";
 import { telegramAgentService } from "./telegramAgent.service";
 import { comoDolares, pagosClienteService } from "./pagosCliente.service";
+import { crmIntegracionService, linkIntegraciones } from "./crmIntegracion.service";
 import { escaparHtml, telegramService, type InlineButton, type TelegramUpdate } from "./telegram.service";
 
 /**
@@ -662,6 +663,7 @@ export class TelegramBotService {
     if (data === "menu:equipo") return this.mostrarEquipo(chat);
     if (data === "fact:ver") return this.mostrarFacturacion(chat);
     if (data === "pago:ver") return this.mostrarPagos(chat);
+    if (data === "crm:ver") return this.mostrarCrm(chat);
     if (data.startsWith("pago:f:")) return this.mandarLinkDePago(chat, data.slice(7));
     if (data.startsWith("sub:")) return this.pedirArchivo(chat, data.slice(4) as CategoriaRecurso);
     if (data === "fact:metricas") {
@@ -2093,7 +2095,7 @@ export class TelegramBotService {
   }
 
   private async mostrarMenu(chat: ITelegramChat, nombreEntorno?: string, saludo?: string): Promise<void> {
-    const [nombre, pagos] = await Promise.all([
+    const [nombre, pagos, crm] = await Promise.all([
       nombreEntorno ??
         models.workspaces
           .findById(chat.workspaceId)
@@ -2101,7 +2103,10 @@ export class TelegramBotService {
           .lean()
           .then((w) => w?.name ?? "tu entorno"),
       pagosClienteService.estado(String(chat.workspaceId)),
+      // Si no se puede leer, el botón simplemente no aparece.
+      chat.workspaceId ? crmIntegracionService.estado(chat.workspaceId).catch(() => undefined) : Promise.resolve(undefined),
     ]);
+    const crmPorConectar = crm === null || crm?.estado === "error";
     // Con saldo pendiente, el pago va arriba del menú: es lo primero que ve.
     const pago =
       pagos.saldo > 0
@@ -2129,8 +2134,59 @@ export class TelegramBotService {
         [{ text: "💬 Escribirle a mi equipo", callback_data: "menu:atencion" }],
         [{ text: "👥 Quién es quién en Bakano", callback_data: "menu:equipo" }],
         [{ text: "🔑 Mis accesos y contraseñas", callback_data: "acceso:ver" }],
+        ...(crmPorConectar ? [[{ text: "🔌 Conectar mi CRM", callback_data: "crm:ver" }]] : []),
         [{ text: "🔄 Cambiar de entorno", callback_data: "menu:entorno" }],
       ]
+    );
+  }
+
+  /**
+   * Su CRM (GoHighLevel) conectado a Metrics. Sin conectar, se le explica en
+   * corto para qué sirve y se le da el link: el token se pega en la
+   * plataforma, nunca por el chat.
+   */
+  private async mostrarCrm(chat: ITelegramChat): Promise<void> {
+    const volver = [{ text: "📋 Volver al menú", callback_data: "menu:ver" }];
+    if (!chat.workspaceId) return this.mostrarMenu(chat);
+    const link = linkIntegraciones(chat.workspaceId);
+    const crm = await crmIntegracionService.estado(chat.workspaceId);
+
+    if (!crm) {
+      await telegramService.sendMessage(
+        chat.chatId,
+        "Si conectas tu CRM (GoHighLevel), cada mañana reviso tus conversaciones de WhatsApp y tus oportunidades del día anterior " +
+          "y te aviso por aquí de las ventas que quedaron casi cerradas, con un mensaje listo para retomarlas 💪\n\n" +
+          "Toma dos minutos: entras a Metrics, pegas el <b>Location ID</b> y un <b>token de integración privada</b> de tu subcuenta y listo. " +
+          "El token no me lo mandes por aquí: se pega solo en la plataforma, donde queda guardado cifrado.",
+        [[{ text: "🔌 Conectar mi CRM", url: link }], [{ text: "💬 Pedir ayuda a mi equipo", callback_data: "menu:atencion" }], volver]
+      );
+      return;
+    }
+    if (crm.estado === "error") {
+      await telegramService.sendMessage(
+        chat.chatId,
+        "Tu CRM está conectado pero ya no me deja leerlo 😕" +
+          (crm.ultimoError ? `\n\nLo que dice: <i>${escaparHtml(crm.ultimoError)}</i>` : "") +
+          "\n\nEntra a Metrics y vuelve a conectarlo con un token nuevo, así sigo revisándote las ventas cada mañana.",
+        [[{ text: "🔌 Reconectar mi CRM", url: link }], volver]
+      );
+      return;
+    }
+    const whatsapp =
+      crm.whatsapp === "conectado"
+        ? "WhatsApp: conectado ✅"
+        : crm.whatsapp === "no_detectado"
+          ? "WhatsApp: no veo conversaciones de WhatsApp en tu CRM todavía"
+          : "WhatsApp: todavía no lo pude confirmar";
+    await telegramService.sendMessage(
+      chat.chatId,
+      "Tu CRM está conectado ✅\n\n" +
+        `${whatsapp}\n` +
+        (crm.ultimaRevision
+          ? `Última revisión: ${escaparHtml(fechaEcuador(new Date(crm.ultimaRevision)))}`
+          : "La primera revisión sale la próxima mañana a las 9 😉") +
+        "\n\nCada mañana te aviso por aquí si alguna venta quedó casi cerrada.",
+      [[{ text: "🔌 Ver mi CRM en Metrics", url: link }], volver]
     );
   }
 

@@ -4,6 +4,7 @@ import http from "http";
 import routerApi from "./routes";
 import { dbConnect } from "./config/mongo";
 import { globalErrorHandler } from "./middlewares/globalErrorHandler.middleware";
+import mcpRouter, { RUTAS_MCP } from "./routes/mcp.router";
 
 const whitelist = [
   "http://localhost:8100",
@@ -35,7 +36,10 @@ const corsOptions: cors.CorsOptions = {
 export function createApp() {
   const app = express();
 
-  app.use(cors(corsOptions));
+  // El MCP y su OAuth traen su propio CORS (abierto, sin cookies): Claude y el
+  // inspector llaman desde orígenes que no están en la lista de la plataforma.
+  const corsPlataforma = cors(corsOptions);
+  app.use((req, res, next) => (RUTAS_MCP.test(req.path) ? next() : corsPlataforma(req, res, next)));
   app.use(
     express.json({
       limit: "50mb",
@@ -59,6 +63,7 @@ export function createApp() {
     res.send("metrics bakano backapp is alive");
   });
 
+  app.use(mcpRouter);
   routerApi(app);
 
   app.use(globalErrorHandler);

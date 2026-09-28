@@ -25,6 +25,27 @@ export function getBrandProfileCompletionScore(bp: any): number {
   return Math.round(required.filter(Boolean).length / required.length * 100);
 }
 
+/**
+ * Precios y condiciones, datos de pago y reglas de venta: validados igual si
+ * vienen de la web o de Lucas. Solo devuelve lo que llegó.
+ */
+export function limpiarVentas(body: { infoVentas?: unknown; datosPago?: unknown; reglasVenta?: unknown }): {
+  infoVentas?: string;
+  datosPago?: string;
+  reglasVenta?: string[];
+} {
+  const out: { infoVentas?: string; datosPago?: string; reglasVenta?: string[] } = {};
+  if (body.infoVentas !== undefined) out.infoVentas = String(body.infoVentas ?? "").trim().slice(0, 6000);
+  if (body.datosPago !== undefined) out.datosPago = String(body.datosPago ?? "").trim().slice(0, 3000);
+  if (Array.isArray(body.reglasVenta)) {
+    out.reglasVenta = body.reglasVenta
+      .map((r) => String(r ?? "").trim().slice(0, 500))
+      .filter(Boolean)
+      .slice(0, 50);
+  }
+  return out;
+}
+
 // ── GET /:workspaceId/brand-profile ───────────────────────────────────────
 export async function getBrandProfile(
   req: AuthRequest,
@@ -84,6 +105,8 @@ export async function upsertBrandProfile(
       // dropped here, so the wizard reported success while saving nothing —
       // which is why no workspace had a Customer Journey stored.
       segmentosMercado, canalesDetail, actividadesClave, customerJourneyCases,
+      // Ventas por WhatsApp: lo mismo que el negocio le cuenta a Lucas.
+      infoVentas, datosPago, reglasVenta,
     } = req.body;
 
     if (!workspace.brandProfile) {
@@ -100,6 +123,11 @@ export async function upsertBrandProfile(
     if (tono !== undefined) (workspace.brandProfile as any).tono = tono;
     if (productosServicios !== undefined) (workspace.brandProfile as any).productosServicios = productosServicios;
     if (problemaResuelto !== undefined) (workspace.brandProfile as any).problemaResuelto = problemaResuelto;
+
+    const ventas = limpiarVentas({ infoVentas, datosPago, reglasVenta });
+    if (Object.keys(ventas).length) {
+      Object.assign(workspace.brandProfile as any, ventas, { ventasActualizadoEn: new Date(), ventasFuente: "metrics" });
+    }
 
     // ── Strategic schema ───────────────────────────────────────────────────
     // This is what the script generator feeds on. Bad shapes are rejected
