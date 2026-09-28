@@ -2,6 +2,7 @@ import { z } from "zod";
 import { Types } from "mongoose";
 import models from "../../models";
 import { incidentesService } from "../../services/incidentes.service";
+import { lecturaConversacionService } from "../../services/lecturaConversacion.service";
 import type { PerfilMcp, UsuarioMcp } from "../perfiles";
 import { fecha, recortar, resolverCliente, type ToolMcp } from "./base";
 
@@ -79,7 +80,7 @@ export const toolsTelegram: ToolMcp[] = [
     nombre: "ver_conversacion_telegram",
     titulo: "Leer una conversación de Telegram",
     descripcion:
-      "Los últimos mensajes entre un cliente y el bot de Telegram, en orden. El bot guarda los últimos ~20 turnos de cada chat (se borran cuando el cliente cambia de entorno). Perfil Contenido: solo los mensajes de guiones y videos, más el borrador de correcciones.",
+      "Los últimos mensajes entre un cliente y el bot de Telegram, en orden, más los HECHOS del sistema para no quedarte solo con lo que dice el chat: estado del contrato y del último correo que se le mandó, entregables pendientes, avisos que de verdad le llegaron al equipo e incidentes. El bot guarda los últimos ~20 turnos de cada chat. Si te piden explicar por qué se trabó o qué hacer, usa analizar_conversacion_telegram. Perfil Contenido: solo los mensajes de guiones y videos, más el borrador de correcciones.",
     perfiles: TELEGRAM,
     entrada: { cliente: z.string() },
     async correr(a, u) {
@@ -87,8 +88,10 @@ export const toolsTelegram: ToolMcp[] = [
       const chats = await models.telegramChats.find({ workspaceId: ws._id, estado: "listo" }).sort({ updatedAt: -1 }).lean();
       if (!chats.length) return `${ws.name} no tiene a nadie conectado al bot de Telegram en este momento.`;
       const cm = soloContenido(u);
+      const hechos = cm ? undefined : await lecturaConversacionService.hechos(ws._id as Types.ObjectId);
       return {
         cliente: ws.name,
+        ...(hechos ? { hechos, ojo: "Antes de decir que algo sigue pendiente, crúzalo con los hechos: puede haberse resuelto después del chat." } : {}),
         chats: chats.map((c: any) => ({
           quien: nombreChat(c),
           ...(cm ? {} : { animo: c.ultimoAnimo ? { estado: c.ultimoAnimo.estado, motivo: c.ultimoAnimo.motivo, en: fecha(c.ultimoAnimo.en) } : null }),
@@ -97,6 +100,38 @@ export const toolsTelegram: ToolMcp[] = [
             .filter((m: any) => !cm || TEMA_CONTENIDO.test(m.texto || ""))
             .map((m: any) => ({ de: m.rol, texto: recortar(m.texto, 1500), en: fecha(m.en) })),
         })),
+      };
+    },
+  },
+  {
+    nombre: "analizar_conversacion_telegram",
+    titulo: "Explicar qué pasa con un cliente en Telegram",
+    descripcion:
+      "Lectura con IA de la conversación de un cliente con el bot, cruzada con los hechos del sistema: resumen, dónde se trabó y por qué, promesas del bot y si se cumplieron (ej. 'le pasé a Genesis' contra los avisos que de verdad llegaron), qué ya se resolvió después, qué falta del cliente y los siguientes pasos con responsable. Úsala cuando pregunten por qué un cliente se trabó, qué pasó o qué hay que hacer. Tarda unos segundos.",
+    perfiles: ["direccion", "pm"],
+    entrada: { cliente: z.string() },
+    async correr(a) {
+      const ws = await resolverCliente(a.cliente);
+      const chats: any[] = await models.telegramChats.find({ workspaceId: ws._id, estado: "listo" }).sort({ updatedAt: -1 }).lean();
+      const hechos = await lecturaConversacionService.hechos(ws._id as Types.ObjectId);
+      if (!chats.length) return { cliente: ws.name, sinTelegram: true, hechos };
+      const c = chats[0];
+      const mensajes = (c.historial || []).map((m: any) => ({ de: m.rol === "cliente" ? nombreChat(c) : m.rol, texto: recortar(m.texto, 1500) || "", en: fecha(m.en) }));
+      if (!mensajes.length) return { cliente: ws.name, quien: nombreChat(c), sinMensajes: true, hechos };
+      const lectura = await lecturaConversacionService.leer({
+        cliente: ws.name,
+        quien: nombreChat(c),
+        mensajes,
+        hechos,
+        esperandoArchivo: c.archivoEsperado?.categoria ?? null,
+      });
+      return {
+        cliente: ws.name,
+        quien: nombreChat(c),
+        ...(chats.length > 1 ? { otrosChats: chats.slice(1).map(nombreChat) } : {}),
+        lectura,
+        hechos,
+        ultimosMensajes: mensajes.slice(-6),
       };
     },
   },
