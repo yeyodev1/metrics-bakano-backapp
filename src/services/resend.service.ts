@@ -1326,6 +1326,72 @@ export class ResendService {
   }
 
   /**
+   * Correo escrito por alguien del equipo desde el MCP. Sale de la dirección
+   * de solo envío y sin replyTo: el pie lo dice siempre, para que nadie
+   * responda creyendo que alguien lo va a leer. `prueba` agrega una franja
+   * arriba con a quién le va a llegar el de verdad.
+   */
+  async sendCorreoDelEquipo(params: {
+    to: string;
+    asunto: string;
+    mensaje: string;
+    firma: string;
+    prueba?: { destinatarios: string[] };
+  }): Promise<{ id?: string; error?: string }> {
+    const escapar = (t: string) =>
+      t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    const parrafos = params.mensaje
+      .trim()
+      .split(/\n{2,}/)
+      .map((p) => `<p style="margin:0 0 16px;font-size:15px;color:#334155;line-height:1.7;">${escapar(p).replace(/\n/g, "<br/>")}</p>`)
+      .join("");
+    const lista = params.prueba?.destinatarios ?? [];
+    const franjaPrueba = params.prueba
+      ? `<tr><td style="background:#fef3c7;border-bottom:1px solid #fde68a;padding:14px 40px;"><p style="margin:0;font-size:13px;color:#92400e;line-height:1.6;"><strong>Correo de prueba.</strong> Solo te llegó a ti. El de verdad saldrá igual, sin esta franja, a ${lista.length} ${lista.length === 1 ? "persona" : "personas"}: ${escapar(lista.slice(0, 15).join(", "))}${lista.length > 15 ? "…" : ""}</p></td></tr>`
+      : "";
+
+    const html = `<!DOCTYPE html>
+<html lang="es">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+<body style="margin:0;padding:0;background:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="padding:40px 20px;">
+    <tr><td align="center">
+      <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
+        ${barraMarca()}
+        ${franjaPrueba}
+        <tr>
+          <td style="padding:32px 40px 16px;">
+            ${parrafos}
+            <p style="margin:8px 0 0;font-size:15px;color:#1e293b;font-weight:600;">${escapar(params.firma)}</p>
+          </td>
+        </tr>
+        <tr>
+          <td style="background:#f8fafc;padding:18px 40px;border-top:1px solid #e2e8f0;">
+            <p style="margin:0;color:#64748b;font-size:12px;line-height:1.6;text-align:center;">
+              Este correo sale de una dirección de solo envío: <strong>si respondes aquí, nadie lo va a ver.</strong><br/>
+              Para escribirnos usa <a href="mailto:soporte@bakano.ec" style="color:#64748b;">soporte@bakano.ec</a> o el chat de Bakano en Telegram.
+            </p>
+          </td>
+        </tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+
+    const texto = `${params.prueba ? `[PRUEBA: el de verdad va a ${lista.length} personas]\n\n` : ""}${params.mensaje.trim()}\n\n${params.firma}\n\n--\nEste correo sale de una dirección de solo envío: si respondes aquí, nadie lo va a ver. Escríbenos a soporte@bakano.ec.`;
+
+    const { data, error } = await this.client.emails.send({
+      from: this.from,
+      to: params.to,
+      subject: params.prueba ? `[Prueba] ${params.asunto}` : params.asunto,
+      html,
+      text: texto,
+    });
+    return error ? { error: error.message } : { id: data?.id };
+  }
+
+  /**
    * Bakanology va incluido mientras el cliente siga con Bakano.
    *
    * Se puede mandar cuando haga falta: al dar el acceso, cuando alguien

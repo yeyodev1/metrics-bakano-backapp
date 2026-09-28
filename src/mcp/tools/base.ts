@@ -95,6 +95,34 @@ export async function resolverCliente(texto: string): Promise<{ _id: Types.Objec
   );
 }
 
+const MOTIVO_PAUSA: Record<string, string> = {
+  falta_de_pago: "Falta de pago",
+  fin_de_contrato: "Contrato finalizado",
+  pausa_acordada: "Pausa acordada",
+  otro: "Otro",
+};
+
+/**
+ * Cómo está el entorno, en palabras. Lo ven todos los perfiles: si un cliente
+ * pausado o con el contrato terminado pide algo, el equipo tiene que saberlo
+ * antes de hacerlo. Necesita `isActive` y `desactivacion` en el select.
+ */
+export function estadoEntorno(ws: any) {
+  if (ws?.isActive !== false) return { estado: "activo" as const };
+  const d = ws.desactivacion;
+  const finalizado = d?.motivo === "fin_de_contrato";
+  return {
+    estado: finalizado ? ("contrato_finalizado" as const) : ("pausado" as const),
+    motivo: d ? MOTIVO_PAUSA[d.motivo] ?? d.motivo : "Sin motivo registrado",
+    ...(d?.nota ? { nota: d.nota } : {}),
+    ...(d?.fecha ? { inactivoDesde: fecha(d.fecha, false) } : {}),
+    ...(d?.porNombre ? { por: d.porNombre } : {}),
+    aviso: finalizado
+      ? "Su contrato terminó: no se le da servicio. Si pide algo, que lo vea dirección."
+      : "Está pausado: antes de hacer algo que pida, confírmalo con dirección.",
+  };
+}
+
 export function recortar(texto: string | undefined | null, max = 400): string | undefined {
   if (!texto) return undefined;
   return texto.length > max ? `${texto.slice(0, max)}…` : texto;
