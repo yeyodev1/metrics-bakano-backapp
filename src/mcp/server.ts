@@ -23,7 +23,8 @@ function instrucciones(u: UsuarioMcp): string {
 
 function resumirArgs(args: unknown): string {
   try {
-    return JSON.stringify(args ?? {}).slice(0, 4000);
+    // Las contraseñas no quedan en la auditoría.
+    return JSON.stringify(args ?? {}, (k, v) => (/contrasena|password/i.test(k) && v ? "***" : v)).slice(0, 4000);
   } catch {
     return "";
   }
