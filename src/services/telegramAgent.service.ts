@@ -4,7 +4,7 @@ import type { ITelegramChat } from "../models/telegramChat.model";
 import { EQUIPO_ATENCION, equipoAtencionService, type TemaAtencion } from "./equipoAtencion.service";
 import { contenidoClienteService } from "./contenidoCliente.service";
 import { accesosClienteService } from "./accesosCliente.service";
-import { atencionClienteService, fechaEcuador, type DatosCliente } from "./atencionCliente.service";
+import { atencionClienteService, DIAS_ARIANA_A_PRODUCCION, fechaEcuador, type DatosCliente } from "./atencionCliente.service";
 import { onboardingBotService } from "./onboardingBot.service";
 import { citasClienteService } from "./citasCliente.service";
 import { AYUDA_CAMPO_MARCA, CAMPOS_MARCA, ENTREGABLES, onboardingDatosService } from "./onboardingDatos.service";
@@ -19,6 +19,7 @@ import { equipoParaLaIa, WHATSAPP_DIRECCION } from "./equipoBakano.service";
 import { CATEGORIAS_GUION, revisionGuionesService } from "./revisionGuiones.service";
 import { perfilClienteService, type PerfilCliente } from "./perfilCliente.service";
 import {
+  ORDEN_SESIONES,
   PROCESO_ONBOARDING,
   SESIONES_ONBOARDING,
   procesoOnboardingEnTexto,
@@ -459,6 +460,7 @@ Producciones (grabaciones):
 - QUÉ ES LA PRODUCCIÓN: es la grabación para crear su AVATAR y grabar sus PRODUCTOS. No es una grabación de videos sueltos ni una sesión de contenido mensual: con ese material armamos todos los videos del periodo. Dilo así siempre que pregunte.
 - CADA CUÁNTO: una producción cada 6 MESES, contados desde la última. En la práctica, para la mayoría es una vez al año. Si ya tiene una agendada, no puede agendar otra.
 - Puede volver a grabar antes de los 6 meses si la estrategia lo pide (productos nuevos, cambio de marca, se acabó el contenido). Eso lo habilita el equipo: si lo pide, díselo así y pásale el mensaje con pasarMensajeAlEquipo.
+- Orden del onboarding: 1) especialización con Joel, 2) levantamiento con Ariana, 3) primera producción. La primera producción SOLO se agenda cuando ya tiene su reunión con Ariana, y al menos ${DIAS_ARIANA_A_PRODUCCION} días después de ella: en esa reunión se define qué se graba y Ariana necesita esos días para los guiones. Si pide producción sin Ariana, explícale eso y ofrécele agendar con Ariana primero.
 - Para agendar: usa verHorariosProduccion, ofrece 3 o 4 horarios y, cuando el cliente elija uno concreto, usa agendarProduccion con el valor "inicio" exacto. Confirma fecha, hora y que lo atienden ${equipoAtencionService.nombres("produccion")}.
 - Si todavía no puede agendar, explica la regla con naturalidad y dile desde qué fecha puede.
 - El cliente es UNO SOLO: nunca le agendes dos cosas a la misma hora, aunque sean con personas distintas del equipo. Los horarios que te devuelven las herramientas ya vienen filtrados; si aun así te sale "ya_tiene_esa_hora", dile qué cita tiene a esa hora y con quién, y ofrécele otro horario o mover la que ya tiene.
@@ -725,12 +727,16 @@ Reglas:
 
       verHorariosOnboarding: {
         description: "Horarios libres (próximos 14 días) del responsable de una sesión del onboarding.",
-        inputSchema: z.object({ sesion: z.enum(["meta", "crm", "estrategia"]) }),
+        inputSchema: z.object({ sesion: z.enum(ORDEN_SESIONES as [SesionOnboarding, ...SesionOnboarding[]]) }),
         execute: async ({ sesion }: { sesion: SesionOnboarding }) => {
           const def = SESIONES_ONBOARDING[sesion];
-          const crudos = await onboardingBotService.horarios(sesion);
+          const crudos = await onboardingBotService.horarios(sesion, chat.workspaceId);
           const libres = crudos?.length ? await citasClienteService.sinChoques(chat, crudos) : { horarios: [], quitados: 0 };
+          const limite = await onboardingBotService.limiteAriana(sesion, chat.workspaceId);
           return {
+            ...(limite
+              ? { reglaAriana: `Ya tiene producción agendada: la reunión con Ariana tiene que ser al menos ${DIAS_ARIANA_A_PRODUCCION} días antes, hasta el ${fechaEcuador(limite)}. Si no hay horarios, ofrécele mover su producción.` }
+              : {}),
             con: def.responsable.nombre,
             etiqueta: def.etiqueta,
             link: def.link,
@@ -746,7 +752,7 @@ Reglas:
         description:
           "Agenda una sesión del onboarding en el calendario del responsable y le avisa. Úsala solo con un horario que el cliente eligió de verHorariosOnboarding.",
         inputSchema: z.object({
-          sesion: z.enum(["meta", "crm", "estrategia"]),
+          sesion: z.enum(ORDEN_SESIONES as [SesionOnboarding, ...SesionOnboarding[]]),
           inicio: z.string().describe("Valor 'inicio' exacto devuelto por verHorariosOnboarding"),
         }),
         execute: async ({ sesion, inicio }: { sesion: SesionOnboarding; inicio: string }) => {
@@ -764,7 +770,9 @@ Reglas:
           const def = SESIONES_ONBOARDING[sesion];
           return r.ok
             ? { ok: true, cuando: r.cuando, con: r.responsable, correo: def.responsable.email, llevarListo: def.requisitos }
-            : { ok: false, motivo: r.motivo, link: def.link };
+            : r.motivo === "muy_cerca_de_produccion"
+              ? { ok: false, motivo: r.motivo, siguiente: `Ese horario queda a menos de ${DIAS_ARIANA_A_PRODUCCION} días de su producción. Ofrécele un horario anterior o mover la producción.` }
+              : { ok: false, motivo: r.motivo, link: def.link };
         },
       },
 
@@ -863,8 +871,16 @@ Reglas:
             ? (await citasClienteService.sinChoques(chat, crudos, { duracionMs: 3 * 3_600_000 })).horarios
             : crudos;
           const horarios = libres;
+          if (estado.bloqueo === "falta_ariana") {
+            return {
+              puedeAgendar: false,
+              motivo: "falta_ariana",
+              siguiente: `Todavía no puede agendar su producción: primero va la reunión de levantamiento con Ariana Vera, donde se define qué se graba, y la producción va al menos ${DIAS_ARIANA_A_PRODUCCION} días después para que lleguen los guiones. Ofrécele agendar con Ariana (verHorariosOnboarding con sesion=levantamiento).`,
+            };
+          }
           return {
             puedeAgendar: estado.puedeAgendar,
+            ...(estado.porAriana ? { reglaAriana: `Desde el ${fechaEcuador(estado.porAriana)}: al menos ${DIAS_ARIANA_A_PRODUCCION} días después de su reunión con Ariana, para llegar con los guiones.` } : {}),
             yaTieneAgendada: estado.proxima ? fechaEcuador(estado.proxima) : null,
             ultimaProduccion: estado.ultima ? fechaEcuador(estado.ultima) : null,
             disponibleDesde: estado.habilitadaDesde ? fechaEcuador(estado.habilitadaDesde) : null,
@@ -908,7 +924,9 @@ Reglas:
                     : "Dile claro que toda producción necesita su planificación con guiones antes de grabar, y que ya avisaste a su equipo de contenido y a Genesis para que los preparen.") +
                   " Y recuérdale agendar su sesión de CRM con David Robles si todavía no la tiene.",
               }
-            : { ok: false, motivo: r.motivo };
+            : r.motivo === "falta_ariana"
+              ? { ok: false, motivo: r.motivo, siguiente: "Primero va la reunión con Ariana Vera: ofrécele agendarla (verHorariosOnboarding con sesion=levantamiento)." }
+              : { ok: false, motivo: r.motivo };
         },
       },
 
