@@ -72,6 +72,14 @@ cancelar) avisa a Ariana (`EQUIPO_ATENCION.guiones`) y a las content_manager del
 in-app + correo con cuántos guiones hay aprobados y hasta cuándo corrige el cliente
 (`avisoContenidoProduccion.service.ts`).
 
+## Telegram: hechos y lectura con IA
+
+`ver_conversacion_telegram` trae además `hechos` (`lecturaConversacion.service.hechos`): contrato y estado del
+último correo, entregables pendientes, avisos que de verdad llegaron al equipo (y si alguien los leyó) e
+incidentes. `analizar_conversacion_telegram` (dirección y PM) cruza chat + hechos con la IA (`AI_MODEL` vía AI
+Gateway) y devuelve resumen, dónde se trabó y por qué, promesas del bot cumplidas o no, lo ya resuelto, lo que
+falta del cliente y siguientes pasos con responsable.
+
 ## Lucas
 
 `lucas_cliente` pide a Lucas `GET /api/metrics/entornos/:id/resumen` con `x-metrics-key` =
