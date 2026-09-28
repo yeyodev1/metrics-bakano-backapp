@@ -41,6 +41,18 @@ entornos en la plataforma es de superadmin, así que a él no le aparecen.
   `eliminar_entorno(token, confirmar_nombre)`. Solo entornos ya pausados. Usa el mismo `deleteWorkspace`
   de la plataforma: borra el entorno y sus usuarios del cliente, desvincula a los @bakano.ec y deja
   producciones, guiones y chats sin entorno (no los borra).
+- Personas: `ver_personas_entorno`, `agregar_persona_entorno` (mismo `createUser` de la plataforma: si es
+  nueva, contraseña aleatoria + correo de bienvenida; arranca onboarding, bot y Bakanology),
+  `quitar_persona_entorno` (sin token muestra el impacto y da token; con token aplica `deleteUser`,
+  que borra la cuenta si era su único entorno). Los contactos bloqueados no se agregan.
+
+## Correos (solo superadmin)
+
+`correo_prueba` manda la prueba SOLO a quien lo pide (con franja de a quién llegaría) y da un token de
+30 min que lleva el correo entero; `enviar_correo(token)` manda exactamente eso, uno por destinatario
+(máx. 40, la función vive 60 s). Sale de noreply sin replyTo y el pie siempre dice que es de solo envío
+y remite a soporte@bakano.ec. Destinatarios: `para` y/o los clientes activos de un entorno; los
+bloqueados se apartan.
 
 ## Fechas negociadas
 

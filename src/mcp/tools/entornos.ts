@@ -1,8 +1,12 @@
 import { z } from "zod";
 import jwt from "jsonwebtoken";
+import crypto from "crypto";
 import { Types } from "mongoose";
 import models from "../../models";
 import { WorkspaceService } from "../../services/workspace.service";
+import { resendService } from "../../services/resend.service";
+import { normalizarTelefono } from "../../utils/telefono";
+import { correoBloqueado } from "../../utils/contactosBloqueados";
 import { fecha, resolverCliente, type ToolMcp } from "./base";
 
 const workspaceService = new WorkspaceService();
@@ -26,6 +30,8 @@ function traducir(error: any): never {
   if (m === "WORKSPACE_NAME_TAKEN") throw new Error("Ya hay un entorno con ese nombre.");
   if (m === "NOT_FOUND" || m === "INVALID_ID") throw new Error("No encontré ese entorno.");
   if (m === "MOTIVO_REQUERIDO") throw new Error("Para pausar hace falta el motivo.");
+  if (m === "EMAIL_TAKEN") throw new Error("Esa persona ya está en ese entorno.");
+  if (m === "WORKSPACE_NOT_FOUND") throw new Error("No encontré ese entorno.");
   throw error;
 }
 
@@ -220,6 +226,121 @@ export const toolsEntornos: ToolMcp[] = [
       const impacto = await impactoDeBorrar(ws._id);
       await workspaceService.deleteWorkspace(String(ws._id)).catch(traducir);
       return { eliminado: true, entorno: ws.name, id: String(ws._id), impacto };
+    },
+  },
+  {
+    nombre: "ver_personas_entorno",
+    titulo: "Quién está en un entorno",
+    descripcion: "Las personas con acceso a un entorno: nombre, correo, rol en el entorno (admin o colaborador) y si son del equipo. Solo superadmin.",
+    perfiles: ["direccion"],
+    soloSuperadmin: true,
+    entrada: { cliente: z.string().describe("Nombre o id del entorno") },
+    async correr(a) {
+      const ref = await resolverCliente(a.cliente);
+      const gente = await workspaceService.listUsersByWorkspace(String(ref._id));
+      return {
+        entorno: ref.name,
+        total: gente.length,
+        personas: gente.map((p: any) => ({
+          nombre: p.name, correo: p.email, rol: p.role, equipo: p.isInternal === true || /@bakano\.ec$/i.test(p.email),
+          activo: p.isActive !== false,
+        })),
+      };
+    },
+  },
+  {
+    nombre: "agregar_persona_entorno",
+    titulo: "Agregar a alguien a un entorno",
+    descripcion:
+      "Da acceso a un entorno a una persona por su correo, como admin o colaborador. Si ya tiene cuenta, solo se le suma el entorno. Si es nueva, se crea la cuenta (el teléfono es obligatorio) y le llega el correo de bienvenida con su contraseña. Como en la plataforma, además arranca el onboarding del entorno si no había empezado, le llega la invitación al bot de Telegram y su acceso a Bakanology. Confirma con la persona antes. Solo superadmin.",
+    perfiles: ["direccion"],
+    soloSuperadmin: true,
+    escribe: true,
+    entrada: {
+      cliente: z.string().describe("Nombre o id del entorno"),
+      correo: z.string().email(),
+      rol: z.enum(["admin", "colaborador"]),
+      nombre: z.string().max(120).optional().describe("Obligatorio si la persona no tiene cuenta"),
+      telefono: z.string().optional().describe("Obligatorio si la persona no tiene cuenta. Sin el código de país"),
+      prefijo_pais: z.string().optional().describe("Código de país sin +. Por defecto 593 (Ecuador)"),
+    },
+    async correr(a) {
+      const correo = String(a.correo).toLowerCase().trim();
+      if (await correoBloqueado(correo)) throw new Error("Ese contacto está bloqueado: no se le da acceso ni se le escribe.");
+      const ref = await resolverCliente(a.cliente);
+      const existe: any = await models.users.findOne({ email: correo }).select("name role").lean();
+      if (existe?.role === "superadmin") throw new Error("Es superadmin: ya ve todos los entornos.");
+      let password: string | undefined;
+      if (!existe) {
+        if (!a.nombre) throw new Error("No tiene cuenta todavía: dime su nombre.");
+        if (!a.telefono) throw new Error("No tiene cuenta todavía: el teléfono es obligatorio (sin él no le llegan los avisos por WhatsApp).");
+        const tel = normalizarTelefono(String(a.telefono), a.prefijo_pais || "593");
+        if (!tel.valido) throw new Error(tel.error || "El teléfono no es válido.");
+        password = crypto.randomBytes(9).toString("base64url");
+      }
+      await workspaceService
+        .createUser({
+          name: a.nombre ?? existe?.name,
+          email: correo,
+          password: password as string,
+          role: a.rol,
+          workspaceId: String(ref._id),
+          ...(a.telefono ? { phoneNumber: String(a.telefono), phoneExtension: a.prefijo_pais || "593" } : {}),
+        } as any)
+        .catch(traducir);
+      if (password) {
+        await resendService.sendWelcomeEmail({ to: correo, recipientName: a.nombre, email: correo, password, isInternal: false });
+      }
+      return {
+        agregado: true,
+        entorno: ref.name,
+        correo,
+        rol: a.rol,
+        cuentaNueva: !existe,
+        ...(password ? { aviso: "Le llegó el correo de bienvenida con su contraseña. La contraseña no se muestra aquí." } : {}),
+      };
+    },
+  },
+  {
+    nombre: "quitar_persona_entorno",
+    titulo: "Quitar a alguien de un entorno",
+    descripcion:
+      "Quita el acceso de una persona a un entorno. Primero llámala sin token: no cambia nada y dice qué pasaría (si era su único entorno, su cuenta se borra, igual que en la plataforma) y devuelve un token de 5 minutos. Con ese token se aplica. No avisa a la persona. Confirma con quien lo pide antes. Solo superadmin.",
+    perfiles: ["direccion"],
+    soloSuperadmin: true,
+    escribe: true,
+    destructiva: true,
+    entrada: {
+      cliente: z.string().describe("Nombre o id del entorno"),
+      correo: z.string().email(),
+      token: z.string().optional().describe("El que devolvió la primera llamada"),
+    },
+    async correr(a, u) {
+      const ref = await resolverCliente(a.cliente);
+      const correo = String(a.correo).toLowerCase().trim();
+      const p: any = await models.users
+        .findOne({ email: correo, $or: [{ "workspaces.workspaceId": ref._id }, { workspaceId: ref._id }] })
+        .select("name email role workspaces workspaceId")
+        .lean();
+      if (!p) throw new Error(`${correo} no está en ${ref.name}.`);
+      if (p.role === "superadmin") throw new Error("Es superadmin: no se le quita de un entorno.");
+      const otros = (p.workspaces || []).filter((w: any) => String(w.workspaceId) !== String(ref._id)).length;
+      const pasaria = otros ? `Pierde acceso a ${ref.name}; sigue en ${otros} entorno(s) más.` : `Era su único entorno: su cuenta se borra.`;
+
+      if (!a.token) {
+        const token = jwt.sign({ q: String(p._id), w: String(ref._id), u: u._id }, secreto(), { expiresIn: `${TOKEN_MIN}m` });
+        return { persona: `${p.name || "sin nombre"} <${p.email}>`, entorno: ref.name, pasaria, borraCuenta: !otros, token, venceEn: `${TOKEN_MIN} minutos` };
+      }
+      let d: any;
+      try {
+        d = jwt.verify(a.token, secreto());
+      } catch {
+        throw new Error("El token venció o no es válido. Vuelve a llamar sin token.");
+      }
+      if (d.u !== u._id) throw new Error("Ese token es de otra persona.");
+      if (d.q !== String(p._id) || d.w !== String(ref._id)) throw new Error("Ese token es de otra persona u otro entorno. Vuelve a llamar sin token.");
+      await workspaceService.deleteUser(String(ref._id), String(p._id)).catch(traducir);
+      return { quitado: true, persona: p.email, entorno: ref.name, cuentaBorrada: !otros };
     },
   },
 ];
