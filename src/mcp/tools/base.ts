@@ -15,8 +15,21 @@ export interface ToolMcp {
   perfiles: PerfilMcp[];
   /** Cambia datos o avisa a alguien. Claude pide confirmación antes. */
   escribe?: boolean;
+  /** Borra o corta algo que no se deshace solo. Claude lo trata con más cuidado. */
+  destructiva?: boolean;
+  /**
+   * Solo superadmin, no todo el perfil Dirección: un director (internalRole)
+   * también es Dirección, pero en la plataforma estas acciones son de superadmin.
+   */
+  soloSuperadmin?: boolean;
   entrada: ZodRawShape;
   correr: (args: any, u: UsuarioMcp) => Promise<unknown>;
+}
+
+/** Lo que decide si una tool aparece para esta persona. */
+export function leToca(tool: ToolMcp, u: UsuarioMcp): boolean {
+  if (!tool.perfiles.includes(u.perfil)) return false;
+  return !tool.soloSuperadmin || u.role === "superadmin";
 }
 
 export const ZONA = "America/Guayaquil";

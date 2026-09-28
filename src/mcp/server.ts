@@ -4,6 +4,7 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { McpAuditoriaModel } from "../models/mcp.model";
 import { NOMBRE_PERFIL, type UsuarioMcp } from "./perfiles";
 import { TOOLS } from "./tools/index";
+import { leToca } from "./tools/base";
 
 /**
  * Un servidor por llamada, sin sesión (serverless): se arma con las tools que
@@ -34,14 +35,14 @@ export function crearServidor(u: UsuarioMcp): McpServer {
   );
 
   for (const tool of TOOLS) {
-    if (!tool.perfiles.includes(u.perfil)) continue;
+    if (!leToca(tool, u)) continue;
     server.registerTool(
       tool.nombre,
       {
         title: tool.titulo,
         description: tool.descripcion,
         inputSchema: tool.entrada,
-        annotations: { readOnlyHint: !tool.escribe, destructiveHint: false, openWorldHint: false },
+        annotations: { readOnlyHint: !tool.escribe, destructiveHint: tool.destructiva === true, openWorldHint: false },
       },
       async (args: any) => {
         const inicio = Date.now();
