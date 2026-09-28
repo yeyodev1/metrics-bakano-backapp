@@ -2,6 +2,7 @@ import { Types } from "mongoose";
 import models from "../models";
 import { IPlanning } from "../models/planning.model";
 import { ghlService } from "./ghl.service";
+import { avisoContenidoProduccionService } from "./avisoContenidoProduccion.service";
 
 export class PlanningService {
   async createEntry(data: {
@@ -88,17 +89,21 @@ export class PlanningService {
       date?: Date | string;
       notes?: string;
       assignedTo?: string[];
-    }
+    },
+    /** Quién la mueve, para el aviso a contenido. */
+    porNombre?: string
   ): Promise<IPlanning | null> {
     if (!Types.ObjectId.isValid(entryId)) throw new Error("INVALID_ID");
 
     const updateData: any = {};
+    let fechaAnterior: Date | null = null;
     if (data.date !== undefined) {
       const actual = await models.planning.findById(entryId).select("date endsAt source crm").lean();
       if (!actual) throw new Error("NOT_FOUND");
       const nueva = new Date(data.date as string);
       if (Number.isNaN(nueva.getTime())) throw new Error("FECHA_INVALIDA");
       const mueve = Math.abs(nueva.getTime() - new Date(actual.date).getTime()) > 60_000;
+      if (mueve) fechaAnterior = new Date(actual.date);
 
       if (mueve && actual.source === "crm" && actual.crm?.appointmentId) {
         try {
@@ -130,6 +135,8 @@ export class PlanningService {
       .populate("assignedTo", "name email internalRole");
 
     if (!entry) throw new Error("NOT_FOUND");
+    // Se espera: en Vercel una promesa suelta se pierde al responder.
+    if (fechaAnterior) await avisoContenidoProduccionService.avisar({ entryId, tipo: "movida", fechaAnterior, porNombre });
     return entry;
   }
 

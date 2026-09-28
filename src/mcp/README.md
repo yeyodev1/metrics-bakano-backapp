@@ -22,7 +22,7 @@ El rol se relee de Mongo en cada llamada: cambiar o desactivar a alguien corta e
 | Dirección | superadmin, director | Todo + `auditoria_mcp`. Solo superadmin: gestión de entornos (ver abajo) |
 | Project Manager | project_manager, account_manager | Pendientes, Telegram completo, incidentes, fechas (videos y producciones), onboarding (escribe) |
 | Contenido | content_manager, community_manager, estratega, copywriter | Pendientes, Telegram solo de guiones/videos, planificación, mover publicaciones, feedback, revisión |
-| Producción | productor, asistente_produccion | Pendientes, calendario, planificación, onboarding (lectura) |
+| Producción | productor, asistente_produccion | Pendientes, calendario, planificación, mover producciones (con aviso a contenido), onboarding (lectura) |
 | Edición | editor, disenador | Pendientes, `mi_cola_edicion`, `actualizar_edicion` (solo estadoProduccion/edicion/linkVideo) |
 | Campañas | trafficker | Pendientes, métricas, clientes sin Meta |
 | Equipo | el resto | Pendientes, clientes, calendario, notificaciones |
@@ -59,6 +59,20 @@ bloqueados se apartan.
 `consultar_cambio_fecha` no escribe: devuelve permitido/motivos/advertencias y un token JWT de 5 min
 atado a ese cambio y a esa persona. `mover_fecha(token)` vuelve a evaluar y recién ahí mueve.
 Producción: solo PM/dirección, 48 h de anticipación, se mueve también en el CRM.
+
+## Producciones → contenido
+
+Producción, PM y dirección mueven producciones (`consultar_cambio_fecha` + `mover_fecha`). Todo cambio de
+fecha de una producción (MCP, plataforma con `PlanningService.updateEntry`, o el CRM al agendar, mover o
+cancelar) avisa a Ariana (`EQUIPO_ATENCION.guiones`) y a las content_manager del entorno (si no hay, a todas):
+in-app + correo con cuántos guiones hay aprobados y hasta cuándo corrige el cliente
+(`avisoContenidoProduccion.service.ts`).
+
+## Lucas
+
+`lucas_cliente` pide a Lucas `GET /api/metrics/entornos/:id/resumen` con `x-metrics-key` =
+`METRICS_PROXY_KEY` (en Lucas es `METRICS_SYNC_KEY`). `LUCAS_API_URL` (def.
+`https://lucas-by-bakano-backapp.vercel.app/api`).
 
 ## Variables
 

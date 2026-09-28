@@ -84,7 +84,7 @@ export async function updateEntry(req: AuthRequest, res: Response, next: NextFun
       date,
       notes,
       assignedTo: Array.isArray(assignedTo) ? assignedTo : undefined,
-    });
+    }, (req.user as any)?.name || req.user?.email);
 
     res.status(HttpStatusCode.Ok).send({ message: "Planning entry updated successfully.", entry });
     return;
