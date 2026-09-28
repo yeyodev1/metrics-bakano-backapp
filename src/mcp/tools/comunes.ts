@@ -7,7 +7,7 @@ import { onboardingProgresoService } from "../../services/onboardingProgreso.ser
 import { metricasClienteService } from "../../services/metricasCliente.service";
 import { McpAuditoriaModel } from "../../models/mcp.model";
 import { NOMBRE_PERFIL, TODOS } from "../perfiles";
-import { fecha, leerFecha, recortar, resolverCliente, type ToolMcp } from "./base";
+import { fecha, leToca, leerFecha, recortar, resolverCliente, type ToolMcp } from "./base";
 
 const planningService = new PlanningService();
 
@@ -25,7 +25,7 @@ export const toolsComunes: ToolMcp[] = [
         perfil: NOMBRE_PERFIL[u.perfil],
         rolEnMetrics: u.role === "superadmin" ? "superadmin" : u.internalRole,
         // Import al vuelo: index importa este archivo, al revés sería circular al cargar.
-        puedes: (await import("./index")).TOOLS.filter((t) => t.perfiles.includes(u.perfil)).map((t) => `${t.nombre}: ${t.titulo}`),
+        puedes: (await import("./index")).TOOLS.filter((t) => leToca(t, u)).map((t) => `${t.nombre}: ${t.titulo}`),
         guia: "https://mcp.bakano.ec",
       };
     },

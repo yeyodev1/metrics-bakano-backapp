@@ -19,7 +19,7 @@ El rol se relee de Mongo en cada llamada: cambiar o desactivar a alguien corta e
 
 | Perfil | internalRole | Ve |
 |---|---|---|
-| Dirección | superadmin, director | Todo + `auditoria_mcp` |
+| Dirección | superadmin, director | Todo + `auditoria_mcp`. Solo superadmin: gestión de entornos (ver abajo) |
 | Project Manager | project_manager, account_manager | Pendientes, Telegram completo, incidentes, fechas (videos y producciones), onboarding (escribe) |
 | Contenido | content_manager, community_manager, estratega, copywriter | Pendientes, Telegram solo de guiones/videos, planificación, mover publicaciones, feedback, revisión |
 | Producción | productor, asistente_produccion | Pendientes, calendario, planificación, onboarding (lectura) |
@@ -29,6 +29,18 @@ El rol se relee de Mongo en cada llamada: cambiar o desactivar a alguien corta e
 
 Una tool que no es del perfil no aparece en `tools/list`. Cada llamada queda en `mcpauditoria`.
 Si cambias el perfil de una tool, cambia también `mcp-bakano-frontapp/src/data/perfiles.ts`.
+
+## Entornos (solo superadmin)
+
+`soloSuperadmin` en la tool: un director también es perfil Dirección, pero crear, pausar o borrar
+entornos en la plataforma es de superadmin, así que a él no le aparecen.
+
+- `crear_entorno`, `editar_entorno` (nombre; motivo/nota si está pausado).
+- `pausar_entorno` (motivo obligatorio) / `reanudar_entorno`: no borran nada.
+- Borrar en dos pasos: `consultar_eliminar_entorno` no escribe, muestra el impacto y da un token de 5 min;
+  `eliminar_entorno(token, confirmar_nombre)`. Solo entornos ya pausados. Usa el mismo `deleteWorkspace`
+  de la plataforma: borra el entorno y sus usuarios del cliente, desvincula a los @bakano.ec y deja
+  producciones, guiones y chats sin entorno (no los borra).
 
 ## Fechas negociadas
 
