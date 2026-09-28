@@ -5,6 +5,7 @@ import { telegramService, escaparHtml, type InlineButton } from "./telegram.serv
 import { onboardingService } from "./onboarding.service";
 import { resendService } from "./resend.service";
 import { slackService } from "./slack.service";
+import { correoBloqueado } from "../utils/contactosBloqueados";
 import { PAUTA_MINIMA, PAUTA_TEMPORADA_ALTA, formatoDolares } from "./contratoTexto";
 
 /**
@@ -64,8 +65,11 @@ export function mostrarDatoContrato(campo: CampoContrato, valor: unknown): strin
 
 const CORREO_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 
-/** Reenviar el firmado al correo, como mucho cada 10 minutos. */
-const REENVIO_CADA_MS = 10 * 60_000;
+/**
+ * Se reenvía cada vez que lo pidan; este margen solo frena el doble toque
+ * (o la IA llamando dos veces seguidas) para no mandar dos correos iguales.
+ */
+const REENVIO_CADA_MS = 60_000;
 
 /** Se recuerda una vez al dia. */
 const CADA_MS = 20 * 3_600_000;
@@ -158,10 +162,11 @@ class ContratoChatService {
         (faltan.length ? `\n\nTe ${faltan.length === 1 ? "falta 1 dato" : `faltan ${faltan.length} datos`} para poder firmarlo.` : "");
 
     const botones: InlineButton[][] = firmado
-      ? [[{ text: "📧 Reenviármelo al correo", callback_data: "contrato:correo" }]]
+      ? []
       : faltan.length
         ? [[{ text: `📝 Completar mis datos (${faltan.length})`, callback_data: "contrato:llenar" }]]
         : [[{ text: "✍️ Firmar mi contrato", url: this.link(chat.workspaceId) }]];
+    if (correo) botones.push([{ text: "📧 Mandármelo al correo", callback_data: "contrato:correo" }]);
     botones.push([{ text: "📋 Volver al menú", callback_data: "menu:ver" }]);
 
     await telegramService.sendDocument(
@@ -174,21 +179,52 @@ class ContratoChatService {
     return { ok: true, firmado, correo: correo || undefined };
   }
 
-  /** Reenvia el contrato firmado al correo que dio. */
-  async reenviarPorCorreo(chat: ITelegramChat): Promise<{ ok: boolean; correo?: string; motivo?: string }> {
+  /**
+   * Manda el contrato al correo que pida el cliente: el firmado si ya firmó, o
+   * el borrador con el link de firma si no. Por defecto, el correo del
+   * contrato. Antes solo salía el firmado, y un cliente que quería leerlo en su
+   * correo antes de firmar se quedaba dando vueltas con el bot.
+   */
+  async enviarPorCorreo(
+    chat: ITelegramChat,
+    correoPedido?: string
+  ): Promise<{ ok: boolean; correo?: string; firmado?: boolean; motivo?: "sin_entorno" | "sin_correo" | "correo_invalido" | "bloqueado" | "reciente" | "error" }> {
     if (!chat.workspaceId) return { ok: false, motivo: "sin_entorno" };
-    const w = await models.workspaces.findById(chat.workspaceId).select("contractData onboardingStatus").lean();
-    const datos = ((w as any)?.contractData || {}) as Record<string, any>;
-    if (!(w as any)?.onboardingStatus?.contractSubmitted) return { ok: false, motivo: "sin_firmar" };
-    if (!datos.email) return { ok: false, motivo: "sin_correo" };
+    const w: any = await models.workspaces
+      .findById(chat.workspaceId)
+      .select("contractData preNegotiatedContract onboardingStatus contratoCorreoEnviado")
+      .lean();
+    if (!w) return { ok: false, motivo: "sin_entorno" };
+    const datos = { ...(w.preNegotiatedContract || {}), ...(w.contractData || {}) } as Record<string, any>;
+    const correo = String(correoPedido || datos.email || "").trim().toLowerCase();
+    if (!correo) return { ok: false, motivo: "sin_correo" };
+    if (!CORREO_RE.test(correo)) return { ok: false, correo, motivo: "correo_invalido" };
+    if (await correoBloqueado(correo)) return { ok: false, correo, motivo: "bloqueado" };
 
-    const ultimo = datos.ultimoReenvioCorreoEn ? new Date(datos.ultimoReenvioCorreoEn).getTime() : 0;
-    if (Date.now() - ultimo < REENVIO_CADA_MS) return { ok: false, correo: datos.email, motivo: "reciente" };
+    // Un doble toque no manda dos correos iguales.
+    const previo = w.contratoCorreoEnviado;
+    if (previo?.correo === correo && Date.now() - new Date(previo.en).getTime() < REENVIO_CADA_MS) {
+      return { ok: false, correo, motivo: "reciente" };
+    }
 
-    const pdf = await onboardingService.generateContractPDF(datos as any, { firmado: true });
-    await resendService.sendContractEmail({ to: datos.email, recipientName: datos.representanteCliente || "", pdfBuffer: pdf });
-    await models.workspaces.updateOne({ _id: chat.workspaceId }, { $set: { "contractData.ultimoReenvioCorreoEn": new Date() } });
-    return { ok: true, correo: datos.email };
+    const firmado = Boolean(w.onboardingStatus?.contractSubmitted);
+    const faltan = CAMPOS_CONTRATO.filter((c) => !String(datos[c] ?? "").trim());
+    try {
+      const pdf = await onboardingService.generateContractPDF(datos as any, { firmado, borrador: !firmado });
+      await resendService.sendContratoAlCliente({
+        to: correo,
+        recipientName: datos.representanteCliente || chat.firstName || "",
+        pdfBuffer: pdf,
+        firmado,
+        linkFirma: this.link(chat.workspaceId),
+        faltanDatos: firmado ? 0 : faltan.length,
+      });
+    } catch (error: any) {
+      console.error("[Contrato] no salió el correo:", error?.message || error);
+      return { ok: false, correo, motivo: "error" };
+    }
+    await models.workspaces.updateOne({ _id: chat.workspaceId }, { $set: { contratoCorreoEnviado: { correo, en: new Date() } } });
+    return { ok: true, correo, firmado };
   }
 
   /** El link que abre solo la pantalla de firma. */

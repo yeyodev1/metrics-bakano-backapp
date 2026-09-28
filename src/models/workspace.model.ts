@@ -221,6 +221,8 @@ export interface IWorkspace extends Document {
    */
   driveFolderId?: string;
   driveFolderLink?: string;
+  /** Último envío del contrato por correo, para no mandarlo dos veces seguidas. */
+  contratoCorreoEnviado?: { correo: string; en: Date };
   createdAt: Date;
   updatedAt: Date;
 }
@@ -436,6 +438,7 @@ const WorkspaceSchema = new Schema<IWorkspace>(
     },
     driveFolderId: { type: String, trim: true },
     driveFolderLink: { type: String, trim: true },
+    contratoCorreoEnviado: { type: { correo: String, en: Date }, default: undefined },
   },
   {
     timestamps: true,

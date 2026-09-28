@@ -300,7 +300,7 @@ class TelegramAgentService {
     if (uso("verOnboarding", "verPendientesOnboarding", "registrarDatoMarca", "registrarEntregable", "pedirAyudaConDato", "verHorariosOnboarding", "agendarSesionOnboarding")) {
       botones.push([{ text: "🚀 Cómo va mi onboarding", callback_data: "menu:onboarding" }]);
     }
-    if (uso("enviarMiContrato", "reenviarContratoAlCorreo")) {
+    if (uso("enviarMiContrato", "enviarContratoAlCorreo")) {
       botones.push([{ text: "📝 Mi contrato", callback_data: "contrato:estado" }]);
     }
     if (uso("verMisAccesos", "recuperarContrasena")) {
@@ -470,7 +470,8 @@ BAKANOLOGY (la academia):
 
 CONTRATO:
 - Si pide ver, leer, revisar o que le mandes su contrato, usa enviarMiContrato: le llega el PDF aquí mismo. Puede pedirlo las veces que quiera. Si no lo firmó, es un borrador con sus datos; si ya lo firmó, es el firmado.
-- Siempre dile que la copia firmada le llega también a su correo (el que dio para el contrato). Si ya firmó y quiere que se lo mandes de nuevo al correo, usa reenviarContratoAlCorreo.
+- Si pide el contrato por correo (firmado o sin firmar, para revisarlo o firmarlo), usa enviarContratoAlCorreo: sale de team@bakano.ec con el PDF y, si no lo firmó, con el enlace para firmar. Lo puede pedir las veces que quiera: cada vez que lo pida, se lo vuelves a mandar. Nunca le digas que "solo llega por aquí".
+- Puede ser cualquier correo que te dé. Si es distinto al del contrato, repíteselo y confirma que está bien escrito antes de mandarlo (un correo mal escrito no le llega). Si no tienes ninguno, pídeselo.
 - Lo que dice el contrato, por si pregunta: el servicio empieza al día siguiente de recibir el comprobante de pago. Se compromete a una inversión mensual en anuncios de mínimo $${PAUTA_MINIMA} sin impuestos (con menos no podemos asegurar cierres y los resultados tardan más), que crece a medida que crece su facturación; en octubre, noviembre y diciembre se recomiendan al menos $${PAUTA_TEMPORADA_ALTA}. Bakano cubre el CRM; los mensajes de WhatsApp del CRM los paga él directo a Meta. El primer mes es de exploración y lo recomendado es quedarse al menos dos meses. Si en los dos primeros meses no hay resultados, en el tercer y cuarto mes paga el 50% de los honorarios, siempre que haya mantenido su pauta y dado seguimiento a sus prospectos. Para suspender el servicio tiene que pedirlo por escrito por los canales oficiales de Bakano.
 - No activas la garantía ni cambias condiciones: si la pide o quiere suspender, pásale el mensaje al equipo con pasarMensajeAlEquipo.
 
@@ -811,10 +812,24 @@ Reglas:
         },
       },
 
-      reenviarContratoAlCorreo: {
-        description: "Le reenvía a su correo el contrato ya firmado. Solo si ya lo firmó y lo pide por correo.",
-        inputSchema: z.object({}),
-        execute: async () => contratoChatService.reenviarPorCorreo(chat),
+      enviarContratoAlCorreo: {
+        description:
+          "Le manda su contrato al correo desde team@bakano.ec: el firmado si ya lo firmó, o el borrador con el enlace para firmar si no. Sin correo usa el del contrato. Úsala cada vez que pida el contrato por correo, aunque ya se lo hayas mandado antes.",
+        inputSchema: z.object({
+          correo: z.string().optional().describe("Solo si pide otro correo distinto al del contrato, ya confirmado con él"),
+        }),
+        execute: async ({ correo }: { correo?: string }) => {
+          const r = await contratoChatService.enviarPorCorreo(chat, correo);
+          if (r.ok) return { ok: true, correo: r.correo, firmado: r.firmado, siguiente: `Dile que se lo mandaste a ${r.correo} desde team@bakano.ec${r.firmado ? "" : ", con el enlace para firmarlo"}, y que revise spam si no lo ve en unos minutos.` };
+          if (r.motivo === "reciente") return { ok: true, correo: r.correo, siguiente: "Se lo acabas de mandar hace menos de un minuto: dile que ya va en camino y que revise spam." };
+          if (r.motivo === "sin_correo") return { ok: false, siguiente: "Pídele a qué correo se lo mandas." };
+          if (r.motivo === "correo_invalido") return { ok: false, siguiente: `"${r.correo}" no parece un correo válido: pídele que lo revise.` };
+          if (r.motivo === "bloqueado") return { ok: false, siguiente: "No se puede enviar a ese correo. Pídele otro." };
+          await atencionClienteService
+            .enviarMensaje(chat, "atencion", `[Aviso del bot] No salió el correo con el contrato${r.correo ? ` a ${r.correo}` : ""}. Mándaselo a mano.`)
+            .catch(() => {});
+          return { ok: false, siguiente: "No salió el correo. Dile que ya le avisaste a su equipo para que se lo envíen, y mándale el PDF por aquí con enviarMiContrato." };
+        },
       },
 
       verReservaDeContenido: {

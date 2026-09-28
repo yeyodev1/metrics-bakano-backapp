@@ -1109,6 +1109,61 @@ export class ResendService {
   }
 
   /**
+   * El contrato al correo que pida el cliente, firmado o como borrador con el
+   * link para firmar. Sale de team@bakano.ec para que llegue a la bandeja y no
+   * a spam. Propaga el error: el bot no puede decir "te lo mandé" si no salió.
+   */
+  async sendContratoAlCliente(params: {
+    to: string;
+    recipientName?: string;
+    pdfBuffer: Buffer;
+    firmado: boolean;
+    linkFirma: string;
+    faltanDatos?: number;
+  }): Promise<void> {
+    const nombre = params.recipientName?.trim().split(" ")[0] || "Hola";
+    const cuerpo = params.firmado
+      ? `<p style="margin:0 0 16px;font-size:15px;color:#475569;line-height:1.7;">Te adjuntamos tu contrato de servicios con Bakano, <strong>ya firmado</strong>. Guárdalo para tus registros.</p>`
+      : `<p style="margin:0 0 16px;font-size:15px;color:#475569;line-height:1.7;">Te adjuntamos el <strong>borrador de tu contrato</strong> de servicios con Bakano, con tus datos, para que lo revises con calma.</p>
+            ${params.faltanDatos ? `<p style="margin:0 0 16px;font-size:15px;color:#475569;line-height:1.7;">Todavía ${params.faltanDatos === 1 ? "falta 1 dato" : `faltan ${params.faltanDatos} datos`} para poder firmarlo: los completas en el chat de Bakano en Telegram o en el mismo enlace de firma.</p>` : ""}
+            <p style="margin:0 0 24px;font-size:15px;color:#475569;line-height:1.7;">Cuando estés de acuerdo, lo firmas aquí. Apenas lo firmes te llega la copia firmada.</p>
+            <div style="text-align:center;margin-bottom:12px;">
+              <a href="${params.linkFirma}" style="display:inline-block;background:linear-gradient(135deg,#e6285c 0%,#85529c 100%);color:#ffffff;text-decoration:none;padding:14px 36px;border-radius:10px;font-size:15px;font-weight:700;">Firmar mi contrato</a>
+            </div>`;
+    const html = `<!DOCTYPE html>
+<html lang="es">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+<body style="margin:0;padding:0;background:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="padding:40px 20px;">
+    <tr><td align="center">
+      <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
+        ${barraMarca()}
+        <tr>
+          <td style="padding:32px 40px 24px;">
+            <p style="margin:0 0 16px;font-size:16px;color:#1e293b;">${nombre},</p>
+            ${cuerpo}
+            <p style="margin:16px 0 0;font-size:15px;color:#1e293b;">El equipo de Bakano</p>
+          </td>
+        </tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+    const { error } = await this.client.emails.send({
+      from: "Bakano <team@bakano.ec>",
+      to: params.to,
+      bcc: ["dreyes@bakano.ec", "dquimi@bakano.ec"],
+      subject: params.firmado ? "Tu contrato firmado con Bakano" : "Tu contrato con Bakano para revisar y firmar",
+      html,
+      attachments: [
+        { filename: params.firmado ? "contrato_bakano_firmado.pdf" : "contrato_bakano_borrador.pdf", content: params.pdfBuffer },
+      ],
+    });
+    if (error) throw new Error(error.message);
+  }
+
+  /**
    * Enlace para restablecer la contraseña.
    *
    * A diferencia de los demás correos, este SÍ propaga el error: si el envío
