@@ -36,7 +36,8 @@ export class OnboardingService {
   ): Promise<Buffer> {
     const version = data.version ?? (opciones.firmado ? 1 : CONTRATO_VERSION_ACTUAL);
     if (version === 1) return this.generarContratoV1(data);
-    return this.generarContrato(data, Boolean(opciones.borrador));
+    // Un borrador todavía no se firmó: siempre con el texto vigente.
+    return this.generarContrato(opciones.borrador ? { ...data, version: CONTRATO_VERSION_ACTUAL } : data, Boolean(opciones.borrador));
   }
 
   private generarContrato(data: IContractData, borrador: boolean): Promise<Buffer> {

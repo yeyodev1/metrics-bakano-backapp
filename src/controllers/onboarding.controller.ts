@@ -171,7 +171,12 @@ export const checkOnboardingStatus = async (req: Request, res: Response, next: N
       // PDF no pueden decir cosas distintas.
       contrato: {
         titulo: TITULO_CONTRATO,
-        clausulas: clausulasContrato({ ...(workspace.preNegotiatedContract || {}), ...(workspace.contractData || {}) }),
+        clausulas: clausulasContrato({
+          ...(workspace.preNegotiatedContract || {}),
+          ...(workspace.contractData || {}),
+          // Sin firmar se muestra el texto vigente; firmado, el que firmó.
+          ...(workspace.onboardingStatus?.contractSubmitted ? {} : { version: CONTRATO_VERSION_ACTUAL }),
+        }),
         bakano: BAKANO_LEGAL,
       },
       workspaceName: workspace.name,
