@@ -7,7 +7,7 @@ import { WorkspaceService } from "../../services/workspace.service";
 import { resendService } from "../../services/resend.service";
 import { normalizarTelefono } from "../../utils/telefono";
 import { correoBloqueado } from "../../utils/contactosBloqueados";
-import { fecha, resolverCliente, type ToolMcp } from "./base";
+import { estadoEntorno, fecha, resolverCliente, type ToolMcp } from "./base";
 
 const workspaceService = new WorkspaceService();
 const TOKEN_MIN = 5;
@@ -291,9 +291,11 @@ export const toolsEntornos: ToolMcp[] = [
       if (password) {
         await resendService.sendWelcomeEmail({ to: correo, recipientName: a.nombre, email: correo, password, isInternal: false });
       }
+      const est = estadoEntorno(await models.workspaces.findById(ref._id).select("isActive desactivacion").lean());
       return {
         agregado: true,
         entorno: ref.name,
+        ...(est.estado !== "activo" ? { ojo: `El entorno está ${est.estado === "pausado" ? "pausado" : "con el contrato finalizado"} (${est.motivo}): no va a poder entrar hasta que se reanude.` } : {}),
         correo,
         rol: a.rol,
         cuentaNueva: !existe,

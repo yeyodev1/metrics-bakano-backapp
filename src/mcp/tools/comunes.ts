@@ -7,7 +7,7 @@ import { onboardingProgresoService } from "../../services/onboardingProgreso.ser
 import { metricasClienteService } from "../../services/metricasCliente.service";
 import { McpAuditoriaModel } from "../../models/mcp.model";
 import { NOMBRE_PERFIL, TODOS } from "../perfiles";
-import { fecha, leToca, leerFecha, recortar, resolverCliente, type ToolMcp } from "./base";
+import { estadoEntorno, fecha, leToca, leerFecha, recortar, resolverCliente, type ToolMcp } from "./base";
 
 const planningService = new PlanningService();
 
@@ -34,32 +34,40 @@ export const toolsComunes: ToolMcp[] = [
     nombre: "buscar_clientes",
     titulo: "Buscar clientes",
     descripcion:
-      "Lista los clientes (entornos) de Bakano con su id. Filtra por nombre. Por defecto solo activos. Úsala para encontrar el nombre exacto o el id antes de otras herramientas.",
+      "Lista los clientes (entornos) de Bakano con su id y su estado: activo, pausado (con motivo) o contrato finalizado. Filtra por nombre y por estado (por defecto solo activos). Úsala para encontrar el nombre exacto o el id antes de otras herramientas.",
     perfiles: TODOS,
     entrada: {
       texto: z.string().optional().describe("Parte del nombre del cliente"),
-      incluir_inactivos: z.boolean().optional(),
+      estado: z
+        .enum(["activos", "pausados", "contrato_finalizado", "inactivos", "todos"])
+        .optional()
+        .describe("inactivos = pausados + contrato finalizado. Por defecto: activos"),
+      incluir_inactivos: z.boolean().optional().describe("Igual que estado=todos"),
     },
     async correr(a) {
       const q: any = {};
-      if (!a.incluir_inactivos) q.isActive = { $ne: false };
+      const estado = a.estado ?? (a.incluir_inactivos ? "todos" : "activos");
+      if (estado === "activos") q.isActive = { $ne: false };
+      if (estado === "inactivos") q.isActive = false;
+      if (estado === "contrato_finalizado") Object.assign(q, { isActive: false, "desactivacion.motivo": "fin_de_contrato" });
+      if (estado === "pausados") Object.assign(q, { isActive: false, "desactivacion.motivo": { $ne: "fin_de_contrato" } });
       if (a.texto) q.name = new RegExp(String(a.texto).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
-      const ws = await models.workspaces.find(q).select("name isActive createdAt").sort({ name: 1 }).limit(200).lean();
-      return { total: ws.length, clientes: ws.map((w: any) => ({ id: String(w._id), nombre: w.name, activo: w.isActive !== false })) };
+      const ws = await models.workspaces.find(q).select("name isActive desactivacion createdAt").sort({ name: 1 }).limit(200).lean();
+      return { total: ws.length, clientes: ws.map((w: any) => ({ id: String(w._id), nombre: w.name, ...estadoEntorno(w) })) };
     },
   },
   {
     nombre: "ver_cliente",
     titulo: "Ficha de un cliente",
     descripcion:
-      "Resumen en vivo de un cliente: próximas producciones, estado del onboarding, último ánimo leído en Telegram y equipo con acceso.",
+      "Resumen en vivo de un cliente: su estado (activo, pausado con motivo o contrato finalizado), próximas producciones, estado del onboarding, último ánimo leído en Telegram y equipo con acceso.",
     perfiles: TODOS,
     entrada: { cliente: z.string().describe("Nombre o id del cliente") },
     async correr(a, u) {
       const ws = await resolverCliente(a.cliente);
       const hoy = new Date();
       const [workspace, producciones, onboarding, chats, equipo] = await Promise.all([
-        models.workspaces.findById(ws._id).select("name isActive createdAt metaAds.adAccountId").lean(),
+        models.workspaces.findById(ws._id).select("name isActive desactivacion createdAt metaAds.adAccountId").lean(),
         planningService.listEntries(String(ws._id), new Date(hoy.getTime() - 30 * 86_400_000)),
         onboardingProgresoService.detalle(String(ws._id)).catch(() => null),
         models.telegramChats.find({ workspaceId: ws._id, estado: "listo" }).select("firstName telegramUsername ultimoAnimo updatedAt").lean(),
@@ -67,7 +75,7 @@ export const toolsComunes: ToolMcp[] = [
       ]);
       const verAnimo = ["direccion", "pm", "contenido"].includes(u.perfil);
       return {
-        cliente: { id: String(ws._id), nombre: ws.name, activo: (workspace as any)?.isActive !== false, desde: fecha((workspace as any)?.createdAt, false) },
+        cliente: { id: String(ws._id), nombre: ws.name, desde: fecha((workspace as any)?.createdAt, false), ...estadoEntorno(workspace) },
         metaConectado: Boolean((workspace as any)?.metaAds?.adAccountId),
         producciones: producciones.map((p: any) => ({
           id: String(p._id), titulo: p.title, fecha: fecha(p.date), cumplida: p.cumplida === true, origen: p.source,

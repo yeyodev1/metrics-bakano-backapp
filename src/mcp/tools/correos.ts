@@ -3,7 +3,7 @@ import jwt from "jsonwebtoken";
 import models from "../../models";
 import { resendService } from "../../services/resend.service";
 import { correoBloqueado } from "../../utils/contactosBloqueados";
-import { resolverCliente, type ToolMcp } from "./base";
+import { estadoEntorno, resolverCliente, type ToolMcp } from "./base";
 
 /** Da tiempo a abrir la prueba en el correo y leerla con calma. */
 const TOKEN_MIN = 30;
@@ -23,9 +23,11 @@ function secreto(): string {
 async function destinatarios(a: { para?: string[]; cliente?: string }) {
   const todos = new Set<string>((a.para ?? []).map((c) => c.toLowerCase().trim()).filter(Boolean));
   let entorno: string | undefined;
+  let estado: ReturnType<typeof estadoEntorno> | undefined;
   if (a.cliente) {
     const ref = await resolverCliente(a.cliente);
     entorno = ref.name;
+    estado = estadoEntorno(await models.workspaces.findById(ref._id).select("isActive desactivacion").lean());
     const gente = await models.users
       .find({
         $or: [{ "workspaces.workspaceId": ref._id }, { workspaceId: ref._id }],
@@ -40,7 +42,7 @@ async function destinatarios(a: { para?: string[]; cliente?: string }) {
   const envio: string[] = [];
   const bloqueados: string[] = [];
   for (const c of todos) ((await correoBloqueado(c)) ? bloqueados : envio).push(c);
-  return { envio, bloqueados, entorno };
+  return { envio, bloqueados, entorno, estado };
 }
 
 export const toolsCorreos: ToolMcp[] = [
@@ -60,7 +62,7 @@ export const toolsCorreos: ToolMcp[] = [
     },
     async correr(a, u) {
       if (!a.para?.length && !a.cliente) throw new Error("Dime a quién: correos en `para` o un entorno en `cliente`.");
-      const { envio, bloqueados, entorno } = await destinatarios(a);
+      const { envio, bloqueados, entorno, estado } = await destinatarios(a);
       if (!envio.length) throw new Error("No queda nadie a quien enviarle.");
       if (envio.length > MAX_DESTINATARIOS) throw new Error(`Son ${envio.length} destinatarios; el máximo por envío es ${MAX_DESTINATARIOS}. Pártelo.`);
       const firma = `${u.nombre} · Bakano`;
@@ -71,6 +73,7 @@ export const toolsCorreos: ToolMcp[] = [
       return {
         pruebaEnviadaA: u.email,
         ...(entorno ? { entorno } : {}),
+        ...(estado && estado.estado !== "activo" ? { ojo: `${entorno} no está activo: ${estado.motivo}. ${estado.aviso}` } : {}),
         llegaria: envio,
         ...(bloqueados.length ? { noSeLesEnvia: bloqueados.length } : {}),
         token,
