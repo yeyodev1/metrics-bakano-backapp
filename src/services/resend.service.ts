@@ -1995,6 +1995,59 @@ export class ResendService {
    * cancelo desde el link de agendamiento del CRM. `sin_entorno` va a los
    * superadmins porque nadie mas puede resolverlo.
    */
+  /**
+   * Aviso a contenido (Ariana y la content del cliente) cuando una producción
+   * se agenda, se mueve o se cancela: la grabación la organiza producción,
+   * pero los videos listos para esa fecha son de contenido.
+   */
+  async sendAvisoContenidoProduccion(params: {
+    to: string[];
+    titulo: string;
+    que: string;
+    estadoGuiones?: string;
+    pendiente: string;
+    workspaceId: string;
+  }): Promise<void> {
+    if (!params.to.length) return;
+    const enlace = `https://metrics.bakano.ec/app/workspaces/${params.workspaceId}/planning`;
+    const html = `<!DOCTYPE html>
+<html lang="es">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+<body style="margin:0;padding:0;background:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="padding:40px 20px;">
+    <tr><td align="center">
+      <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
+        ${barraMarca()}
+        <tr>
+          <td style="background:linear-gradient(135deg,#e6285c 0%,#85529c 100%);padding:28px 40px;text-align:center;">
+            <h1 style="margin:0;font-size:22px;font-weight:800;color:#ffffff;">${params.titulo}</h1>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:28px 40px 12px;">
+            <p style="margin:0 0 16px;font-size:15px;color:#1e293b;line-height:1.7;">${params.que}</p>
+            ${params.estadoGuiones ? `<p style="margin:0 0 16px;font-size:15px;color:#475569;line-height:1.7;">${params.estadoGuiones}</p>` : ""}
+            <div style="background:#fdf2f8;border:1.5px solid #fbcfe8;border-radius:12px;padding:16px 20px;margin-bottom:24px;">
+              <p style="margin:0;font-size:14px;color:#9d174d;line-height:1.6;"><strong>Contenido:</strong> ${params.pendiente}</p>
+            </div>
+            <div style="text-align:center;margin-bottom:12px;">
+              <a href="${enlace}" style="display:inline-block;background:linear-gradient(135deg,#e6285c 0%,#85529c 100%);color:#ffffff;text-decoration:none;padding:13px 32px;border-radius:10px;font-size:15px;font-weight:700;">Ver el Planificador</a>
+            </div>
+          </td>
+        </tr>
+        <tr>
+          <td style="background:#f8fafc;padding:16px 40px;border-top:1px solid #e2e8f0;text-align:center;">
+            <p style="margin:0;color:#94a3b8;font-size:12px;">Aviso interno de Bakano para contenido.</p>
+          </td>
+        </tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+    await this.client.emails.send({ from: this.from, to: params.to, subject: params.titulo, html });
+  }
+
   async sendProduccionCrmEmail(params: {
     to: string[];
     tipo: "creada" | "reprogramada" | "cancelada" | "sin_entorno";

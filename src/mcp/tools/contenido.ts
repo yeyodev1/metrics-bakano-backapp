@@ -12,7 +12,9 @@ const videoPlanningService = new VideoPlanningService();
 
 /** Quién mueve qué fecha: el contenido mueve publicaciones; la producción es del PM. */
 const MUEVEN_VIDEO: PerfilMcp[] = ["direccion", "pm", "contenido"];
-const MUEVEN_PRODUCCION: PerfilMcp[] = ["direccion", "pm"];
+/** Producción organiza su calendario completo; contenido se entera de cada cambio. */
+const MUEVEN_PRODUCCION: PerfilMcp[] = ["direccion", "pm", "produccion"];
+const MUEVEN_ALGO: PerfilMcp[] = [...new Set([...MUEVEN_VIDEO, ...MUEVEN_PRODUCCION])];
 const ANTICIPACION_PRODUCCION_H = 48;
 const TOKEN_MIN = 5;
 
@@ -41,7 +43,7 @@ async function evaluarCambio(a: any, u: UsuarioMcp) {
   let descripcion = "";
 
   if (a.tipo === "produccion") {
-    if (!MUEVEN_PRODUCCION.includes(u.perfil)) bloqueos.push("Mover producciones le toca al Project Manager.");
+    if (!MUEVEN_PRODUCCION.includes(u.perfil)) bloqueos.push("Mover producciones le toca a Producción o al Project Manager.");
     if (!a.produccion_id || !Types.ObjectId.isValid(a.produccion_id)) throw new Error("Falta produccion_id (sale de calendario_producciones).");
     const p: any = await models.planning.findById(a.produccion_id).populate("workspaceId", "name").lean();
     if (!p) throw new Error("No encontré esa producción.");
@@ -53,6 +55,7 @@ async function evaluarCambio(a: any, u: UsuarioMcp) {
       bloqueos.push(`La producción se agenda con al menos ${ANTICIPACION_PRODUCCION_H} h de anticipación.`);
     }
     if (p.source === "crm") advertencias.push("Viene del CRM: se mueve también la cita en GoHighLevel.");
+    advertencias.push("Al moverla se avisa a Ariana y a la content del cliente (in-app y correo) para que los videos estén listos para la nueva fecha.");
     const vp: any = await planningDeLaProduccion(p._id);
     if (vp?.items?.length && !vp.clienteAprobado) {
       advertencias.push("Tiene guiones sin aprobar: el plazo de correcciones del cliente (48 h antes) se corre con la nueva fecha.");
@@ -63,7 +66,7 @@ async function evaluarCambio(a: any, u: UsuarioMcp) {
       .lean();
     for (const o of otras as any[]) advertencias.push(`Queda cerca de otra producción del mismo cliente: "${o.title}" el ${fecha(o.date)}.`);
   } else {
-    if (!MUEVEN_VIDEO.includes(u.perfil)) bloqueos.push("Mover publicaciones le toca a Contenido o al Project Manager.");
+    if (!MUEVEN_VIDEO.includes(u.perfil)) throw new Error("Mover publicaciones de videos le toca a Contenido o al Project Manager.");
     if (!a.planning_id || !a.item_id) throw new Error("Faltan planning_id e item_id (salen de ver_planificacion).");
     const vp: any = await models.videoPlanning.findById(a.planning_id).populate("workspaceId", "name").lean();
     const item = vp?.items?.find((i: any) => String(i._id) === String(a.item_id));
@@ -149,8 +152,8 @@ export const toolsContenido: ToolMcp[] = [
     nombre: "consultar_cambio_fecha",
     titulo: "¿Se puede mover esta fecha?",
     descripcion:
-      "Paso 1 de 2 para mover una fecha. No cambia nada: revisa si la fecha de publicación de un video (tipo=video) o la fecha de una producción (tipo=produccion) se puede mover, con motivos y advertencias. Si se puede, devuelve un token de 5 minutos para mover_fecha. Contenido y PM mueven videos; solo PM y dirección mueven producciones (y se mueve también en el CRM).",
-    perfiles: MUEVEN_VIDEO,
+      "Paso 1 de 2 para mover una fecha. No cambia nada: revisa si la fecha de publicación de un video (tipo=video) o la fecha de una producción (tipo=produccion) se puede mover, con motivos y advertencias. Si se puede, devuelve un token de 5 minutos para mover_fecha. Contenido y PM mueven videos; Producción, PM y dirección mueven producciones (se mueve también en el CRM y se avisa a Ariana y a la content del cliente).",
+    perfiles: MUEVEN_ALGO,
     entrada: {
       tipo: z.enum(["video", "produccion"]),
       nueva_fecha: z.string().describe("AAAA-MM-DD o AAAA-MM-DDTHH:mm, hora de Ecuador"),
@@ -164,8 +167,8 @@ export const toolsContenido: ToolMcp[] = [
     nombre: "mover_fecha",
     titulo: "Mover la fecha (con token)",
     descripcion:
-      "Paso 2 de 2: aplica el cambio que consultar_cambio_fecha aprobó. Solo acepta ese token (vence en 5 minutos y es de quien lo pidió). Confirma con la persona antes.",
-    perfiles: MUEVEN_VIDEO,
+      "Paso 2 de 2: aplica el cambio que consultar_cambio_fecha aprobó. Solo acepta ese token (vence en 5 minutos y es de quien lo pidió). Si es una producción, avisa a Ariana y a la content del cliente. Confirma con la persona antes.",
+    perfiles: MUEVEN_ALGO,
     escribe: true,
     entrada: { token: z.string() },
     async correr(a, u) {
@@ -183,7 +186,7 @@ export const toolsContenido: ToolMcp[] = [
       );
       if (!revision.permitido) return { movido: false, motivos: revision.motivos };
       if (d.t === "produccion") {
-        await planningService.updateEntry(d.p, { date: d.f });
+        await planningService.updateEntry(d.p, { date: d.f }, u.nombre);
       } else {
         await videoPlanningService.updateItem(d.vp, d.i, { fechaPublicacion: d.f }, u.internalRole ?? undefined, undefined, { id: u._id, nombre: u.nombre });
       }

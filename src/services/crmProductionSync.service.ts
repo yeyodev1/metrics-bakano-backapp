@@ -1,5 +1,6 @@
 import { Types } from "mongoose";
 import models from "../models";
+import { avisoContenidoProduccionService } from "./avisoContenidoProduccion.service";
 import type { IPlanning } from "../models/planning.model";
 import { ghlService } from "./ghl.service";
 import { notificationService } from "./notification.service";
@@ -598,6 +599,13 @@ class CrmProductionSyncService {
     } catch (err: any) {
       console.warn("[CRM Producción] aviso falló:", err.message);
     }
+    // Contenido se entera siempre, con cuántos guiones hay y hasta cuándo corrige el cliente.
+    await avisoContenidoProduccionService.avisar({
+      entryId: entry._id as Types.ObjectId,
+      tipo: tipo === "creada" ? "agendada" : tipo === "reprogramada" ? "movida" : "cancelada",
+      fechaAnterior: detalle.fechaAnterior,
+      porNombre: "alguien desde el CRM",
+    });
   }
 
   private async avisarSinEntorno(cita: CitaCrm, origen: "webhook" | "cron") {
