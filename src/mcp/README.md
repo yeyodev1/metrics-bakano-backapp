@@ -47,6 +47,8 @@ entornos en la plataforma es de superadmin, así que a él no le aparecen.
   que borra la cuenta si era su único entorno). Los contactos bloqueados no se agregan.
   `contrasena_persona_entorno`: pone contraseña (dada o generada `xxxx-xxxx-xxxx`) con `updateUser`, la devuelve
   y opcionalmente manda el correo de acceso. La auditoría guarda `***` en lugar de contraseñas.
+  `agregar_persona_entorno` acepta `contrasena` inicial y la devuelve. `recuperar_contrasena` (dirección y PM)
+  manda el correo de "olvidé mi contraseña" de Metrics o Bakanology (`accesosCliente.recuperarPorCorreo`).
 
 ## Correos (solo superadmin)
 

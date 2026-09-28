@@ -252,7 +252,7 @@ export const toolsEntornos: ToolMcp[] = [
     nombre: "agregar_persona_entorno",
     titulo: "Agregar a alguien a un entorno",
     descripcion:
-      "Da acceso a un entorno a una persona por su correo, como admin o colaborador. Si ya tiene cuenta, solo se le suma el entorno. Si es nueva, se crea la cuenta (el teléfono es obligatorio) y le llega el correo de bienvenida con su contraseña. Como en la plataforma, además arranca el onboarding del entorno si no había empezado, le llega la invitación al bot de Telegram y su acceso a Bakanology. Confirma con la persona antes. Solo superadmin.",
+      "Da acceso a un entorno a una persona por su correo, como admin o colaborador. Si ya tiene cuenta, solo se le suma el entorno (si das contrasena, también se la cambia). Si es nueva, se crea la cuenta (el teléfono es obligatorio) con la contraseña que des o una generada fácil de dictar, te la muestra y le llega el correo de bienvenida con ella. Como en la plataforma, además arranca el onboarding del entorno si no había empezado, le llega la invitación al bot de Telegram y su acceso a Bakanology. Confirma con la persona antes. Solo superadmin.",
     perfiles: ["direccion"],
     soloSuperadmin: true,
     escribe: true,
@@ -263,6 +263,7 @@ export const toolsEntornos: ToolMcp[] = [
       nombre: z.string().max(120).optional().describe("Obligatorio si la persona no tiene cuenta"),
       telefono: z.string().optional().describe("Obligatorio si la persona no tiene cuenta. Sin el código de país"),
       prefijo_pais: z.string().optional().describe("Código de país sin +. Por defecto 593 (Ecuador)"),
+      contrasena: z.string().min(8).max(64).optional().describe("Mínimo 8 caracteres. Si es nueva y no se da, se genera"),
     },
     async correr(a) {
       const correo = String(a.correo).toLowerCase().trim();
@@ -276,7 +277,7 @@ export const toolsEntornos: ToolMcp[] = [
         if (!a.telefono) throw new Error("No tiene cuenta todavía: el teléfono es obligatorio (sin él no le llegan los avisos por WhatsApp).");
         const tel = normalizarTelefono(String(a.telefono), a.prefijo_pais || "593");
         if (!tel.valido) throw new Error(tel.error || "El teléfono no es válido.");
-        password = crypto.randomBytes(9).toString("base64url");
+        password = a.contrasena ?? contrasenaFacil();
       }
       await workspaceService
         .createUser({
@@ -290,6 +291,10 @@ export const toolsEntornos: ToolMcp[] = [
         .catch(traducir);
       if (password) {
         await resendService.sendWelcomeEmail({ to: correo, recipientName: a.nombre, email: correo, password, isInternal: false });
+      } else if (a.contrasena) {
+        const p: any = await models.users.findOne({ email: correo }).select("_id").lean();
+        await workspaceService.updateUser(String(ref._id), String(p._id), { password: a.contrasena }).catch(traducir);
+        password = a.contrasena;
       }
       const est = estadoEntorno(await models.workspaces.findById(ref._id).select("isActive desactivacion").lean());
       return {
@@ -299,7 +304,16 @@ export const toolsEntornos: ToolMcp[] = [
         correo,
         rol: a.rol,
         cuentaNueva: !existe,
-        ...(password ? { aviso: "Le llegó el correo de bienvenida con su contraseña. La contraseña no se muestra aquí." } : {}),
+        ...(password
+          ? {
+              usuario: correo,
+              contrasena: password,
+              entraEn: "https://metrics.bakano.ec",
+              aviso: existe
+                ? "Ya tenía cuenta: se le cambió la contraseña (la anterior ya no sirve). No se le mandó correo."
+                : "Le llegó el correo de bienvenida con esta contraseña. Si se la pasas tú, que sea por un canal privado.",
+            }
+          : {}),
       };
     },
   },
@@ -385,6 +399,41 @@ export const toolsEntornos: ToolMcp[] = [
         entraEn: "https://metrics.bakano.ec",
         correoEnviado,
         aviso: "La contraseña anterior ya no sirve. Compártela por un canal privado.",
+      };
+    },
+  },
+  {
+    nombre: "recuperar_contrasena",
+    titulo: "Mandar el correo para recuperar la contraseña",
+    descripcion:
+      "Le manda a una persona de un entorno el correo para crear una contraseña nueva, el mismo del 'olvidé mi contraseña': en metrics.bakano.ec (enlace de 60 minutos) o en Bakanology (si no tenía cuenta en la academia, se le crea y le llegan sus datos). No cambia nada hasta que la persona entra al enlace. Las contraseñas no se pueden leer: si hay que dársela ya, usa contrasena_persona_entorno.",
+    perfiles: ["direccion", "pm"],
+    escribe: true,
+    entrada: {
+      cliente: z.string().describe("Nombre o id del entorno"),
+      correo: z.string().email(),
+      plataforma: z.enum(["metrics", "bakanology"]).optional().describe("Por defecto metrics"),
+    },
+    async correr(a) {
+      const ref = await resolverCliente(a.cliente);
+      const correo = String(a.correo).toLowerCase().trim();
+      const p: any = await models.users
+        .findOne({ email: correo, $or: [{ "workspaces.workspaceId": ref._id }, { workspaceId: ref._id }] })
+        .select("name isActive role")
+        .lean();
+      if (!p) throw new Error(`${correo} no está en ${ref.name}.`);
+      if (p.role === "superadmin") throw new Error("Es superadmin: que lo pida él desde el login.");
+      if (p.isActive === false) throw new Error("Su cuenta está desactivada: no le llegaría el correo. Reactívala primero en metrics.bakano.ec.");
+      if (await correoBloqueado(correo)) throw new Error("Ese contacto está bloqueado: no se le escribe.");
+      const plataforma = a.plataforma ?? "metrics";
+      const { accesosClienteService } = await import("../../services/accesosCliente.service");
+      const r = await accesosClienteService.recuperarPorCorreo(correo, plataforma);
+      if (!r.ok) throw new Error("No salió el correo. Inténtalo en un momento o usa contrasena_persona_entorno.");
+      return {
+        enviado: true,
+        a: correo,
+        plataforma,
+        ...(r.motivo === "cuenta_creada" ? { nota: "No tenía cuenta en Bakanology: se le creó y le llegaron sus datos." } : { nota: plataforma === "metrics" ? "El enlace vence en 60 minutos." : undefined }),
       };
     },
   },

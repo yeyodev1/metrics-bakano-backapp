@@ -38,7 +38,11 @@ class AccesosClienteService {
   async recuperar(chat: ITelegramChat, plataforma: Plataforma): Promise<{ ok: boolean; correo?: string; motivo?: string }> {
     const correo = await this.correoDe(chat);
     if (!correo) return { ok: false, motivo: "sin_correo" };
+    return this.recuperarPorCorreo(correo, plataforma);
+  }
 
+  /** Lo mismo, a partir del correo: lo usa también el equipo desde el MCP. */
+  async recuperarPorCorreo(correo: string, plataforma: Plataforma): Promise<{ ok: boolean; correo?: string; motivo?: string }> {
     if (plataforma === "metrics") {
       const solicitud = await authService.requestPasswordReset(correo).catch(() => null);
       // Cuenta desconocida o desactivada: se responde igual, sin decir cual es.
