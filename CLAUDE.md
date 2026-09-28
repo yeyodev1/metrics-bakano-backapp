@@ -131,6 +131,26 @@ facturación real, ritmo del mes, equipo asignado y recordatorios.
 - Bot: botón "🔌 Conectar mi CRM" (`crm:ver`) solo si no está conectado o
   está en error; herramienta de IA `verMiCrm`.
 
+### CRM: revisión configurable + modo agencia (2026-09-27)
+- `CrmIntegration.revision { activa, diasConversaciones (1–30, def. 1),
+  diasOportunidades (1–30, def. 1), diasEstancada (2–60, def. 7) }`. Los
+  documentos viejos no la tienen: leer SIEMPRE con `configRevision(doc)`.
+  `activa: false` → el cron no revisa ese entorno.
+- Tope de conversaciones por corrida: `min(60, 30 + 10·(días−1))` (cada una
+  es una llamada de mensajes). Oportunidades: siempre 2 páginas de 100.
+- `PATCH .../integraciones/crm/revision` (solo equipo, 403 a clientes) →
+  `CrmVista`. `POST .../integraciones/crm/revisar` `{ desde, hasta,
+  avisarCliente? }` (solo equipo): revisión manual de hasta 31 días, hora de
+  Ecuador, mismo análisis e índices anti-duplicado; guarda con `dia` = día en
+  que se corrió; `truncado: true` si quedó algo sin mirar. No crea CrmRevision.
+- `CrmIntegration.modo: token_propio | agencia`. Modo agencia: env
+  `GHL_AGENCY_TOKEN` + `GHL_COMPANY_ID`; no se guarda token (`tokenFinal`
+  = ""), el de subcuenta se pide con `POST /oauth/locationToken` y se cachea en
+  memoria. Solo el equipo puede conectar así (`agenciaDisponible` es false
+  para clientes) y una location no se conecta por agencia a dos entornos.
+  `PUT .../integraciones/crm` con `token` → token_propio; sin `token` →
+  agencia si está disponible, si no 400.
+
 ## Notas importantes
 - No hay cron jobs instalados aún — usar `node-cron`
 - Los emails tienen plantillas HTML inline (ver patrón en `resend.service.ts`)
