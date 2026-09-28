@@ -19,6 +19,13 @@ import { PAUTA_MINIMA, PAUTA_TEMPORADA_ALTA, formatoDolares } from "./contratoTe
 
 const APP_URL = process.env.APP_URL || "https://metrics.bakano.ec";
 
+export interface ResultadoCorreoContrato {
+  ok: boolean;
+  correo?: string;
+  firmado?: boolean;
+  motivo?: "sin_entorno" | "sin_correo" | "correo_invalido" | "bloqueado" | "reciente" | "error";
+}
+
 export type CampoContrato = "rucCliente" | "nombreCliente" | "representanteCliente" | "email" | "presupuestoPauta";
 
 export const CAMPOS_CONTRATO: CampoContrato[] = ["rucCliente", "nombreCliente", "representanteCliente", "email", "presupuestoPauta"];
@@ -179,19 +186,24 @@ class ContratoChatService {
     return { ok: true, firmado, correo: correo || undefined };
   }
 
+  /** Desde el chat: el mismo envío, con el nombre de quien escribe. */
+  async enviarPorCorreo(chat: ITelegramChat, correoPedido?: string): Promise<ResultadoCorreoContrato> {
+    if (!chat.workspaceId) return { ok: false, motivo: "sin_entorno" };
+    return this.enviarContratoPorCorreo(chat.workspaceId, correoPedido, chat.firstName);
+  }
+
   /**
    * Manda el contrato al correo que pida el cliente: el firmado si ya firmó, o
    * el borrador con el link de firma si no. Por defecto, el correo del
-   * contrato. Antes solo salía el firmado, y un cliente que quería leerlo en su
-   * correo antes de firmar se quedaba dando vueltas con el bot.
+   * contrato. Guarda el id de Resend para poder decirle después si le llegó.
    */
-  async enviarPorCorreo(
-    chat: ITelegramChat,
-    correoPedido?: string
-  ): Promise<{ ok: boolean; correo?: string; firmado?: boolean; motivo?: "sin_entorno" | "sin_correo" | "correo_invalido" | "bloqueado" | "reciente" | "error" }> {
-    if (!chat.workspaceId) return { ok: false, motivo: "sin_entorno" };
+  async enviarContratoPorCorreo(
+    workspaceId: Types.ObjectId | string,
+    correoPedido?: string,
+    nombre?: string
+  ): Promise<ResultadoCorreoContrato> {
     const w: any = await models.workspaces
-      .findById(chat.workspaceId)
+      .findById(workspaceId)
       .select("contractData preNegotiatedContract onboardingStatus contratoCorreoEnviado")
       .lean();
     if (!w) return { ok: false, motivo: "sin_entorno" };
@@ -209,22 +221,47 @@ class ContratoChatService {
 
     const firmado = Boolean(w.onboardingStatus?.contractSubmitted);
     const faltan = CAMPOS_CONTRATO.filter((c) => !String(datos[c] ?? "").trim());
+    let id: string | undefined;
     try {
       const pdf = await onboardingService.generateContractPDF(datos as any, { firmado, borrador: !firmado });
-      await resendService.sendContratoAlCliente({
+      ({ id } = await resendService.sendContratoAlCliente({
         to: correo,
-        recipientName: datos.representanteCliente || chat.firstName || "",
+        recipientName: datos.representanteCliente || nombre || "",
         pdfBuffer: pdf,
         firmado,
-        linkFirma: this.link(chat.workspaceId),
+        linkFirma: this.link(workspaceId),
         faltanDatos: firmado ? 0 : faltan.length,
-      });
+      }));
     } catch (error: any) {
       console.error("[Contrato] no salió el correo:", error?.message || error);
       return { ok: false, correo, motivo: "error" };
     }
-    await models.workspaces.updateOne({ _id: chat.workspaceId }, { $set: { contratoCorreoEnviado: { correo, en: new Date() } } });
+    await models.workspaces.updateOne({ _id: workspaceId }, { $set: { contratoCorreoEnviado: { correo, en: new Date(), id } } });
     return { ok: true, correo, firmado };
+  }
+
+  /**
+   * Si le llegó el último correo del contrato. Resend dice "delivered" cuando
+   * el servidor del cliente lo aceptó: de ahí a la bandeja o a spam ya no lo
+   * sabemos, por eso siempre se le recuerda revisar spam.
+   */
+  async estadoCorreo(workspaceId: Types.ObjectId | string): Promise<{
+    correo: string | null;
+    enviadoEn: Date | null;
+    estado: "sin_enviar" | "enviando" | "entregado" | "abierto" | "demorado" | "rebotado" | "desconocido";
+  }> {
+    const w: any = await models.workspaces.findById(workspaceId).select("contratoCorreoEnviado contractData.email").lean();
+    const envio = w?.contratoCorreoEnviado;
+    if (!envio?.en) return { correo: w?.contractData?.email || null, enviadoEn: null, estado: "sin_enviar" };
+    const evento = envio.id ? await resendService.estadoCorreo(envio.id) : null;
+    const estado =
+      evento === "delivered" ? "entregado"
+      : evento === "opened" || evento === "clicked" ? "abierto"
+      : evento === "delivery_delayed" ? "demorado"
+      : evento === "bounced" || evento === "failed" || evento === "complained" || evento === "suppressed" ? "rebotado"
+      : evento === "sent" || evento === "queued" || evento === "scheduled" ? "enviando"
+      : "desconocido";
+    return { correo: envio.correo, enviadoEn: envio.en, estado };
   }
 
   /** El link que abre solo la pantalla de firma. */

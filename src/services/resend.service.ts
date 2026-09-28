@@ -1,17 +1,19 @@
 import { Resend } from "resend";
 import { sinBloqueados } from "../utils/contactosBloqueados";
+import { paraModoOscuro } from "../utils/correoModoOscuro";
 
 const MARCA = "Bakano Metrics";
-// Logo blanco con punto rosado: vive en public/ del front para tener URL fija.
-const LOGO_CLARO = "https://metrics.bakano.ec/email/bakano-logo-light.png";
-
 /**
- * Barra de marca arriba de todos los correos. Fondo oscuro para que el logo
- * blanco (y su punto rosado) contraste siempre, sea cual sea el color del
- * encabezado de cada correo (rojo urgente, morado novedades, etc.).
+ * Cabecera con el logo y su fondo oscuro en una sola imagen (public/ del
+ * front). Como imagen, ningún cliente de correo le invierte los colores: con
+ * fondo y logo por separado, Gmail en modo oscuro volvía clara la barra y el
+ * logo blanco desaparecía.
  */
+const CABECERA = "https://metrics.bakano.ec/email/bakano-header.png";
+
+/** Cabecera de marca arriba de todos los correos: una sola imagen, ver CABECERA. */
 function barraMarca(): string {
-  return `<tr><td style="background:#0f0d14;padding:22px 40px 18px;text-align:center;border-bottom:3px solid #e6285c;"><a href="https://metrics.bakano.ec" style="text-decoration:none;"><img src="${LOGO_CLARO}" width="150" height="26" alt="${MARCA}" style="display:inline-block;border:0;outline:none;width:150px;height:26px;"/></a><p style="margin:8px 0 0;font-size:11px;font-weight:700;letter-spacing:4px;text-transform:uppercase;color:#f9a8d4;">📊 metrics</p></td></tr>`;
+  return `<tr><td style="padding:0;line-height:0;font-size:0;"><a href="https://metrics.bakano.ec" style="text-decoration:none;"><img src="${CABECERA}" width="600" alt="${MARCA}" style="display:block;width:100%;max-width:600px;height:auto;border:0;outline:none;"/></a></td></tr>`;
 }
 
 
@@ -44,6 +46,7 @@ export class ResendService {
           }
           return resend.emails.send({
             ...p,
+            ...(typeof p.html === "string" ? { html: paraModoOscuro(p.html) } : {}),
             to,
             ...(p.cc ? { cc: await sinBloqueados(p.cc) } : {}),
             ...(p.bcc ? { bcc: await sinBloqueados(p.bcc) } : {}),
@@ -56,7 +59,7 @@ export class ResendService {
   private get from(): string {
     const configurado = process.env.RESEND_FROM_EMAIL || "noreply@bakano.ec";
     const direccion = configurado.match(/<([^>]+)>/)?.[1] ?? configurado.trim();
-    return `${process.env.RESEND_FROM_NAME || `${MARCA} 📊`} <${direccion}>`;
+    return `${process.env.RESEND_FROM_NAME || MARCA} <${direccion}>`;
   }
 
   async sendWelcomeEmail(params: WelcomeEmailParams): Promise<void> {
@@ -1120,7 +1123,7 @@ export class ResendService {
     firmado: boolean;
     linkFirma: string;
     faltanDatos?: number;
-  }): Promise<void> {
+  }): Promise<{ id?: string }> {
     const nombre = params.recipientName?.trim().split(" ")[0] || "Hola";
     const cuerpo = params.firmado
       ? `<p style="margin:0 0 16px;font-size:15px;color:#475569;line-height:1.7;">Te adjuntamos tu contrato de servicios con Bakano, <strong>ya firmado</strong>. Guárdalo para tus registros.</p>`
@@ -1150,7 +1153,7 @@ export class ResendService {
   </table>
 </body>
 </html>`;
-    const { error } = await this.client.emails.send({
+    const { data, error } = await this.client.emails.send({
       from: "Bakano <team@bakano.ec>",
       to: params.to,
       bcc: ["dreyes@bakano.ec", "dquimi@bakano.ec"],
@@ -1161,6 +1164,21 @@ export class ResendService {
       ],
     });
     if (error) throw new Error(error.message);
+    return { id: data?.id };
+  }
+
+  /**
+   * Qué pasó con un correo ya enviado, según Resend: "delivered", "bounced",
+   * "opened"... null si no se pudo consultar.
+   */
+  async estadoCorreo(id: string): Promise<string | null> {
+    try {
+      const { data, error } = await new Resend(process.env.RESEND_API_KEY).emails.get(id);
+      if (error || !data) return null;
+      return (data as any).last_event ?? null;
+    } catch {
+      return null;
+    }
   }
 
   /**
