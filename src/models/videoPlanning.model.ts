@@ -331,7 +331,7 @@ const VideoItemSchema = new Schema<IVideoItem>(
 // ── VideoPlanning document ─────────────────────────────────────────────────
 /** Un intento de aviso al cliente, con su resultado. */
 export interface INotificacionPlanning {
-  canal: "whatsapp" | "email";
+  canal: "whatsapp" | "email" | "telegram";
   enviadoEn: Date;
   porNombre?: string;
   exito: boolean;
@@ -422,7 +422,7 @@ const VideoPlanningSchema = new Schema<IVideoPlanning>(
     notificaciones: {
       type: [
         {
-          canal: { type: String, enum: ["whatsapp", "email"], required: true },
+          canal: { type: String, enum: ["whatsapp", "email", "telegram"], required: true },
           enviadoEn: { type: Date, default: Date.now },
           porNombre: { type: String, trim: true },
           exito: { type: Boolean, default: true },
