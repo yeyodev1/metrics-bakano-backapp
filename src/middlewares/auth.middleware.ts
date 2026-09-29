@@ -51,14 +51,15 @@ export async function authMiddleware(
   try {
     const fresh = await models.users
       .findById(decoded._id)
-      .select("role isInternal internalRole isActive")
-      .lean<{ role?: string; isInternal?: boolean; internalRole?: string; isActive?: boolean }>();
+      .select("email role isInternal internalRole isActive")
+      .lean<{ email?: string; role?: string; isInternal?: boolean; internalRole?: string; isActive?: boolean }>();
 
     if (fresh) {
       if (fresh.isActive === false) {
         res.status(401).json({ message: "Usuario desactivado." });
         return;
       }
+      decoded.email = fresh.email ?? decoded.email;
       decoded.role = fresh.role ?? decoded.role;
       decoded.isInternal = fresh.isInternal === true;
       decoded.internalRole = fresh.internalRole ?? null;

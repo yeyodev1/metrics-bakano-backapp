@@ -6,6 +6,7 @@ import { slackService } from "./slack.service";
 import { telegramService } from "./telegram.service";
 import { atencionClienteService, fechaEcuador } from "./atencionCliente.service";
 import { equipoAtencionService } from "./equipoAtencion.service";
+import { puedeMarcarPaso } from "./permisoOnboarding.service";
 import { BIENVENIDA, ORDEN_SESIONES, SESIONES_ONBOARDING, type SesionOnboarding } from "./onboardingSesiones.service";
 
 /**
@@ -51,6 +52,10 @@ export interface PasoProgreso {
   paso: PasoOnboarding;
   etiqueta: string;
   responsable: string;
+  /** Correos de quienes pueden marcar este paso ademas de los superadmin. */
+  responsableEmails: string[];
+  /** Si quien pide el progreso puede marcar este paso. Lo llena el controlador. */
+  puedoMarcar?: boolean;
   estado: EstadoSesionOnboarding;
   fecha?: Date;
   motivo?: string;
@@ -107,6 +112,7 @@ class OnboardingProgresoService {
         paso,
         etiqueta: ETIQUETA_PASO[paso],
         responsable: RESPONSABLE_PASO[paso],
+        responsableEmails: CORREO_PASO[paso],
         estado,
         fecha,
         motivo: s?.motivo,
@@ -180,6 +186,11 @@ class OnboardingProgresoService {
       models.onboardingEventos.find({ workspaceId: new Types.ObjectId(workspaceId) }).sort({ createdAt: -1 }).limit(50).lean(),
     ]);
     return { progreso, bitacora };
+  }
+
+  /** Quien puede mover el paso: su responsable, Genesis o un superadmin. */
+  puedeMarcar(usuario: { role?: string | null; email?: string | null } | undefined, paso: PasoOnboarding): boolean {
+    return puedeMarcarPaso(usuario, CORREO_PASO[paso] ?? []);
   }
 
   /** El responsable mueve el paso. "bloqueada" exige motivo. */
