@@ -8,6 +8,7 @@ import { ghlService } from "./ghl.service";
 import { slackService } from "./slack.service";
 import { crmProductionSyncService } from "./crmProductionSync.service";
 import { contenidoClienteService, type ReservaContenido } from "./contenidoCliente.service";
+import { estadoPagoService } from "./estadoPago.service";
 import { produccionPlanificacionService } from "./produccionPlanificacion.service";
 import { CALENDARIOS_PRODUCCION, EQUIPO_ATENCION, equipoAtencionService, type TemaAtencion } from "./equipoAtencion.service";
 
@@ -55,6 +56,27 @@ const BLOQUEO_AGENDA_MS = 60_000;
  * se graba si la estrategia lo pide, y eso lo habilita el equipo.
  */
 const MESES_ENTRE_PRODUCCIONES = Number(process.env.PRODUCCION_MESES_ENTRE) > 0 ? Number(process.env.PRODUCCION_MESES_ENTRE) : 6;
+
+/**
+ * Cada cuantos meses graba ESTE cliente. Hay clientes que graban cada mes y
+ * otros cada medio año: el equipo lo ajusta por cliente (produccion.mesesEntre)
+ * y si no, vale la regla general.
+ */
+export function mesesEntreDe(workspace: { produccion?: { mesesEntre?: number } } | null | undefined): number {
+  const propio = Number(workspace?.produccion?.mesesEntre);
+  return propio > 0 ? propio : MESES_ENTRE_PRODUCCIONES;
+}
+
+/** "una cada 6 meses", "una al mes": para los textos al cliente. */
+export function frecuenciaEnTexto(meses: number): string {
+  return meses === 1 ? "una al mes" : `una cada ${meses} meses`;
+}
+
+/**
+ * Dias entre que el cliente aprueba sus guiones y su produccion: el margen
+ * para hacer los ajustes de la planificacion antes de grabar.
+ */
+export const DIAS_APROBACION_A_PRODUCCION = 4;
 // El cliente necesita tiempo para revisar guiones antes de grabar (48 h de correcciones).
 /**
  * Dias de margen para agendar una produccion, contados desde mañana.
@@ -135,15 +157,19 @@ export interface EstadoProduccion {
   reserva?: ReservaContenido | null;
   /** Se quedo sin guiones por grabar: la espera entre producciones no aplica. */
   sinContenido?: boolean;
-  /** Por qué no puede agendar: ya tiene una, o le falta la reunión con Ariana. */
-  bloqueo?: "ya_agendada" | "falta_ariana";
+  /** Por qué no puede agendar: ya tiene una, le falta la reunión con Ariana o debe pagos. */
+  bloqueo?: "ya_agendada" | "falta_ariana" | "pago_pendiente";
+  /** Deuda vencida, cuando el bloqueo es por pago. */
+  deudaTexto?: string;
+  /** Aprobó guiones que todavía no se graban: puede agendar sin esperar los meses. */
+  porGuionesAprobados?: boolean;
   /** La fecha permitida la pone la reunión con Ariana (+4 días). */
   porAriana?: Date;
 }
 
 export type ResultadoProduccion =
   | { ok: true; cuando: string; planificacion?: { tienePlanificacion: boolean; guiones: number; listaParaCliente: boolean } | null }
-  | { ok: false; motivo: "sin_calendario" | "en_curso" | "ya_agendada" | "falta_ariana" | "antes_de_tiempo" | "ocupado" | "error" };
+  | { ok: false; motivo: "sin_calendario" | "en_curso" | "ya_agendada" | "falta_ariana" | "pago_pendiente" | "antes_de_tiempo" | "ocupado" | "error" };
 
 function sumarMeses(fecha: Date, meses: number): Date {
   const r = new Date(fecha);
@@ -314,6 +340,26 @@ class AtencionClienteService {
     if (proxima) return { puedeAgendar: false, bloqueo: "ya_agendada", proxima: proxima.date, ultima: ultima?.date };
     // Primera producción: primero la reunión con Ariana.
     if (ariana.aplica && !ariana.tieneAriana) return { puedeAgendar: false, bloqueo: "falta_ariana" };
+    // Sin pago al día no se graba: es lo primero que se le dice.
+    const pago = await estadoPagoService.bloqueo(String(workspaceId)).catch(() => null);
+    if (pago) return { puedeAgendar: false, bloqueo: "pago_pendiente", deudaTexto: pago.deudaTexto, ultima: ultima?.date };
+
+    // Aprobó guiones que todavía no se graban: eso es lo que decide que toca
+    // grabar, no el calendario. Se agenda al instante, dejando unos días para
+    // ajustar la planificación.
+    const aprobada: any = await models.videoPlanning
+      .findOne({
+        workspaceId,
+        clienteAprobado: true,
+        items: { $elemMatch: { clienteAprobacion: "APROBADO", estadoProduccion: "POR_GRABAR" } },
+      })
+      .sort({ clienteAprobadoAt: -1 })
+      .select("clienteAprobadoAt")
+      .lean();
+    const porAprobacion = aprobada?.clienteAprobadoAt
+      ? new Date(inicioDiaEcuador(new Date(aprobada.clienteAprobadoAt)).getTime() + DIAS_APROBACION_A_PRODUCCION * 86_400_000)
+      : undefined;
+    const mesesEntre = mesesEntreDe(entorno as any);
 
     // La espera entre producciones existe para no grabar de mas. Si ya no
     // queda nada escrito por grabar, esperar es justo lo contrario de lo que
@@ -324,16 +370,17 @@ class AtencionClienteService {
     // la espera de los seis meses no aplica.
     const excepcion = (entorno as any)?.produccion?.excepcionHasta;
     const conExcepcion = excepcion && new Date(excepcion).getTime() > ahora.getTime();
-    const porRegla = ultima && !sinContenido && !conExcepcion ? sumarMeses(ultima.date, MESES_ENTRE_PRODUCCIONES) : ahora;
+    const porRegla = ultima && !sinContenido && !conExcepcion && !aprobada ? sumarMeses(ultima.date, mesesEntre) : ahora;
     const minimo = desdeParaProduccion(ahora).getTime();
     const porAriana = ariana.aplica && ariana.produccionDesde && ariana.produccionDesde.getTime() > Math.max(porRegla.getTime(), minimo) ? ariana.produccionDesde : undefined;
     return {
       puedeAgendar: true,
       ultima: ultima?.date,
-      habilitadaDesde: new Date(Math.max(porRegla.getTime(), minimo, porAriana?.getTime() ?? 0)),
+      habilitadaDesde: new Date(Math.max(porRegla.getTime(), minimo, porAriana?.getTime() ?? 0, porAprobacion?.getTime() ?? 0)),
       porAriana,
       esperar: porRegla.getTime() > minimo,
-      mesesEntre: MESES_ENTRE_PRODUCCIONES,
+      mesesEntre,
+      porGuionesAprobados: Boolean(aprobada),
       porEstrategia: Boolean(conExcepcion),
       reserva,
       sinContenido,
@@ -373,7 +420,9 @@ class AtencionClienteService {
     try {
       // La regla se vuelve a validar aqui: ni el menu ni la IA la pueden saltar.
       const estado = await this.estadoProduccion(chat.workspaceId!);
-      if (!estado.puedeAgendar) return { ok: false, motivo: estado.bloqueo === "falta_ariana" ? "falta_ariana" : "ya_agendada" };
+      if (!estado.puedeAgendar) {
+        return { ok: false, motivo: estado.bloqueo === "falta_ariana" || estado.bloqueo === "pago_pendiente" ? estado.bloqueo : "ya_agendada" };
+      }
       if (inicio.getTime() < estado.habilitadaDesde!.getTime() - 60_000) return { ok: false, motivo: "antes_de_tiempo" };
 
       const cliente = await this.datosCliente(chat);

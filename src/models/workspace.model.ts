@@ -207,7 +207,14 @@ export interface IWorkspace extends Document {
    * Produccion: cada 6 meses. `excepcionHasta` es la ventana que abre el
    * equipo cuando la estrategia pide grabar antes de tiempo.
    */
-  produccion?: { excepcionHasta?: Date; excepcionPorNombre?: string; excepcionMotivo?: string };
+  produccion?: {
+    excepcionHasta?: Date;
+    excepcionPorNombre?: string;
+    excepcionMotivo?: string;
+    /** Cada cuantos meses graba este cliente. Sin esto vale la regla general. */
+    mesesEntre?: number;
+    mesesEntrePorNombre?: string;
+  };
   /**
    * El cliente con pagos vencidos no ve sus guiones. Esto es la excepcion que
    * pone el equipo (un acuerdo de pago, un pago que no se registro a tiempo).
@@ -416,7 +423,13 @@ const WorkspaceSchema = new Schema<IWorkspace>(
       default: undefined,
     },
     produccion: {
-      type: { excepcionHasta: Date, excepcionPorNombre: String, excepcionMotivo: String },
+      type: {
+        excepcionHasta: Date,
+        excepcionPorNombre: String,
+        excepcionMotivo: String,
+        mesesEntre: Number,
+        mesesEntrePorNombre: String,
+      },
       default: undefined,
     },
     guionesSinPago: {
