@@ -23,6 +23,7 @@ import { onboardingRouter } from "./onboarding.router";
 import contratoRouter from "./contrato.router";
 import onboardingProgresoRouter from "./onboardingProgreso.router";
 import recorridoRouter from "./recorrido.router";
+import contextoClienteRouter from "./contextoCliente.router";
 import { resourceRouter } from "./resource.router";
 import { webhookRouter } from "./webhook.router";
 import evaluationRouter from "./evaluation.router";
@@ -69,6 +70,7 @@ function routerApi(app: Application) {
   router.use("/contrato", contratoRouter);
   router.use("/onboarding-progreso", onboardingProgresoRouter);
   router.use("/recorrido", recorridoRouter);
+  router.use("/contexto-cliente", contextoClienteRouter);
   router.use("/evaluations", evaluationRouter);
   router.use("/florinda-sales", florindaSalesRouter);
   router.use("/booking", bookingRouter);
