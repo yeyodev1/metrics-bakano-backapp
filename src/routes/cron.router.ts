@@ -109,7 +109,14 @@ cronRouter.get("/bot-recordatorios", async (req: Request, res: Response) => {
     const { contratoChatService } = await import("../services/contratoChat.service");
     const c = await contratoChatService.recordarPendientes();
     console.log(`[Cron] Contratos sin firmar — revisados: ${c.revisados}, recordados: ${c.recordados}`);
-    res.status(200).json({ ...r, academia: b, contratos: c });
+    // Cada tres semanas: qué quiere destacar el cliente, para planificar sobre eso.
+    const { destacarClienteService } = await import("../services/destacarCliente.service");
+    const d = await destacarClienteService.preguntarPendientes().catch((error: any) => {
+      console.error("[Cron] Qué destacar:", error?.message || error);
+      return null;
+    });
+    if (d) console.log(`[Cron] Qué destacar — candidatos: ${d.candidatos}, preguntados: ${d.preguntados}`);
+    res.status(200).json({ ...r, academia: b, contratos: c, destacar: d });
   } catch (error: any) {
     console.error("[Cron] Bot recordatorios:", error?.message || error);
     res.status(500).json({ error: error?.message || "error" });

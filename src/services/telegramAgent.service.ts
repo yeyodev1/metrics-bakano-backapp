@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { estadoPagoService } from "./estadoPago.service";
+import { destacarClienteService } from "./destacarCliente.service";
 import models from "../models";
 import type { ITelegramChat } from "../models/telegramChat.model";
 import { EQUIPO_ATENCION, equipoAtencionService, type TemaAtencion } from "./equipoAtencion.service";
@@ -485,6 +486,8 @@ CONTRASEÑAS:
 
 - GRABAMOS HASTA QUEDARNOS SIN CONTENIDO. La producción no se agenda "porque toca cada tantos meses": se agenda antes de quedarnos sin guiones por grabar. Usa verReservaDeContenido cuando se hable de producción, contenido o videos; si seAcaba viene en true, díselo claro y empújalo a cerrar fecha ya, que ahí la espera entre producciones no aplica.
 - NO HAY PRODUCCIÓN SIN PLANIFICACIÓN. Dilo siempre que se hable de grabar: los guiones de lo que vamos a grabar tienen que estar escritos y aprobados por él ANTES de la grabación. Si su planificación está vacía, dile que ya avisaste a su equipo de contenido y a Genesis Benalcazar para que los preparen, y pásale el link de su planificación.
+- LO QUE QUIERE DESTACAR: si cuenta qué producto, servicio o promoción quiere destacar (o responde a la pregunta de "qué destacamos"), guárdalo con guardarQueDestacar con sus palabras y dile que Ariana arma sus próximos guiones en base a eso. Si es vago ("todo"), pregúntale cuál primero.
+- SIN PAGO NO HAY GUIONES NI PRODUCCIÓN: con pagos vencidos no ve ni aprueba guiones ni agenda producción. Cuando apruebe sus guiones, puede agendar su producción al instante con verHorariosProduccion.
 - Y para que lo que grabemos llegue a sus clientes hace falta el CRM: si todavía no hizo su sesión de Configuración de CRM y Metrics con David Robles, dile que la agende. Sin eso, los videos no tienen a dónde llevar a la gente.
 
 Mover o cancelar citas (producción, sesiones del onboarding y reuniones):
@@ -566,6 +569,18 @@ Reglas:
             proximas: proximas.map((p) => ({ fecha: fechaEcuador(p.date), titulo: p.title })),
             ultima: ultima ? { fecha: fechaEcuador(ultima.date), titulo: ultima.title, grabada: ultima.cumplida } : null,
           };
+        },
+      },
+
+      guardarQueDestacar: {
+        description:
+          "Guarda lo que el cliente quiere destacar en sus próximos videos (producto, servicio, promoción nueva o de temporada) y avisa a contenido.",
+        inputSchema: z.object({ texto: z.string().describe("Qué quiere destacar, con sus palabras y los detalles que dio (precio, fechas, condiciones)") }),
+        execute: async ({ texto }: { texto: string }) => {
+          const r = await destacarClienteService.guardar(chat.workspaceId!, texto, { nombre: chat.firstName, fuente: "cliente" });
+          return r.ok
+            ? { ok: true, siguiente: "Confírmale que quedó anotado y que Ariana arma sus próximos guiones con eso." }
+            : { ok: false, motivo: r.motivo };
         },
       },
 
