@@ -208,6 +208,11 @@ export interface IWorkspace extends Document {
    * equipo cuando la estrategia pide grabar antes de tiempo.
    */
   produccion?: { excepcionHasta?: Date; excepcionPorNombre?: string; excepcionMotivo?: string };
+  /**
+   * El cliente con pagos vencidos no ve sus guiones. Esto es la excepcion que
+   * pone el equipo (un acuerdo de pago, un pago que no se registro a tiempo).
+   */
+  guionesSinPago?: { hasta?: Date; motivo?: string; porNombre?: string; en?: Date };
   preNegotiatedContract?: any; // Stores predefined contract parameters
   contractData?: any; // Stores the final contract form and signature
   teamInfo?: {
@@ -412,6 +417,10 @@ const WorkspaceSchema = new Schema<IWorkspace>(
     },
     produccion: {
       type: { excepcionHasta: Date, excepcionPorNombre: String, excepcionMotivo: String },
+      default: undefined,
+    },
+    guionesSinPago: {
+      type: { hasta: Date, motivo: String, porNombre: String, en: Date },
       default: undefined,
     },
     publicidad: {

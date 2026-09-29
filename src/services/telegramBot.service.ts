@@ -1,4 +1,5 @@
 import { createHash, randomInt, timingSafeEqual } from "crypto";
+import { estadoPagoService } from "./estadoPago.service";
 import { Types } from "mongoose";
 import models from "../models";
 import type { ITelegramChat } from "../models/telegramChat.model";
@@ -819,8 +820,29 @@ export class TelegramBotService {
     );
   }
 
+  /**
+   * Con pagos vencidos no se muestran ni se aprueban guiones: se le dice por
+   * qué y se le deja el botón para pagar. true = quedó bloqueado.
+   */
+  private async bloqueadoPorPago(chat: ITelegramChat): Promise<boolean> {
+    const bloqueo = await estadoPagoService.bloqueo(String(chat.workspaceId)).catch(() => null);
+    if (!bloqueo) return false;
+    await telegramService.sendMessage(
+      chat.chatId,
+      "📝 <b>Tus guiones ya están listos</b>\n\n" +
+        `Para verlos y aprobarlos primero hay que ponerse al día con el pago: tienes <b>${bloqueo.deudaTexto}</b> vencido.\n\n` +
+        "Apenas se registre tu pago los ves aquí mismo y, cuando los apruebes, puedes agendar tu producción 🎬",
+      [
+        [{ text: "💳 Ver y pagar", callback_data: "pago:ver" }],
+        [{ text: "📋 Volver al menú", callback_data: "menu:ver" }],
+      ]
+    );
+    return true;
+  }
+
   /** Cuántos guiones hay, en qué estado, y el link para verlos en Metrics. */
   private async mostrarGuiones(chat: ITelegramChat): Promise<void> {
+    if (await this.bloqueadoPorPago(chat)) return;
     // Aquí SÍ entran las producciones canceladas: los guiones escritos no se
     // van con la fecha. Si se movió o se canceló la grabación, el cliente
     // igual tiene que poder revisar lo que Ariana ya escribió.
@@ -926,6 +948,7 @@ export class TelegramBotService {
   // ── Revision de guiones ────────────────────────────────────────────────────
   /** Hay revision abierta: se invita a corregir conversando, no a mandar un mensaje suelto. */
   private async invitarARevisar(chat: ITelegramChat, revision: RevisionPendiente): Promise<void> {
+    if (await this.bloqueadoPorPago(chat)) return;
     chat.tema = undefined;
     await chat.save();
     const pendientes = revision.guiones.filter((g) => g.aprobacion !== "APROBADO").length;
@@ -946,6 +969,7 @@ export class TelegramBotService {
   }
 
   private async mostrarGuionesParaRevisar(chat: ITelegramChat): Promise<void> {
+    if (await this.bloqueadoPorPago(chat)) return;
     const r = await revisionGuionesService.resumen(chat);
     if (!r) {
       await telegramService.sendMessage(chat.chatId, "No tienes guiones esperando revisión ahora mismo 🙂");

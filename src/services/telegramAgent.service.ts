@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { estadoPagoService } from "./estadoPago.service";
 import models from "../models";
 import type { ITelegramChat } from "../models/telegramChat.model";
 import { EQUIPO_ATENCION, equipoAtencionService, type TemaAtencion } from "./equipoAtencion.service";
@@ -522,6 +523,25 @@ Reglas:
   }
 
   private herramientas(chat: ITelegramChat, textoCliente: string, turno: { inicio: Date; propuesta: boolean }) {
+    /**
+     * Con pagos vencidos el cliente no ve ni aprueba guiones. La IA recibe el
+     * motivo en vez del guion, para que se lo diga y le ofrezca pagar.
+     */
+    const conPago =
+      <A, R>(fn: (args: A) => Promise<R>) =>
+      async (args: A): Promise<R | Record<string, unknown>> => {
+        const bloqueo = await estadoPagoService.bloqueo(String(chat.workspaceId)).catch(() => null);
+        if (!bloqueo) return fn(args);
+        return {
+          bloqueadoPorPago: true,
+          deudaVencida: bloqueo.deudaTexto,
+          nota:
+            "El cliente tiene pagos vencidos: NO le muestres, leas ni resumas guiones, ni le recibas correcciones o aprobaciones. " +
+            "Dile con amabilidad que sus guiones ya están listos y que para verlos y aprobarlos primero tiene que ponerse al día, " +
+            "y ofrécele el link con verMisPagos / generarLinkDePago.",
+        };
+      };
+
     return {
       verProducciones: {
         description: "Próximas producciones (grabaciones) del cliente y la última realizada.",
@@ -553,7 +573,7 @@ Reglas:
         description:
           "Guiones de las planificaciones recientes: aprobación del cliente, grabación, edición, publicación y hasta cuándo puede pedir correcciones.",
         inputSchema: z.object({}),
-        execute: async () => {
+        execute: conPago(async () => {
           const entradas = await models.planning
             .find({ workspaceId: chat.workspaceId, date: { $gte: new Date(Date.now() - 45 * 86_400_000) } })
             .sort({ date: 1 })
@@ -589,7 +609,7 @@ Reglas:
               };
             }),
           };
-        },
+        }),
       },
 
       verHorariosLibres: {
@@ -621,7 +641,7 @@ Reglas:
         description:
           "Guiones que el cliente tiene por revisar (planificación lista y sin respuesta), con el plazo para pedir correcciones y lo que ya anotó en su borrador.",
         inputSchema: z.object({}),
-        execute: async () => {
+        execute: conPago(async () => {
           const r = await revisionGuionesService.resumen(chat);
           if (!r) return { hayGuionesPorRevisar: false, nota: "No hay guiones esperando su revisión: o ya la envió o todavía no está lista." };
           const enBorrador = new Map(r.correcciones.map((c) => [c.numero, c.texto]));
@@ -638,17 +658,17 @@ Reglas:
               correccionAnotada: enBorrador.get(g.numero) ?? null,
             })),
           };
-        },
+        }),
       },
 
       verGuion: {
         description: "Texto completo de un guion (gancho, cuerpo y CTA) para comentarlo con el cliente.",
         inputSchema: z.object({ numero: z.number().int() }),
-        execute: async ({ numero }: { numero: number }) => {
+        execute: conPago(async ({ numero }: { numero: number }) => {
           const r = await revisionGuionesService.pendiente(chat.workspaceId!);
           const g = r?.guiones.find((x) => x.numero === numero);
           return g ? { numero: g.numero, tema: g.tema, texto: g.texto || "Este guion todavía no tiene texto." } : { error: `No encontré el guion #${numero}.` };
-        },
+        }),
       },
 
       anotarCorreccion: {
@@ -659,8 +679,8 @@ Reglas:
           correccion: z.string().describe("La corrección con las palabras del cliente: qué cambiar y cómo lo quiere"),
           categoria: z.enum(CATEGORIAS_GUION).describe("gancho_debil, tono_incorrecto, estructura, informacion_incorrecta, ortografia u otro"),
         }),
-        execute: async ({ numero, correccion, categoria }: { numero: number; correccion: string; categoria: string }) =>
-          revisionGuionesService.anotar(chat, numero, correccion, categoria),
+        execute: conPago(async ({ numero, correccion, categoria }: { numero: number; correccion: string; categoria: string }) =>
+          revisionGuionesService.anotar(chat, numero, correccion, categoria)),
       },
 
       quitarCorreccion: {
@@ -672,7 +692,7 @@ Reglas:
       verBorradorRevision: {
         description: "Resumen de lo que se enviaría: correcciones anotadas y guiones que quedarían sin corrección.",
         inputSchema: z.object({}),
-        execute: async () => {
+        execute: conPago(async () => {
           const r = await revisionGuionesService.resumen(chat);
           if (!r) return { nota: "No hay guiones esperando su revisión." };
           return {
@@ -681,14 +701,14 @@ Reglas:
             puedePedirCorrecciones: !r.plazo.cerrado,
             correccionesHasta: r.plazo.hasta ?? null,
           };
-        },
+        }),
       },
 
       enviarRevisionGuiones: {
         description:
           "Envía la revisión completa al equipo (una sola vez). Solo tras confirmación explícita del cliente. aprobarResto=true aprueba los guiones que no corrigió; úsalo solo si el cliente lo aceptó.",
         inputSchema: z.object({ aprobarResto: z.boolean() }),
-        execute: async ({ aprobarResto }: { aprobarResto: boolean }) => revisionGuionesService.enviar(chat, aprobarResto),
+        execute: conPago(async ({ aprobarResto }: { aprobarResto: boolean }) => revisionGuionesService.enviar(chat, aprobarResto)),
       },
 
       verOnboarding: {
