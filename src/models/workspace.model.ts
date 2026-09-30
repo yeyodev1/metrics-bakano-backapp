@@ -214,6 +214,8 @@ export interface IWorkspace extends Document {
     /** Cada cuantos meses graba este cliente. Sin esto vale la regla general. */
     mesesEntre?: number;
     mesesEntrePorNombre?: string;
+    /** El cliente pidio grabar antes de tiempo y espera la respuesta de contenido. */
+    solicitud?: { en: Date; motivo: string; porNombre?: string; recordadaEn?: Date };
   };
   /**
    * El cliente con pagos vencidos no ve sus guiones. Esto es la excepcion que
@@ -438,6 +440,7 @@ const WorkspaceSchema = new Schema<IWorkspace>(
         excepcionMotivo: String,
         mesesEntre: Number,
         mesesEntrePorNombre: String,
+        solicitud: { en: Date, motivo: String, porNombre: String, recordadaEn: Date },
       },
       default: undefined,
     },

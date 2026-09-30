@@ -4,6 +4,7 @@ import models from "../../models";
 import { PlanningService } from "../../services/planning.service";
 import { VideoPlanningService } from "../../services/videoPlanning.service";
 import { onboardingProgresoService } from "../../services/onboardingProgreso.service";
+import { produccionAnticipadaService } from "../../services/produccionAnticipada.service";
 import { TODOS, type UsuarioMcp } from "../perfiles";
 import { fecha, recortar, type ToolMcp } from "./base";
 
@@ -149,6 +150,17 @@ const secciones = {
       return { reEditar: cuenta(cola?.reEditar), porEditar: cuenta(cola?.porEditar), porSubirMaster: cuenta(cola?.porSubirMaster) };
     }),
 
+  produccionAntes: () =>
+    seccion("clientesQuePidenGrabarAntes", async () => {
+      const lista = await produccionAnticipadaService.pendientes();
+      return lista.map((p) => ({
+        cliente: p.cliente,
+        motivo: p.solicitud.motivo,
+        pidioEl: fecha(p.solicitud.en),
+        siguiente: "Responde con responder_produccion_antes (aprobar o no); el cliente espera.",
+      }));
+    }),
+
   metaSinConectar: () =>
     seccion("clientesActivosSinMetaConectado", async () => {
       const ws = await models.workspaces.find({ isActive: { $ne: false }, $or: [{ "metaAds.adAccountId": { $exists: false } }, { "metaAds.adAccountId": null }, { "metaAds.adAccountId": "" }] }).select("name").limit(50).lean();
@@ -171,17 +183,19 @@ export const toolsPendientes: ToolMcp[] = [
         case "direccion":
           tareas.push(
             secciones.incidentes(), secciones.telegramEnRiesgo(), secciones.telegramAMedias(false), secciones.mensajesDeClientes(false),
-            secciones.onboarding(), secciones.produccionesProximas(dias, true), secciones.guionesRechazados(), secciones.revisionVideos()
+            secciones.onboarding(), secciones.produccionesProximas(dias, true), secciones.guionesRechazados(), secciones.revisionVideos(),
+            secciones.produccionAntes()
           );
           break;
         case "pm":
           tareas.push(
             secciones.incidentes(), secciones.telegramEnRiesgo(), secciones.telegramAMedias(false), secciones.mensajesDeClientes(false),
-            secciones.onboarding(), secciones.produccionesProximas(dias, true)
+            secciones.onboarding(), secciones.produccionesProximas(dias, true), secciones.produccionAntes()
           );
           break;
         case "contenido":
           tareas.push(
+            secciones.produccionAntes(),
             secciones.telegramAMedias(true), secciones.mensajesDeClientes(true), secciones.guionesRechazados(),
             secciones.produccionesProximas(Math.max(dias, 14), true), secciones.revisionVideos()
           );
