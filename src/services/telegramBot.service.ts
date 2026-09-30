@@ -1,5 +1,6 @@
 import { createHash, randomInt, timingSafeEqual } from "crypto";
 import { estadoPagoService } from "./estadoPago.service";
+import { produccionAnticipadaService } from "./produccionAnticipada.service";
 import { Types } from "mongoose";
 import models from "../models";
 import type { ITelegramChat } from "../models/telegramChat.model";
@@ -100,6 +101,11 @@ function mismoHash(a: string, b: string): boolean {
  * (telegramAgent.service). El menu sigue ahi para quien prefiera botones y
  * como respaldo si la IA falla.
  */
+/** Solicitud de grabar antes, a nombre de quien escribe en el chat. */
+function produccionAnticipada(chat: ITelegramChat, motivo = "Lo pidió desde el menú del bot") {
+  return produccionAnticipadaService.solicitar(chat.workspaceId!, motivo, chat.firstName);
+}
+
 export class TelegramBotService {
   async handleUpdate(update: TelegramUpdate): Promise<void> {
     if (update.callback_query) {
@@ -780,6 +786,7 @@ export class TelegramBotService {
       return this.agendarOnboarding(chat, sesion as SesionOnboarding, segundos);
     }
 
+    if (data === "prod:antes") return this.pedirProduccionAntes(chat);
     if (data.startsWith("prod:")) return this.agendarProduccion(chat, data.slice(5));
 
     const [accion, tema, extra] = data.split(":") as [string, TemaAtencion, string | undefined];
@@ -1996,6 +2003,16 @@ export class TelegramBotService {
               ? `Te muestro horarios desde el <b>${fechaEcuador(estado.porAriana)}</b>: al menos ${DIAS_ARIANA_A_PRODUCCION} días después de tu reunión con Ariana, para llegar con tus guiones listos.\n\n`
               : "";
     const botones = this.botonesHorarios(horarios, (h) => `prod:${Math.floor(h.getTime() / 1000)}`);
+    // La frecuencia no es un absoluto: si necesita grabar antes, lo pide y
+    // decide contenido.
+    if (estado.esperar && !estado.porGuionesAprobados && !estado.porEstrategia) {
+      botones.push([
+        {
+          text: estado.solicitudPendiente ? "⏳ Pedido de grabar antes: esperando respuesta" : "🙋 Necesito grabar antes",
+          callback_data: "prod:antes",
+        },
+      ]);
+    }
     botones.push([{ text: "✍️ Prefiero escribirles", callback_data: "menu:produccion" }]);
 
     await telegramService.sendMessage(
@@ -2008,6 +2025,20 @@ export class TelegramBotService {
         `${regla}Elige el horario que te quede mejor 👇` +
         this.avisoChoques(quitados),
       botones
+    );
+  }
+
+  /** Pide grabar antes de lo que le toca: lo decide contenido y se le avisa. */
+  private async pedirProduccionAntes(chat: ITelegramChat): Promise<void> {
+    const r = await produccionAnticipada(chat);
+    const quien = escaparHtml(equipoAtencionService.nombres("guiones"));
+    await telegramService.sendMessage(
+      chat.chatId,
+      r.yaPendiente
+        ? `⏳ Tu pedido de grabar antes ya lo tiene <b>${quien}</b>. Apenas lo decida te aviso por aquí.`
+        : `🙋 Listo, le pasé a <b>${quien}</b> que necesitas grabar antes.\n\n` +
+            "Lo revisa según tu estrategia y te aviso por aquí apenas decida. Si quieres contarme el motivo (productos nuevos, una promo, un cambio de marca), escríbemelo y se lo sumo.",
+      [[{ text: "📋 Volver al menú", callback_data: "menu:ver" }]]
     );
   }
 

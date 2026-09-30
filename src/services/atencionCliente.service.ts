@@ -163,6 +163,8 @@ export interface EstadoProduccion {
   deudaTexto?: string;
   /** Aprobó guiones que todavía no se graban: puede agendar sin esperar los meses. */
   porGuionesAprobados?: boolean;
+  /** Pidió grabar antes de tiempo y contenido todavía no responde. */
+  solicitudPendiente?: boolean;
   /** La fecha permitida la pone la reunión con Ariana (+4 días). */
   porAriana?: Date;
 }
@@ -381,6 +383,7 @@ class AtencionClienteService {
       esperar: porRegla.getTime() > minimo,
       mesesEntre,
       porGuionesAprobados: Boolean(aprobada),
+      solicitudPendiente: Boolean((entorno as any)?.produccion?.solicitud?.en),
       porEstrategia: Boolean(conExcepcion),
       reserva,
       sinContenido,

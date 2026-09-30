@@ -116,7 +116,14 @@ cronRouter.get("/bot-recordatorios", async (req: Request, res: Response) => {
       return null;
     });
     if (d) console.log(`[Cron] Qué destacar — candidatos: ${d.candidatos}, preguntados: ${d.preguntados}`);
-    res.status(200).json({ ...r, academia: b, contratos: c, destacar: d });
+    // Clientes que piden grabar antes: se le insiste a contenido hasta que responda.
+    const { produccionAnticipadaService } = await import("../services/produccionAnticipada.service");
+    const pa = await produccionAnticipadaService.recordarPendientes().catch((error: any) => {
+      console.error("[Cron] Grabar antes:", error?.message || error);
+      return null;
+    });
+    if (pa) console.log(`[Cron] Grabar antes — pendientes: ${pa.pendientes}, recordadas: ${pa.recordadas}`);
+    res.status(200).json({ ...r, academia: b, contratos: c, destacar: d, grabarAntes: pa });
   } catch (error: any) {
     console.error("[Cron] Bot recordatorios:", error?.message || error);
     res.status(500).json({ error: error?.message || "error" });

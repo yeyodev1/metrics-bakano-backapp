@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { estadoPagoService } from "./estadoPago.service";
 import { destacarClienteService } from "./destacarCliente.service";
+import { produccionAnticipadaService } from "./produccionAnticipada.service";
 import models from "../models";
 import type { ITelegramChat } from "../models/telegramChat.model";
 import { EQUIPO_ATENCION, equipoAtencionService, type TemaAtencion } from "./equipoAtencion.service";
@@ -487,6 +488,7 @@ CONTRASEÑAS:
 - GRABAMOS HASTA QUEDARNOS SIN CONTENIDO. La producción no se agenda "porque toca cada tantos meses": se agenda antes de quedarnos sin guiones por grabar. Usa verReservaDeContenido cuando se hable de producción, contenido o videos; si seAcaba viene en true, díselo claro y empújalo a cerrar fecha ya, que ahí la espera entre producciones no aplica.
 - NO HAY PRODUCCIÓN SIN PLANIFICACIÓN. Dilo siempre que se hable de grabar: los guiones de lo que vamos a grabar tienen que estar escritos y aprobados por él ANTES de la grabación. Si su planificación está vacía, dile que ya avisaste a su equipo de contenido y a Genesis Benalcazar para que los preparen, y pásale el link de su planificación.
 - LO QUE QUIERE DESTACAR: si cuenta qué producto, servicio o promoción quiere destacar (o responde a la pregunta de "qué destacamos"), guárdalo con guardarQueDestacar con sus palabras y dile que Ariana arma sus próximos guiones en base a eso. Si es vago ("todo"), pregúntale cuál primero.
+- LA FRECUENCIA DE PRODUCCIÓN NO ES UN ABSOLUTO: si necesita grabar antes de la fecha que le toca, NUNCA le digas que no se puede. Pregúntale el motivo y usa pedirProduccionAntes: lo decide Ariana y él se entera por aquí apenas responda.
 - SIN PAGO NO HAY GUIONES NI PRODUCCIÓN: con pagos vencidos no ve ni aprueba guiones ni agenda producción. Cuando apruebe sus guiones, puede agendar su producción al instante con verHorariosProduccion.
 - Y para que lo que grabemos llegue a sus clientes hace falta el CRM: si todavía no hizo su sesión de Configuración de CRM y Metrics con David Robles, dile que la agende. Sin eso, los videos no tienen a dónde llevar a la gente.
 
@@ -569,6 +571,20 @@ Reglas:
             proximas: proximas.map((p) => ({ fecha: fechaEcuador(p.date), titulo: p.title })),
             ultima: ultima ? { fecha: fechaEcuador(ultima.date), titulo: ultima.title, grabada: ultima.cumplida } : null,
           };
+        },
+      },
+
+      pedirProduccionAntes: {
+        description:
+          "Le pasa a contenido (Ariana) que el cliente necesita grabar antes de la fecha que le toca por su frecuencia. Ella decide y al cliente se le avisa por este chat.",
+        inputSchema: z.object({ motivo: z.string().describe("Por qué necesita grabar antes, con sus palabras") }),
+        execute: async ({ motivo }: { motivo: string }) => {
+          const r = await produccionAnticipadaService.solicitar(chat.workspaceId!, motivo, chat.firstName);
+          return r.yaPendiente
+            ? { ok: true, yaPendiente: true, siguiente: "Dile que su pedido ya lo tiene Ariana y que le avisas apenas decida." }
+            : r.ok
+              ? { ok: true, siguiente: "Dile que se lo pasaste a Ariana, que lo revisa según su estrategia y que le avisas por aquí apenas decida." }
+              : { ok: false };
         },
       },
 
@@ -927,6 +943,13 @@ Reglas:
             ultimaProduccion: estado.ultima ? fechaEcuador(estado.ultima) : null,
             disponibleDesde: estado.habilitadaDesde ? fechaEcuador(estado.habilitadaDesde) : null,
             esperaPorReglaDeMeses: estado.esperar ?? false,
+            ...(estado.esperar && !estado.porGuionesAprobados
+              ? {
+                  siNecesitaGrabarAntes: estado.solicitudPendiente
+                    ? "Ya pidió grabar antes y Ariana todavía no responde: dile que le avisas apenas decida."
+                    : "La frecuencia no es un absoluto: si necesita grabar antes, pregúntale el motivo y usa pedirProduccionAntes.",
+                }
+              : {}),
             mesesEntreProducciones: estado.mesesEntre ?? null,
             ...(estado.porGuionesAprobados
               ? { porGuionesAprobados: "Ya aprobó sus guiones: puede grabar sin esperar la regla de meses. Se deja un margen de días para ajustar la planificación." }
