@@ -1902,7 +1902,8 @@ export class ResendService {
           <td style="padding:32px 40px 8px;">
             <p style="margin:0 0 16px;font-size:16px;color:#1e293b;">${firstName},</p>
             <p style="margin:0 0 20px;font-size:15px;color:#475569;line-height:1.7;">
-              Te dimos acceso a <strong>Lucas</strong> para vender por <strong>${esc(workspaceName)}</strong>${esDueno ? " como dueño del negocio" : ""}.
+              De parte de <strong>Bakano</strong>: por la alianza activa entre <strong>${esc(workspaceName)}</strong> y Bakano,
+              ya tienes acceso a <strong>Lucas</strong>, nuestro asesor de ventas${esDueno ? ", como dueño del negocio" : ""}.
               Cuando un cliente te escriba por WhatsApp, le pasas la conversación y te dice:
             </p>
             <table width="100%" cellpadding="0" cellspacing="0">${puede}</table>
@@ -1944,7 +1945,7 @@ export class ResendService {
     const { error } = await this.client.emails.send({
       from: this.from,
       to,
-      subject: `${workspaceName}: tu acceso a Lucas, tu asesor de ventas`,
+      subject: `Bakano x ${workspaceName}: ya tienes acceso a Lucas, tu asesor de ventas`,
       html,
     });
     if (error) throw new Error(error.message);
