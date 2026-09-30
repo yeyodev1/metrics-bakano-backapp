@@ -1,10 +1,19 @@
 import { createHash, randomInt, timingSafeEqual } from "crypto";
+import { estadoPagoService } from "./estadoPago.service";
 import { Types } from "mongoose";
 import models from "../models";
 import type { ITelegramChat } from "../models/telegramChat.model";
 import { resendService } from "./resend.service";
 import { EQUIPO_ATENCION, equipoAtencionService, type TemaAtencion } from "./equipoAtencion.service";
-import { atencionClienteService, DIAS_ARIANA_A_PRODUCCION, diaEcuador, fechaEcuador, horarioCorto } from "./atencionCliente.service";
+import {
+  atencionClienteService,
+  DIAS_APROBACION_A_PRODUCCION,
+  DIAS_ARIANA_A_PRODUCCION,
+  diaEcuador,
+  fechaEcuador,
+  frecuenciaEnTexto,
+  horarioCorto,
+} from "./atencionCliente.service";
 import { onboardingBotService } from "./onboardingBot.service";
 import { produccionPlanificacionService } from "./produccionPlanificacion.service";
 import { contenidoClienteService } from "./contenidoCliente.service";
@@ -268,6 +277,10 @@ export class TelegramBotService {
       // Vuelve de pagar en Stripe (t.me/...?start=pago): se le muestra cómo quedó.
       if (/^\/start\s+pago/i.test(texto.trim()) && chat.estado === "listo" && chat.workspaceId) {
         return this.mostrarPagos(chat, true);
+      }
+      // Viene de Metrics tras aprobar sus guiones (t.me/...?start=produccion).
+      if (/^\/start\s+produccion/i.test(texto.trim()) && chat.estado === "listo" && chat.workspaceId) {
+        return this.mostrarHorariosProduccion(chat);
       }
       if (chat.estado === "listo" && chat.workspaceId) {
         const nombre = chat.firstName ? `, ${escaparHtml(chat.firstName)}` : "";
@@ -819,8 +832,29 @@ export class TelegramBotService {
     );
   }
 
+  /**
+   * Con pagos vencidos no se muestran ni se aprueban guiones: se le dice por
+   * qué y se le deja el botón para pagar. true = quedó bloqueado.
+   */
+  private async bloqueadoPorPago(chat: ITelegramChat): Promise<boolean> {
+    const bloqueo = await estadoPagoService.bloqueo(String(chat.workspaceId)).catch(() => null);
+    if (!bloqueo) return false;
+    await telegramService.sendMessage(
+      chat.chatId,
+      "📝 <b>Tus guiones ya están listos</b>\n\n" +
+        `Para verlos y aprobarlos primero hay que ponerse al día con el pago: tienes <b>${bloqueo.deudaTexto}</b> vencido.\n\n` +
+        "Apenas se registre tu pago los ves aquí mismo y, cuando los apruebes, puedes agendar tu producción 🎬",
+      [
+        [{ text: "💳 Ver y pagar", callback_data: "pago:ver" }],
+        [{ text: "📋 Volver al menú", callback_data: "menu:ver" }],
+      ]
+    );
+    return true;
+  }
+
   /** Cuántos guiones hay, en qué estado, y el link para verlos en Metrics. */
   private async mostrarGuiones(chat: ITelegramChat): Promise<void> {
+    if (await this.bloqueadoPorPago(chat)) return;
     // Aquí SÍ entran las producciones canceladas: los guiones escritos no se
     // van con la fecha. Si se movió o se canceló la grabación, el cliente
     // igual tiene que poder revisar lo que Ariana ya escribió.
@@ -897,11 +931,13 @@ export class TelegramBotService {
         ? proximas.map((p) => `🎬 <b>${fechaEcuador(p.date)}</b>`).join("\n")
         : "🎬 No tienes ninguna producción agendada.",
       ultima ? `\nLa última fue el ${fechaEcuador(ultima.date)}${ultima.cumplida ? " y ya quedó grabada ✅" : ""}.` : "",
-      `\nGraban <b>${escaparHtml(equipoAtencionService.nombres("produccion"))}</b>: <b>tu avatar</b> y <b>tus productos</b>. Se hace una cada 6 meses; con ese material salen todos tus videos del periodo.`,
+      `\nGraban <b>${escaparHtml(equipoAtencionService.nombres("produccion"))}</b>: <b>tu avatar</b> y <b>tus productos</b>. Se hace ${frecuenciaEnTexto(estado.mesesEntre ?? 6)}; con ese material salen todos tus videos del periodo.`,
       estado.reserva ? `\n${contenidoClienteService.enTexto(estado.reserva)}` : "",
       // Grabamos hasta quedarnos sin contenido: si ya no queda nada escrito
       // por grabar, no se le dice "espera al mes que viene".
-      estado.bloqueo === "falta_ariana"
+      estado.bloqueo === "pago_pendiente"
+        ? `\n👉 Para agendar tu producción primero hay que ponerse al día con el pago: tienes <b>${estado.deudaTexto}</b> vencido.`
+        : estado.bloqueo === "falta_ariana"
         ? `\n👉 Tu primera producción se agenda <b>después de tu reunión con Ariana</b> (al menos ${DIAS_ARIANA_A_PRODUCCION} días después): ahí definimos qué grabamos y ella prepara tus guiones.`
         : estado.sinContenido
         ? "\n👉 <b>Toca agendar la siguiente ya</b>: cuando salga lo que está en edición, no queda nada más que publicar."
@@ -916,6 +952,7 @@ export class TelegramBotService {
       [{ text: "📅 Ver mi calendario en Metrics", url: `${APP_URL}/app/workspaces/${chat.workspaceId}/planning` }],
     ];
     if (estado.puedeAgendar) botones.push([{ text: "🎬 Agendar mi producción", callback_data: "ag:produccion" }]);
+    else if (estado.bloqueo === "pago_pendiente") botones.push([{ text: "💳 Ver y pagar", callback_data: "pago:ver" }]);
     else if (estado.bloqueo === "falta_ariana") botones.push([{ text: "📝 Agendar con Ariana", callback_data: "onb:levantamiento" }]);
     else if (proximas.length) botones.push([{ text: "🗓️ Mover o cancelar", callback_data: "citas:ver" }]);
     botones.push([{ text: "📋 Volver al menú", callback_data: "menu:ver" }]);
@@ -926,6 +963,7 @@ export class TelegramBotService {
   // ── Revision de guiones ────────────────────────────────────────────────────
   /** Hay revision abierta: se invita a corregir conversando, no a mandar un mensaje suelto. */
   private async invitarARevisar(chat: ITelegramChat, revision: RevisionPendiente): Promise<void> {
+    if (await this.bloqueadoPorPago(chat)) return;
     chat.tema = undefined;
     await chat.save();
     const pendientes = revision.guiones.filter((g) => g.aprobacion !== "APROBADO").length;
@@ -946,6 +984,7 @@ export class TelegramBotService {
   }
 
   private async mostrarGuionesParaRevisar(chat: ITelegramChat): Promise<void> {
+    if (await this.bloqueadoPorPago(chat)) return;
     const r = await revisionGuionesService.resumen(chat);
     if (!r) {
       await telegramService.sendMessage(chat.chatId, "No tienes guiones esperando revisión ahora mismo 🙂");
@@ -1891,6 +1930,18 @@ export class TelegramBotService {
     const nombres = escaparHtml(equipoAtencionService.nombres("produccion"));
     const intro = aviso ? `${aviso}\n\n` : "";
 
+    if (estado.bloqueo === "pago_pendiente") {
+      await telegramService.sendMessage(
+        chat.chatId,
+        `${intro}🎬 Para agendar tu producción primero hay que ponerse al día con el pago: tienes <b>${estado.deudaTexto}</b> vencido.\n\n` +
+          "Apenas se registre tu pago te muestro los horarios 🙌",
+        [
+          [{ text: "💳 Ver y pagar", callback_data: "pago:ver" }],
+          [{ text: "📋 Volver al menú", callback_data: "menu:ver" }],
+        ]
+      );
+      return;
+    }
     if (estado.bloqueo === "falta_ariana") {
       await telegramService.sendMessage(
         chat.chatId,
@@ -1913,7 +1964,7 @@ export class TelegramBotService {
         `${intro}🎬 Ya tienes una producción agendada para el <b>${fechaEcuador(estado.proxima!)}</b>.\n\n` +
           (estado.reserva ? `${contenidoClienteService.enTexto(estado.reserva)}\n\n` : "") +
           "La producción es la grabación para crear tu <b>avatar</b> y grabar tus <b>productos</b>: con eso armamos todos tus videos del periodo. " +
-          "Por eso se hace <b>una cada 6 meses</b> y no puedo reservar otra por ahora.\n\n" +
+          `Por eso se hace <b>${frecuenciaEnTexto(estado.mesesEntre ?? 6)}</b> y no puedo reservar otra por ahora.\n\n` +
           "Si la estrategia pide grabar antes (productos nuevos, cambio de marca), cuéntamelo y se lo paso al equipo.\n\n" +
           "Si necesitas moverla o cancelarla, toca abajo (se puede hasta 48 horas antes). " +
           `Para otro tema de producción, cuéntame aquí y se lo paso a <b>${nombres}</b> 📩`,
@@ -1933,11 +1984,12 @@ export class TelegramBotService {
       );
     }
 
-    const regla =
-      estado.sinContenido && estado.ultima
+    const regla = estado.porGuionesAprobados
+      ? `Ya aprobaste tus guiones, así que puedes grabar sin esperar 🎯 Te muestro horarios desde el <b>${fechaEcuador(estado.habilitadaDesde!)}</b>: dejamos al menos ${DIAS_APROBACION_A_PRODUCCION} días para ajustar lo que haga falta antes de grabar.\n\n`
+      : estado.sinContenido && estado.ultima
         ? "Y esto es lo importante: <b>ya grabamos todo lo que estaba escrito</b>, así que no hay que esperar nada. Mientras antes grabemos, antes vuelves a tener contenido saliendo 🎯\n\n"
         : estado.esperar && estado.ultima
-          ? `Tu última producción fue el ${fechaEcuador(estado.ultima)} y grabamos <b>una cada 6 meses</b>, así que te muestro horarios desde el <b>${fechaEcuador(estado.habilitadaDesde!)}</b>.\n\n`
+          ? `Tu última producción fue el ${fechaEcuador(estado.ultima)} y grabamos <b>${frecuenciaEnTexto(estado.mesesEntre ?? 6)}</b>, así que te muestro horarios desde el <b>${fechaEcuador(estado.habilitadaDesde!)}</b>.\n\n`
           : estado.porEstrategia
             ? "El equipo habilitó una producción antes de tiempo porque tu estrategia lo pide 🎯\n\n"
             : estado.porAriana
@@ -1950,7 +2002,7 @@ export class TelegramBotService {
       chat.chatId,
       `${intro}🎬 Agendemos tu producción con <b>${nombres}</b>.\n\n` +
         "Es la grabación en ambiente controlado para <b>crear tu avatar</b> y <b>grabar tus productos</b>. " +
-        "Con ese material armamos todos tus videos, por eso se hace <b>una cada 6 meses</b> (para la mayoría, una vez al año). " +
+        `Con ese material armamos todos tus videos, por eso se hace <b>${frecuenciaEnTexto(estado.mesesEntre ?? 6)}</b>. ` +
         "Si la estrategia lo pide antes —productos nuevos, cambio de marca—, el equipo la habilita.\n\n" +
         (estado.reserva ? `${contenidoClienteService.enTexto(estado.reserva)}\n\n` : "") +
         `${regla}Elige el horario que te quede mejor 👇` +
@@ -1973,7 +2025,9 @@ export class TelegramBotService {
         return;
       }
       if (reserva.motivo === "sin_calendario") return this.coordinarPorCorreo(chat, "produccion");
-      if (reserva.motivo === "ya_agendada" || reserva.motivo === "antes_de_tiempo") return this.mostrarHorariosProduccion(chat);
+      if (reserva.motivo === "ya_agendada" || reserva.motivo === "antes_de_tiempo" || reserva.motivo === "pago_pendiente") {
+        return this.mostrarHorariosProduccion(chat);
+      }
       return this.mostrarHorariosProduccion(chat, "Uy, no pude reservar ese horario 😕 puede que lo hayan tomado justo ahora.");
     }
 

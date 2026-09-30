@@ -207,7 +207,28 @@ export interface IWorkspace extends Document {
    * Produccion: cada 6 meses. `excepcionHasta` es la ventana que abre el
    * equipo cuando la estrategia pide grabar antes de tiempo.
    */
-  produccion?: { excepcionHasta?: Date; excepcionPorNombre?: string; excepcionMotivo?: string };
+  produccion?: {
+    excepcionHasta?: Date;
+    excepcionPorNombre?: string;
+    excepcionMotivo?: string;
+    /** Cada cuantos meses graba este cliente. Sin esto vale la regla general. */
+    mesesEntre?: number;
+    mesesEntrePorNombre?: string;
+  };
+  /**
+   * El cliente con pagos vencidos no ve sus guiones. Esto es la excepcion que
+   * pone el equipo (un acuerdo de pago, un pago que no se registro a tiempo).
+   */
+  guionesSinPago?: { hasta?: Date; motivo?: string; porNombre?: string; en?: Date };
+  /**
+   * Lo que el cliente quiere destacar (producto, servicio, promo). Contenido
+   * planifica sobre esto; el bot lo pregunta cada tres semanas.
+   */
+  destacar?: {
+    actual?: { texto: string; en: Date; porNombre?: string; fuente: "cliente" | "equipo" };
+    historial?: { texto: string; en: Date; porNombre?: string; fuente: "cliente" | "equipo" }[];
+    preguntadoEn?: Date;
+  };
   preNegotiatedContract?: any; // Stores predefined contract parameters
   contractData?: any; // Stores the final contract form and signature
   teamInfo?: {
@@ -411,7 +432,25 @@ const WorkspaceSchema = new Schema<IWorkspace>(
       default: undefined,
     },
     produccion: {
-      type: { excepcionHasta: Date, excepcionPorNombre: String, excepcionMotivo: String },
+      type: {
+        excepcionHasta: Date,
+        excepcionPorNombre: String,
+        excepcionMotivo: String,
+        mesesEntre: Number,
+        mesesEntrePorNombre: String,
+      },
+      default: undefined,
+    },
+    guionesSinPago: {
+      type: { hasta: Date, motivo: String, porNombre: String, en: Date },
+      default: undefined,
+    },
+    destacar: {
+      type: {
+        actual: { texto: String, en: Date, porNombre: String, fuente: String },
+        historial: [{ _id: false, texto: String, en: Date, porNombre: String, fuente: String }],
+        preguntadoEn: Date,
+      },
       default: undefined,
     },
     publicidad: {

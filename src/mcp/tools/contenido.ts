@@ -5,6 +5,7 @@ import models from "../../models";
 import { PlanningService } from "../../services/planning.service";
 import { VideoPlanningService } from "../../services/videoPlanning.service";
 import { atencionClienteService } from "../../services/atencionCliente.service";
+import { destacarClienteService } from "../../services/destacarCliente.service";
 import type { PerfilMcp, UsuarioMcp } from "../perfiles";
 import { fecha, leerFecha, recortar, resolverCliente, type ToolMcp } from "./base";
 
@@ -152,7 +153,13 @@ export const toolsContenido: ToolMcp[] = [
             : "Sin videos planificados todavía.",
         });
       }
-      return { cliente: ws.name, producciones: salida };
+      // Lo que el cliente quiere destacar: sobre eso se planifica.
+      const destacar = await destacarClienteService.de(ws._id).catch(() => null);
+      return {
+        cliente: ws.name,
+        queQuiereDestacar: destacar?.actual ? { texto: destacar.actual.texto, cuando: fecha(destacar.actual.en) } : null,
+        producciones: salida,
+      };
     },
   },
   {

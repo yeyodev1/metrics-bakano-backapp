@@ -6,8 +6,26 @@ import { VideoPlanningService } from "../services/videoPlanning.service";
 import { metaService } from "../services/meta.service";
 import models from "../models";
 import cloudinary from "../config/cloudinary";
+import { estadoPagoService, type BloqueoPago } from "../services/estadoPago.service";
 
 const service = new VideoPlanningService();
+
+/** El equipo siempre ve todo; el bloqueo por pago es solo para el cliente. */
+function esEquipo(req: AuthRequest): boolean {
+  return req.user?.role === "superadmin" || req.user?.isInternal === true;
+}
+
+/** Si el cliente tiene pagos vencidos, sus guiones no se muestran. */
+async function bloqueoDelCliente(req: AuthRequest, workspaceId?: unknown): Promise<BloqueoPago | null> {
+  if (esEquipo(req) || !workspaceId) return null;
+  return estadoPagoService.bloqueo(String(workspaceId)).catch(() => null);
+}
+
+/** Lo que queda de un video sin su guion: el tema y su estado, nada del texto. */
+function sinGuion<T extends Record<string, any>>(item: T): T {
+  const { guion, guionIA, scriptRefs, ...resto } = item as any;
+  return { ...resto, guionOculto: true } as T;
+}
 
 // ── GET /planning-entries/:entryId/video-planning ─────────────────────────
 export async function getByEntry(
@@ -21,6 +39,16 @@ export async function getByEntry(
 
     if (!planning) {
       res.status(HttpStatusCode.Ok).json({ message: "No video planning found.", planning: null });
+      return;
+    }
+
+    const bloqueoPago = await bloqueoDelCliente(req, planning.workspaceId);
+    if (bloqueoPago) {
+      res.status(HttpStatusCode.Ok).json({
+        message: bloqueoPago.mensaje,
+        planning: { ...planning, items: (planning.items || []).map((i: any) => sinGuion(i)) },
+        bloqueoPago,
+      });
       return;
     }
 
@@ -156,6 +184,15 @@ export async function submitClientApproval(
     if (!Array.isArray(approvals) || approvals.length === 0) {
       res.status(HttpStatusCode.BadRequest).json({ message: "approvals array is required." });
       return;
+    }
+
+    if (!esEquipo(req) && Types.ObjectId.isValid(planningId)) {
+      const doc = await models.videoPlanning.findById(planningId).select("workspaceId").lean();
+      const bloqueoPago = await bloqueoDelCliente(req, doc?.workspaceId);
+      if (bloqueoPago) {
+        res.status(HttpStatusCode.PaymentRequired).json({ message: bloqueoPago.mensaje, code: "PAGO_PENDIENTE", bloqueoPago });
+        return;
+      }
     }
 
     const planning = await service.submitClientApproval(planningId, approvals, userId);
@@ -503,6 +540,11 @@ export async function getWorkspaceItems(
   try {
     const { workspaceId } = req.params as { workspaceId: string };
     const items = await service.getWorkspaceItems(workspaceId);
+    const bloqueoPago = await bloqueoDelCliente(req, workspaceId);
+    if (bloqueoPago) {
+      res.status(HttpStatusCode.Ok).json({ items: items.map((i) => sinGuion(i as any)), bloqueoPago });
+      return;
+    }
     res.status(HttpStatusCode.Ok).json({ items });
   } catch (error: any) {
     if (error.message === "INVALID_ID") {

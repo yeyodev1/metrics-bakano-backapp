@@ -1,6 +1,9 @@
 import axios from "axios";
 import models from "../models";
 import { resendService } from "./resend.service";
+import { telegramService } from "./telegram.service";
+import { estadoPagoService } from "./estadoPago.service";
+import { usuarioBloqueado } from "../utils/contactosBloqueados";
 import { normalizarTelefono, partirNombre } from "../utils/telefono";
 
 const APP_URL = "https://metrics.bakano.ec";
@@ -58,6 +61,7 @@ export interface ResultadoNotificacion {
   numeroEnvio: number;
   whatsapp: { enviado: boolean; error?: string; contactos: Contacto[] };
   email: { enviado: boolean; error?: string; destinatarios: string[] };
+  telegram: { enviado: boolean; error?: string; chats: number; bloqueadoPorPago: boolean };
 }
 
 export class PlanningNotificationService {
@@ -113,9 +117,10 @@ export class PlanningNotificationService {
     const total = planning.items?.length ?? 0;
     const { tipo, numeroEnvio } = this.deducirTipo(planning);
 
-    const [whatsapp, email] = await Promise.all([
+    const [whatsapp, email, telegram] = await Promise.all([
       this.enviarWhatsapp(workspace, contactos, sinTelefono, enlace, total, tipo, numeroEnvio),
       this.enviarEmail(correos, workspace.name, enlace, total),
+      this.enviarTelegram(workspace._id, planning, total, tipo),
     ]);
 
     planning.notificaciones.push({
@@ -133,9 +138,78 @@ export class PlanningNotificationService {
       error: email.error,
       proveedorId: email.proveedorId,
     });
+    planning.notificaciones.push({
+      canal: "telegram",
+      enviadoEn: new Date(),
+      porNombre,
+      exito: telegram.enviado,
+      error: telegram.error,
+    });
     await planning.save();
 
-    return { tipoAviso: tipo, numeroEnvio, whatsapp: { ...whatsapp, contactos }, email: { ...email, destinatarios: correos } };
+    return {
+      tipoAviso: tipo,
+      numeroEnvio,
+      whatsapp: { ...whatsapp, contactos },
+      email: { ...email, destinatarios: correos },
+      telegram,
+    };
+  }
+
+  /**
+   * Por el bot, que es donde el cliente habla con nosotros. Si debe, el aviso
+   * dice que los guiones estan listos pero que primero tiene que pagar: asi se
+   * entera igual y tiene el boton para hacerlo.
+   */
+  private async enviarTelegram(
+    workspaceId: any,
+    planning: any,
+    total: number,
+    tipo: TipoAviso
+  ): Promise<{ enviado: boolean; error?: string; chats: number; bloqueadoPorPago: boolean }> {
+    const chats = await models.telegramChats.find({ workspaceId, estado: "listo" }).select("chatId userId").lean();
+    const destino: any[] = [];
+    for (const c of chats as any[]) {
+      if (c.userId && (await usuarioBloqueado(c.userId))) continue;
+      destino.push(c);
+    }
+    const bloqueo = await estadoPagoService.bloqueo(String(workspaceId), true).catch(() => null);
+    if (!destino.length) return { enviado: false, error: "El cliente no tiene el bot de Telegram conectado.", chats: 0, bloqueadoPorPago: Boolean(bloqueo) };
+
+    const encabezado =
+      tipo === "revisada"
+        ? `✍️ <b>Tus guiones ya tienen las correcciones</b> (${total})`
+        : tipo === "recordatorio"
+          ? `⏰ <b>Te recuerdo: tienes ${total} guiones por revisar</b>`
+          : `📝 <b>¡Tu planificación está lista!</b> ${total} guiones para tu próxima producción`;
+    const texto = bloqueo
+      ? `${encabezado}\n\nPara verlos y aprobarlos primero hay que ponerse al día con el pago: tienes <b>${bloqueo.deudaTexto}</b> vencido. ` +
+        "Apenas se registre, los revisas aquí mismo y agendas tu producción 🎬"
+      : `${encabezado}\n\nRevísalos aquí conmigo o en Metrics. Dime qué cambiarías de cada uno y, cuando los apruebes, ` +
+        "puedes agendar tu producción al instante 🎬";
+    const botones = bloqueo
+      ? [[{ text: "💳 Ver y pagar", callback_data: "pago:ver" }]]
+      : [
+          [{ text: "📝 Revisarlos aquí", callback_data: "rev:lista" }],
+          [
+            {
+              text: "💻 Verlos en Metrics",
+              url: `${APP_URL}/app/workspaces/${workspaceId}/planning/${planning.planningEntryId}/video-planning/client`,
+            },
+          ],
+        ];
+
+    let enviados = 0;
+    let error: string | undefined;
+    for (const c of destino) {
+      try {
+        await telegramService.sendMessage(c.chatId, texto, botones);
+        enviados++;
+      } catch (e: any) {
+        error = e?.response?.data?.description || e?.message || "No se pudo enviar por Telegram.";
+      }
+    }
+    return { enviado: enviados > 0, error: enviados ? undefined : error, chats: enviados, bloqueadoPorPago: Boolean(bloqueo) };
   }
 
   /**

@@ -7,6 +7,10 @@ import { toolsOnboarding } from "./onboarding";
 import { toolsEntornos } from "./entornos";
 import { toolsCorreos } from "./correos";
 import { toolsLucas } from "./lucas";
+import { toolsClienteDirecto } from "./clienteDirecto";
+import { toolsProduccionCliente } from "./produccionCliente";
+import { toolsDestacar } from "./destacar";
+import { toolsPagos } from "./pagos";
 
 /** Todas las tools del MCP. Cada una declara qué perfiles la ven. */
-export const TOOLS: ToolMcp[] = [...toolsPendientes, ...toolsComunes, ...toolsTelegram, ...toolsContenido, ...toolsOnboarding, ...toolsEntornos, ...toolsCorreos, ...toolsLucas];
+export const TOOLS: ToolMcp[] = [...toolsPendientes, ...toolsComunes, ...toolsTelegram, ...toolsContenido, ...toolsOnboarding, ...toolsEntornos, ...toolsCorreos, ...toolsLucas, ...toolsClienteDirecto, ...toolsProduccionCliente, ...toolsDestacar, ...toolsPagos];

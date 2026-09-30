@@ -2,11 +2,19 @@ import type { Response } from "express";
 import { HttpStatusCode } from "axios";
 import { Types } from "mongoose";
 import type { AuthRequest } from "../types/AuthRequest";
-import { onboardingProgresoService, PASOS } from "../services/onboardingProgreso.service";
+import { onboardingProgresoService, PASOS, type ProgresoEntorno } from "../services/onboardingProgreso.service";
 import type { PasoOnboarding } from "../models/onboardingEvento.model";
 import type { EstadoSesionOnboarding } from "../models/workspace.model";
 
 const ESTADOS: EstadoSesionOnboarding[] = ["pendiente", "agendada", "cumplida", "bloqueada", "no_aplica"];
+
+/** Cada paso dice si quien mira lo puede marcar, para no ofrecerle botones que no le tocan. */
+function conPermisos(req: AuthRequest, progreso: ProgresoEntorno): ProgresoEntorno {
+  return {
+    ...progreso,
+    pasos: progreso.pasos.map((p) => ({ ...p, puedoMarcar: onboardingProgresoService.puedeMarcar(req.user, p.paso) })),
+  };
+}
 
 // GET /api/onboarding-progreso?bloqueados=1&pendientes=1
 export async function listarProgreso(req: AuthRequest, res: Response): Promise<void> {
@@ -17,7 +25,7 @@ export async function listarProgreso(req: AuthRequest, res: Response): Promise<v
   res.status(HttpStatusCode.Ok).json({
     total: progresos.length,
     bloqueados: progresos.filter((p) => p.bloqueado).length,
-    progresos,
+    progresos: progresos.map((p) => conPermisos(req, p)),
   });
 }
 
@@ -33,7 +41,7 @@ export async function detalleProgreso(req: AuthRequest, res: Response): Promise<
     res.status(HttpStatusCode.NotFound).json({ message: "Entorno no encontrado." });
     return;
   }
-  res.status(HttpStatusCode.Ok).json(detalle);
+  res.status(HttpStatusCode.Ok).json({ ...detalle, progreso: conPermisos(req, detalle.progreso) });
 }
 
 // PATCH /api/onboarding-progreso/:workspaceId/:paso
@@ -49,6 +57,12 @@ export async function marcarPaso(req: AuthRequest, res: Response): Promise<void>
     res.status(HttpStatusCode.BadRequest).json({ message: `Estado inválido. Usa: ${ESTADOS.join(", ")}.` });
     return;
   }
+  if (!onboardingProgresoService.puedeMarcar(req.user, paso)) {
+    res.status(HttpStatusCode.Forbidden).json({
+      message: "Este paso lo marca su responsable o un superadmin. Si hay que moverlo, pídeselo a ellos.",
+    });
+    return;
+  }
 
   try {
     const progreso = await onboardingProgresoService.marcar(workspaceId, paso, {
@@ -59,7 +73,7 @@ export async function marcarPaso(req: AuthRequest, res: Response): Promise<void>
       porId: String(req.user!._id),
       porNombre: (req.user as any)?.name || (req.user as any)?.email || "Equipo",
     });
-    res.status(HttpStatusCode.Ok).json({ progreso });
+    res.status(HttpStatusCode.Ok).json({ progreso: conPermisos(req, progreso) });
   } catch (error: any) {
     if (error.message === "MOTIVO_REQUERIDO") {
       res.status(HttpStatusCode.BadRequest).json({ message: "Para marcar como bloqueada hay que escribir el motivo." });

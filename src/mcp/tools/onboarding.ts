@@ -2,6 +2,7 @@ import { z } from "zod";
 import { onboardingProgresoService, PASOS } from "../../services/onboardingProgreso.service";
 import type { PasoOnboarding } from "../../models/onboardingEvento.model";
 import { fecha, resolverCliente, type ToolMcp } from "./base";
+import { TODOS } from "../perfiles";
 
 const PASO = z.enum(PASOS as [PasoOnboarding, ...PasoOnboarding[]]);
 
@@ -47,8 +48,9 @@ export const toolsOnboarding: ToolMcp[] = [
     nombre: "onboarding_marcar_paso",
     titulo: "Marcar un paso del onboarding",
     descripcion:
-      "Cambia el estado de un paso del onboarding (pendiente, agendada, cumplida, bloqueada, no_aplica). Bloquear exige motivo y avisa por Slack al responsable y a Genesis. Queda en la bitácora con tu nombre.",
-    perfiles: ["direccion", "pm"],
+      "Cambia el estado de un paso del onboarding (pendiente, agendada, cumplida, bloqueada, no_aplica). Bloquear exige motivo y avisa por Slack al responsable y a Genesis. Queda en la bitácora con tu nombre. Cada responsable marca su paso; superadmin y Genesis, cualquiera.",
+    // Lo ve todo el equipo: quién puede marcar cada paso se decide abajo, paso por paso.
+    perfiles: TODOS,
     escribe: true,
     entrada: {
       cliente: z.string(),
@@ -60,6 +62,9 @@ export const toolsOnboarding: ToolMcp[] = [
     },
     async correr(a, u) {
       const ws = await resolverCliente(a.cliente);
+      if (!onboardingProgresoService.puedeMarcar(u, a.paso)) {
+        throw new Error("Ese paso lo marca su responsable o un superadmin. Pídeselo a ellos.");
+      }
       try {
         const p = await onboardingProgresoService.marcar(String(ws._id), a.paso, {
           estado: a.estado, motivo: a.motivo, nota: a.nota, pendienteDelCliente: a.pendiente_del_cliente,

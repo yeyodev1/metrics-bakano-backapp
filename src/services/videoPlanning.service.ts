@@ -646,9 +646,40 @@ export class VideoPlanningService {
           })
         )
         .catch((err: any) => console.warn("[VideoPlanningService] Slack de aprobación falló:", err.message));
+
+      // Y el cliente, en el mismo momento: aprobó, ya puede agendar su producción.
+      this.invitarAAgendar(planning.workspaceId).catch((err: any) =>
+        console.warn("[VideoPlanningService] invitación a agendar falló:", err.message)
+      );
     }
 
     return planning.toObject() as IVideoPlanning;
+  }
+
+  /**
+   * Aprobó sus guiones: se le ofrece agendar la producción al instante por el
+   * bot. Todo depende del cliente, sin esperar a que alguien del equipo le
+   * escriba. Si ya tiene una agendada o no puede (pago), no se le dice nada.
+   */
+  private async invitarAAgendar(workspaceId: Types.ObjectId): Promise<void> {
+    // Import dinámico: atencionCliente arrastra servicios que ya importan este.
+    const { atencionClienteService, fechaEcuador: cuando } = await import("./atencionCliente.service");
+    const { telegramService } = await import("./telegram.service");
+    const estado = await atencionClienteService.estadoProduccion(workspaceId);
+    if (!estado.puedeAgendar) return;
+    const chats = await models.telegramChats.find({ workspaceId, estado: "listo" }).select("chatId").lean();
+    for (const c of chats as any[]) {
+      await telegramService
+        .sendMessage(
+          c.chatId,
+          "✅ <b>¡Aprobaste tus guiones!</b>\n\n" +
+            "Ya puedes agendar tu producción, sin esperar a nadie 🎬 " +
+            (estado.habilitadaDesde ? `Hay horarios desde el <b>${cuando(estado.habilitadaDesde)}</b>, ` : "") +
+            "con unos días de margen para ajustar lo que haga falta antes de grabar.",
+          [[{ text: "🎬 Agendar mi producción", callback_data: "ag:produccion" }], [{ text: "📋 Ver menú", callback_data: "menu:ver" }]]
+        )
+        .catch((err: any) => console.warn("[VideoPlanningService] Telegram:", err?.message || err));
+    }
   }
 
   /**

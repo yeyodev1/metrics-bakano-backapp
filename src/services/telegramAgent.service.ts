@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { estadoPagoService } from "./estadoPago.service";
+import { destacarClienteService } from "./destacarCliente.service";
 import models from "../models";
 import type { ITelegramChat } from "../models/telegramChat.model";
 import { EQUIPO_ATENCION, equipoAtencionService, type TemaAtencion } from "./equipoAtencion.service";
@@ -482,8 +484,10 @@ CONTRASEÑAS:
 - NUNCA le digas una contraseña por el chat, ni digas que se la puedes mandar: no las tenemos en claro y este chat puede quedar abierto en un celular prestado. Lo que sí puedes es mandarle el correo de recuperación al toque.
 - Si solo pregunta con qué correo entra o dónde entra, usa verMisAccesos.
 
-- GRABAMOS HASTA QUEDARNOS SIN CONTENIDO. La producción no se agenda "porque toca cada 6 meses": se agenda antes de quedarnos sin guiones por grabar. Usa verReservaDeContenido cuando se hable de producción, contenido o videos; si seAcaba viene en true, díselo claro y empújalo a cerrar fecha ya, que ahí la espera entre producciones no aplica.
+- GRABAMOS HASTA QUEDARNOS SIN CONTENIDO. La producción no se agenda "porque toca cada tantos meses": se agenda antes de quedarnos sin guiones por grabar. Usa verReservaDeContenido cuando se hable de producción, contenido o videos; si seAcaba viene en true, díselo claro y empújalo a cerrar fecha ya, que ahí la espera entre producciones no aplica.
 - NO HAY PRODUCCIÓN SIN PLANIFICACIÓN. Dilo siempre que se hable de grabar: los guiones de lo que vamos a grabar tienen que estar escritos y aprobados por él ANTES de la grabación. Si su planificación está vacía, dile que ya avisaste a su equipo de contenido y a Genesis Benalcazar para que los preparen, y pásale el link de su planificación.
+- LO QUE QUIERE DESTACAR: si cuenta qué producto, servicio o promoción quiere destacar (o responde a la pregunta de "qué destacamos"), guárdalo con guardarQueDestacar con sus palabras y dile que Ariana arma sus próximos guiones en base a eso. Si es vago ("todo"), pregúntale cuál primero.
+- SIN PAGO NO HAY GUIONES NI PRODUCCIÓN: con pagos vencidos no ve ni aprueba guiones ni agenda producción. Cuando apruebe sus guiones, puede agendar su producción al instante con verHorariosProduccion.
 - Y para que lo que grabemos llegue a sus clientes hace falta el CRM: si todavía no hizo su sesión de Configuración de CRM y Metrics con David Robles, dile que la agende. Sin eso, los videos no tienen a dónde llevar a la gente.
 
 Mover o cancelar citas (producción, sesiones del onboarding y reuniones):
@@ -522,6 +526,25 @@ Reglas:
   }
 
   private herramientas(chat: ITelegramChat, textoCliente: string, turno: { inicio: Date; propuesta: boolean }) {
+    /**
+     * Con pagos vencidos el cliente no ve ni aprueba guiones. La IA recibe el
+     * motivo en vez del guion, para que se lo diga y le ofrezca pagar.
+     */
+    const conPago =
+      <A, R>(fn: (args: A) => Promise<R>) =>
+      async (args: A): Promise<R | Record<string, unknown>> => {
+        const bloqueo = await estadoPagoService.bloqueo(String(chat.workspaceId)).catch(() => null);
+        if (!bloqueo) return fn(args);
+        return {
+          bloqueadoPorPago: true,
+          deudaVencida: bloqueo.deudaTexto,
+          nota:
+            "El cliente tiene pagos vencidos: NO le muestres, leas ni resumas guiones, ni le recibas correcciones o aprobaciones. " +
+            "Dile con amabilidad que sus guiones ya están listos y que para verlos y aprobarlos primero tiene que ponerse al día, " +
+            "y ofrécele el link con verMisPagos / generarLinkDePago.",
+        };
+      };
+
     return {
       verProducciones: {
         description: "Próximas producciones (grabaciones) del cliente y la última realizada.",
@@ -549,11 +572,23 @@ Reglas:
         },
       },
 
+      guardarQueDestacar: {
+        description:
+          "Guarda lo que el cliente quiere destacar en sus próximos videos (producto, servicio, promoción nueva o de temporada) y avisa a contenido.",
+        inputSchema: z.object({ texto: z.string().describe("Qué quiere destacar, con sus palabras y los detalles que dio (precio, fechas, condiciones)") }),
+        execute: async ({ texto }: { texto: string }) => {
+          const r = await destacarClienteService.guardar(chat.workspaceId!, texto, { nombre: chat.firstName, fuente: "cliente" });
+          return r.ok
+            ? { ok: true, siguiente: "Confírmale que quedó anotado y que Ariana arma sus próximos guiones con eso." }
+            : { ok: false, motivo: r.motivo };
+        },
+      },
+
       verGuiones: {
         description:
           "Guiones de las planificaciones recientes: aprobación del cliente, grabación, edición, publicación y hasta cuándo puede pedir correcciones.",
         inputSchema: z.object({}),
-        execute: async () => {
+        execute: conPago(async () => {
           const entradas = await models.planning
             .find({ workspaceId: chat.workspaceId, date: { $gte: new Date(Date.now() - 45 * 86_400_000) } })
             .sort({ date: 1 })
@@ -589,7 +624,7 @@ Reglas:
               };
             }),
           };
-        },
+        }),
       },
 
       verHorariosLibres: {
@@ -621,7 +656,7 @@ Reglas:
         description:
           "Guiones que el cliente tiene por revisar (planificación lista y sin respuesta), con el plazo para pedir correcciones y lo que ya anotó en su borrador.",
         inputSchema: z.object({}),
-        execute: async () => {
+        execute: conPago(async () => {
           const r = await revisionGuionesService.resumen(chat);
           if (!r) return { hayGuionesPorRevisar: false, nota: "No hay guiones esperando su revisión: o ya la envió o todavía no está lista." };
           const enBorrador = new Map(r.correcciones.map((c) => [c.numero, c.texto]));
@@ -638,17 +673,17 @@ Reglas:
               correccionAnotada: enBorrador.get(g.numero) ?? null,
             })),
           };
-        },
+        }),
       },
 
       verGuion: {
         description: "Texto completo de un guion (gancho, cuerpo y CTA) para comentarlo con el cliente.",
         inputSchema: z.object({ numero: z.number().int() }),
-        execute: async ({ numero }: { numero: number }) => {
+        execute: conPago(async ({ numero }: { numero: number }) => {
           const r = await revisionGuionesService.pendiente(chat.workspaceId!);
           const g = r?.guiones.find((x) => x.numero === numero);
           return g ? { numero: g.numero, tema: g.tema, texto: g.texto || "Este guion todavía no tiene texto." } : { error: `No encontré el guion #${numero}.` };
-        },
+        }),
       },
 
       anotarCorreccion: {
@@ -659,8 +694,8 @@ Reglas:
           correccion: z.string().describe("La corrección con las palabras del cliente: qué cambiar y cómo lo quiere"),
           categoria: z.enum(CATEGORIAS_GUION).describe("gancho_debil, tono_incorrecto, estructura, informacion_incorrecta, ortografia u otro"),
         }),
-        execute: async ({ numero, correccion, categoria }: { numero: number; correccion: string; categoria: string }) =>
-          revisionGuionesService.anotar(chat, numero, correccion, categoria),
+        execute: conPago(async ({ numero, correccion, categoria }: { numero: number; correccion: string; categoria: string }) =>
+          revisionGuionesService.anotar(chat, numero, correccion, categoria)),
       },
 
       quitarCorreccion: {
@@ -672,7 +707,7 @@ Reglas:
       verBorradorRevision: {
         description: "Resumen de lo que se enviaría: correcciones anotadas y guiones que quedarían sin corrección.",
         inputSchema: z.object({}),
-        execute: async () => {
+        execute: conPago(async () => {
           const r = await revisionGuionesService.resumen(chat);
           if (!r) return { nota: "No hay guiones esperando su revisión." };
           return {
@@ -681,14 +716,14 @@ Reglas:
             puedePedirCorrecciones: !r.plazo.cerrado,
             correccionesHasta: r.plazo.hasta ?? null,
           };
-        },
+        }),
       },
 
       enviarRevisionGuiones: {
         description:
           "Envía la revisión completa al equipo (una sola vez). Solo tras confirmación explícita del cliente. aprobarResto=true aprueba los guiones que no corrigió; úsalo solo si el cliente lo aceptó.",
         inputSchema: z.object({ aprobarResto: z.boolean() }),
-        execute: async ({ aprobarResto }: { aprobarResto: boolean }) => revisionGuionesService.enviar(chat, aprobarResto),
+        execute: conPago(async ({ aprobarResto }: { aprobarResto: boolean }) => revisionGuionesService.enviar(chat, aprobarResto)),
       },
 
       verOnboarding: {
@@ -863,7 +898,7 @@ Reglas:
 
       verHorariosProduccion: {
         description:
-          "Dice si el cliente puede agendar su producción (una cada 6 meses desde la última, para crear su avatar y grabar sus productos; con una ya agendada no puede otra) y los horarios libres de Karen Muñoz y Jean Ortega desde la fecha permitida.",
+          "Dice si el cliente puede agendar su producción (cada N meses desde la última según su plan, para crear su avatar y grabar sus productos; con una ya agendada no puede otra; si ya aprobó guiones sin grabar, puede agendar al instante; con pagos vencidos no puede) y los horarios libres de Karen Muñoz y Jean Ortega desde la fecha permitida.",
         inputSchema: z.object({}),
         execute: async () => {
           const { estado, horarios: crudos } = await atencionClienteService.horariosProduccion(chat.workspaceId!);
@@ -871,6 +906,13 @@ Reglas:
             ? (await citasClienteService.sinChoques(chat, crudos, { duracionMs: 3 * 3_600_000 })).horarios
             : crudos;
           const horarios = libres;
+          if (estado.bloqueo === "pago_pendiente") {
+            return {
+              puedeAgendar: false,
+              motivo: "pago_pendiente",
+              siguiente: `No puede agendar su producción hasta ponerse al día con el pago (${estado.deudaTexto} vencido). Díselo con amabilidad y ofrécele el link con verMisPagos / generarLinkDePago.`,
+            };
+          }
           if (estado.bloqueo === "falta_ariana") {
             return {
               puedeAgendar: false,
@@ -884,7 +926,11 @@ Reglas:
             yaTieneAgendada: estado.proxima ? fechaEcuador(estado.proxima) : null,
             ultimaProduccion: estado.ultima ? fechaEcuador(estado.ultima) : null,
             disponibleDesde: estado.habilitadaDesde ? fechaEcuador(estado.habilitadaDesde) : null,
-            esperaPorReglaDe2Meses: estado.esperar ?? false,
+            esperaPorReglaDeMeses: estado.esperar ?? false,
+            mesesEntreProducciones: estado.mesesEntre ?? null,
+            ...(estado.porGuionesAprobados
+              ? { porGuionesAprobados: "Ya aprobó sus guiones: puede grabar sin esperar la regla de meses. Se deja un margen de días para ajustar la planificación." }
+              : {}),
             horarios:
               horarios === null
                 ? "El calendario no está disponible: ofrece pasarle el mensaje al equipo."
@@ -895,7 +941,7 @@ Reglas:
 
       agendarProduccion: {
         description:
-          "Agenda la producción en el calendario de Karen Muñoz y Jean Ortega y les avisa. Úsala solo con un horario que el cliente eligió de verHorariosProduccion. El sistema vuelve a validar la regla de 6 meses.",
+          "Agenda la producción en el calendario de Karen Muñoz y Jean Ortega y les avisa. Úsala solo con un horario que el cliente eligió de verHorariosProduccion. El sistema vuelve a validar la regla de meses y el pago.",
         inputSchema: z.object({
           inicio: z.string().describe("Valor 'inicio' exacto devuelto por verHorariosProduccion"),
         }),
@@ -926,6 +972,8 @@ Reglas:
               }
             : r.motivo === "falta_ariana"
               ? { ok: false, motivo: r.motivo, siguiente: "Primero va la reunión con Ariana Vera: ofrécele agendarla (verHorariosOnboarding con sesion=levantamiento)." }
+              : r.motivo === "pago_pendiente"
+                ? { ok: false, motivo: r.motivo, siguiente: "Tiene pagos vencidos: primero tiene que ponerse al día. Ofrécele el link con verMisPagos / generarLinkDePago." }
               : { ok: false, motivo: r.motivo };
         },
       },
