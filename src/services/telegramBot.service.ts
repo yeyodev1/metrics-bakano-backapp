@@ -4,6 +4,7 @@ import { produccionAnticipadaService } from "./produccionAnticipada.service";
 import { Types } from "mongoose";
 import models from "../models";
 import type { ITelegramChat } from "../models/telegramChat.model";
+import { botsDeAcceso } from "../models/user.model";
 import { resendService } from "./resend.service";
 import { EQUIPO_ATENCION, equipoAtencionService, type TemaAtencion } from "./equipoAtencion.service";
 import {
@@ -2154,7 +2155,11 @@ export class TelegramBotService {
   private async entornosDe(userId: Types.ObjectId): Promise<{ _id: Types.ObjectId; name: string }[]> {
     const usuario = await models.users.findById(userId).select("workspaceId workspaces isActive").lean();
     if (!usuario?.isActive) return [];
-    const ids = [usuario.workspaceId, ...(usuario.workspaces || []).map((w) => w.workspaceId)].filter(Boolean);
+    // Los entornos donde solo tiene a Lucas (vendedores del cliente) no cuentan aquí.
+    const ids = [
+      usuario.workspaceId,
+      ...(usuario.workspaces || []).filter((w) => botsDeAcceso(w).includes("bakano")).map((w) => w.workspaceId),
+    ].filter(Boolean);
     return models.workspaces
       .find({ _id: { $in: ids }, isActive: true })
       .select("_id name")
@@ -2169,6 +2174,16 @@ export class TelegramBotService {
       chat.estado = "eligiendo_entorno";
       chat.workspaceId = undefined;
       await chat.save();
+      // Vendedor de un cliente con acceso solo a Lucas: se le manda allá.
+      const usuario = await models.users.findById(chat.userId).select("workspaces").lean();
+      if ((usuario?.workspaces || []).some((w) => botsDeAcceso(w).includes("lucas"))) {
+        await telegramService.sendMessage(
+          chat.chatId,
+          "Tu acceso es a <b>Lucas</b>, el asesor de ventas de Bakano 🙌 Escríbele a @LucasByBakanoBot con este mismo correo y te ayuda a cerrar tus ventas.",
+          [[{ text: "Abrir Lucas", url: "https://t.me/LucasByBakanoBot" }]]
+        );
+        return;
+      }
       await telegramService.sendMessage(
         chat.chatId,
         "Para que todo funcione (tu onboarding, tus sesiones, tus guiones y tus métricas) necesitas un <b>entorno creado</b> en metrics.bakano.ec, y tu cuenta todavía no tiene uno activo 😕\n\n" +

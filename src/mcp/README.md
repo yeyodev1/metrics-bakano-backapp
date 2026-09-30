@@ -41,8 +41,9 @@ entornos en la plataforma es de superadmin, así que a él no le aparecen.
   `eliminar_entorno(token, confirmar_nombre)`. Solo entornos ya pausados. Usa el mismo `deleteWorkspace`
   de la plataforma: borra el entorno y sus usuarios del cliente, desvincula a los @bakano.ec y deja
   producciones, guiones y chats sin entorno (no los borra).
-- Personas: `ver_personas_entorno`, `agregar_persona_entorno` (mismo `createUser` de la plataforma: si es
-  nueva, contraseña aleatoria + correo de bienvenida; arranca onboarding, bot y Bakanology),
+- Personas: `ver_personas_entorno`, `agregar_persona_entorno` (mismo `createUser` de la plataforma, con
+  `bots`: `bakano`, `lucas` o ambos por defecto. Con bakano: contraseña + bienvenida, onboarding, bot y
+  Bakanology; con lucas: su correo de acceso a Lucas. Solo lucas no exige teléfono ni nombre),
   `quitar_persona_entorno` (sin token muestra el impacto y da token; con token aplica `deleteUser`,
   que borra la cuenta si era su único entorno). Los contactos bloqueados no se agregan.
   `contrasena_persona_entorno`: pone contraseña (dada o generada `xxxx-xxxx-xxxx`) con `updateUser`, la devuelve

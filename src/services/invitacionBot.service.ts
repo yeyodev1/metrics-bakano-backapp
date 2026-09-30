@@ -1,5 +1,6 @@
 import { Types } from "mongoose";
 import models from "../models";
+import { botsDeAcceso } from "../models/user.model";
 import { resendService } from "./resend.service";
 
 /**
@@ -15,6 +16,7 @@ import { resendService } from "./resend.service";
  */
 
 const BOT_URL = process.env.TELEGRAM_BOT_URL || "https://t.me/BakanoAgencyBot";
+const LUCAS_URL = process.env.LUCAS_BOT_URL || "https://t.me/LucasByBakanoBot";
 /** Si la bienvenida salio hace menos de esto, ese correo ya cubre la invitacion. */
 const MARGEN_BIENVENIDA_MS = 10 * 60_000;
 
@@ -31,7 +33,7 @@ class InvitacionBotService {
     try {
       const user = await models.users
         .findById(userId)
-        .select("name email isInternal isActive presentacionBotEnviadaEn")
+        .select("name email isInternal isActive presentacionBotEnviadaEn workspaces")
         .lean();
       if (!user?.email || !user.isActive) return false;
       if (user.isInternal || user.email.toLowerCase().endsWith("@bakano.ec")) return false;
@@ -39,8 +41,17 @@ class InvitacionBotService {
       // aunque ya se le haya escrito antes.
       if (!opciones.forzar && (user as any).presentacionBotEnviadaEn) return false;
 
+      // Solo los entornos en los que entra a este bot: al vendedor que solo
+      // tiene a Lucas no se le presenta @BakanoAgencyBot.
+      const conBakano = workspaceIds.filter((id) => {
+        if (!id) return false;
+        const acceso = (user.workspaces || []).find((w: any) => String(w.workspaceId) === String(id));
+        return botsDeAcceso(acceso).includes("bakano");
+      });
+      if (!conBakano.length) return false;
+
       const entornos = await models.workspaces
-        .find({ _id: { $in: workspaceIds.filter(Boolean) }, isActive: true })
+        .find({ _id: { $in: conBakano }, isActive: true })
         .select("name onboardingBienvenidaEnviadaEn")
         .lean();
       if (!entornos.length) return false;
@@ -89,6 +100,34 @@ class InvitacionBotService {
 
     const ok = await this.invitar(userId, entornos as any[], { forzar: true });
     return ok ? { ok: true, email: user.email } : { ok: false, motivo: "no_se_pudo_enviar" };
+  }
+
+  /**
+   * Correo de acceso a Lucas. Se manda siempre que se le abre Lucas (no hay
+   * "ya se le escribió"): es a pedido de una persona desde el panel o el MCP.
+   */
+  async invitarLucas(userId: Types.ObjectId | string, workspaceId: Types.ObjectId | string): Promise<boolean> {
+    try {
+      const user = await models.users.findById(userId).select("name email isActive workspaces").lean();
+      if (!user?.email || !user.isActive) return false;
+      const acceso = (user.workspaces || []).find((w: any) => String(w.workspaceId) === String(workspaceId));
+      if (!acceso || !botsDeAcceso(acceso).includes("lucas")) return false;
+      const entorno = await models.workspaces.findOne({ _id: workspaceId, isActive: true }).select("name").lean();
+      if (!entorno) return false;
+
+      await resendService.sendInvitacionLucas({
+        to: user.email,
+        recipientName: user.name,
+        workspaceName: entorno.name,
+        lucasUrl: LUCAS_URL,
+        esDueno: acceso.role === "admin",
+      });
+      console.log(`[Lucas] invitacion enviada a ${user.email} (${entorno.name})`);
+      return true;
+    } catch (error: any) {
+      console.error("[Lucas] no se pudo invitar:", error?.message || error);
+      return false;
+    }
   }
 
   /** Version que no espera: para llamarla desde el alta de un usuario. */
