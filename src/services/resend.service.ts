@@ -1943,7 +1943,8 @@ export class ResendService {
 </html>`;
 
     const { error } = await this.client.emails.send({
-      from: this.from,
+      // Sale de Lucas, no de Metrics: es quien le va a escribir por Telegram.
+      from: process.env.LUCAS_FROM_EMAIL || "Lucas de Bakano <lucas@bakano.ec>",
       to,
       subject: `Bakano x ${workspaceName}: ya tienes acceso a Lucas, tu asesor de ventas`,
       html,
