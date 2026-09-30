@@ -1,8 +1,22 @@
 import { Schema, model, Document, Types } from "mongoose";
 
+export type BotAcceso = "bakano" | "lucas";
+export const BOTS_ACCESO: BotAcceso[] = ["bakano", "lucas"];
+
 export interface IUserWorkspaceAccess {
   workspaceId: Types.ObjectId;
   role: "admin" | "colaborador";
+  /**
+   * A qué bot entra con este entorno: @BakanoAgencyBot (onboarding, guiones,
+   * producción) y/o Lucas (el asesor de ventas). Los vendedores de un cliente
+   * solo necesitan a Lucas. Sin el campo (altas viejas) entra a los dos.
+   */
+  bots?: BotAcceso[];
+}
+
+/** Bots a los que entra con ese acceso. Leer siempre por aquí: las altas viejas no tienen el campo. */
+export function botsDeAcceso(acceso?: { bots?: BotAcceso[] | null } | null): BotAcceso[] {
+  return acceso?.bots?.length ? acceso.bots : BOTS_ACCESO;
 }
 
 export type InternalRole =
@@ -108,6 +122,10 @@ export const UserSchema = new Schema<IUser>(
           type: String,
           enum: ["admin", "colaborador"],
           required: true,
+        },
+        bots: {
+          type: [{ type: String, enum: ["bakano", "lucas"] }],
+          default: undefined,
         },
       }
     ],

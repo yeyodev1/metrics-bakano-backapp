@@ -1853,6 +1853,104 @@ export class ResendService {
   }
 
   /**
+   * Acceso a Lucas, el asesor de ventas. Va a quien se suma a un entorno con
+   * Lucas, típicamente los vendedores del cliente: no hablan de Metrics ni del
+   * bot de Bakano, solo de cómo entrar a Lucas con su correo.
+   */
+  async sendInvitacionLucas(params: {
+    to: string;
+    recipientName?: string;
+    workspaceName: string;
+    lucasUrl: string;
+    esDueno: boolean;
+  }): Promise<void> {
+    const { to, recipientName, workspaceName, lucasUrl, esDueno } = params;
+    const esc = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const firstName = recipientName ? esc(recipientName.split(" ")[0]) : "Hola";
+
+    const puede = [
+      ["💬", "Qué responder para cerrar", "le pasas la captura del chat de WhatsApp y te da 2 o 3 respuestas listas para copiar"],
+      ["🌡️", "Qué tan cerca está cada cliente", "frío, tibio, caliente o listo para pagar, y lo que falta para cerrar"],
+      ["💳", "Cuándo mandar el pago", "te avisa el momento y te arma el mensaje con los datos de pago"],
+      ["🧠", "Recuerda a cada cliente", "no tienes que explicarle dos veces quién es ni qué te pidió"],
+    ]
+      .map(
+        ([emoji, titulo, detalle]) =>
+          `<tr><td style="padding:10px 0;vertical-align:top;width:34px;font-size:20px;">${emoji}</td>` +
+          `<td style="padding:10px 0;"><p style="margin:0;font-size:15px;font-weight:700;color:#1e293b;">${titulo}</p>` +
+          `<p style="margin:2px 0 0;font-size:14px;color:#64748b;line-height:1.6;">${detalle}</p></td></tr>`
+      )
+      .join("");
+
+    const html = `<!DOCTYPE html>
+<html lang="es">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+<body style="margin:0;padding:0;background:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="padding:40px 20px;">
+    <tr><td align="center">
+      <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
+
+        ${barraMarca()}
+        <tr>
+          <td style="background:linear-gradient(135deg,#e6285c 0%,#85529c 100%);padding:32px 40px;text-align:center;">
+            <h1 style="margin:0;font-size:24px;font-weight:800;color:#ffffff;">Ya tienes a Lucas, tu asesor de ventas</h1>
+            <p style="margin:10px 0 0;font-size:15px;color:#ffe4ec;">Te ayuda a cerrar tus ventas por WhatsApp, desde Telegram</p>
+          </td>
+        </tr>
+
+        <tr>
+          <td style="padding:32px 40px 8px;">
+            <p style="margin:0 0 16px;font-size:16px;color:#1e293b;">${firstName},</p>
+            <p style="margin:0 0 20px;font-size:15px;color:#475569;line-height:1.7;">
+              Te dimos acceso a <strong>Lucas</strong> para vender por <strong>${esc(workspaceName)}</strong>${esDueno ? " como dueño del negocio" : ""}.
+              Cuando un cliente te escriba por WhatsApp, le pasas la conversación y te dice:
+            </p>
+            <table width="100%" cellpadding="0" cellspacing="0">${puede}</table>
+          </td>
+        </tr>
+
+        <tr>
+          <td style="padding:8px 40px 24px;">
+            <div style="background:#f8fafc;border:1.5px solid #e2e8f0;border-radius:12px;padding:20px;">
+              <p style="margin:0 0 10px;font-size:15px;font-weight:700;color:#1e293b;">Cómo entras, en 30 segundos</p>
+              <p style="margin:0;font-size:14px;color:#475569;line-height:1.8;">
+                1. Abres el chat con Lucas con el botón de abajo (necesitas Telegram).<br/>
+                2. Le escribes este correo: <strong>${esc(to)}</strong><br/>
+                3. Te llega un código de 6 números a este correo y se lo escribes en el chat. Listo.
+              </p>
+            </div>
+          </td>
+        </tr>
+
+        <tr>
+          <td style="padding:0 40px 32px;text-align:center;">
+            <a href="${lucasUrl}" style="display:inline-block;background:linear-gradient(135deg,#e6285c 0%,#85529c 100%);color:#ffffff;text-decoration:none;padding:16px 40px;border-radius:12px;font-size:16px;font-weight:700;">Abrir a Lucas en Telegram</a>
+            <p style="margin:14px 0 0;font-size:13px;color:#94a3b8;">Si no te abre, busca <strong>@LucasByBakanoBot</strong> en Telegram.</p>
+          </td>
+        </tr>
+
+        <tr>
+          <td style="background:#f8fafc;padding:16px 40px;border-top:1px solid #e2e8f0;text-align:center;">
+            <p style="margin:0;color:#94a3b8;font-size:12px;">Enviado por <strong>Bakano</strong>.<br/>Si algo no te cuadra, escríbenos a soporte@bakano.ec</p>
+          </td>
+        </tr>
+
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+
+    const { error } = await this.client.emails.send({
+      from: this.from,
+      to,
+      subject: `${workspaceName}: tu acceso a Lucas, tu asesor de ventas`,
+      html,
+    });
+    if (error) throw new Error(error.message);
+  }
+
+  /**
    * Arranque del onboarding: le dice al cliente que todo se maneja por el bot
    * de Telegram y le deja los links de las tres sesiones tecnicas.
    */

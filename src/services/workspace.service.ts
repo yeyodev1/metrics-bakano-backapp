@@ -1,6 +1,7 @@
 import bcrypt from "bcryptjs";
 import { Types } from "mongoose";
 import models from "../models";
+import { BOTS_ACCESO, botsDeAcceso, type BotAcceso, type IUserWorkspaceAccess } from "../models/user.model";
 import { notificationService } from "./notification.service";
 
 export interface CreateWorkspacePayload {
@@ -15,16 +16,53 @@ export interface CreateUserPayload {
   workspaceId: string;
   phoneNumber?: string;
   phoneExtension?: string;
+  /** Bots a los que entra con este entorno. Por defecto, los dos. */
+  bots?: BotAcceso[];
+}
+
+/** Deja solo bots conocidos, sin repetir. Vacío o inválido → los dos. */
+export function normalizarBots(bots?: unknown): BotAcceso[] {
+  const validos = Array.isArray(bots) ? BOTS_ACCESO.filter((b) => bots.includes(b)) : [];
+  return validos.length ? validos : [...BOTS_ACCESO];
+}
+
+export interface AccesoEntornoPayload {
+  workspaceId: string;
+  role: "admin" | "colaborador";
+  /** Si no viene, se conservan los que ya tenía (o los dos si es nuevo). */
+  bots?: BotAcceso[];
+}
+
+/** Bots que se le abren a alguien en un entorno: los nuevos, para mandarle solo esas invitaciones. */
+export interface BotsAbiertos {
+  workspaceId: string;
+  bots: BotAcceso[];
+}
+
+/**
+ * Arma los accesos a partir de lo que manda el panel sin perder a qué bots
+ * entraba cada uno, y devuelve qué bots se le abrieron en cada entorno.
+ */
+function armarAccesos(
+  payload: AccesoEntornoPayload[],
+  anteriores: IUserWorkspaceAccess[] = []
+): { accesos: IUserWorkspaceAccess[]; abiertos: BotsAbiertos[] } {
+  const abiertos: BotsAbiertos[] = [];
+  const accesos = payload.map((ws) => {
+    const antes = anteriores.find((w) => w.workspaceId.toString() === ws.workspaceId);
+    const bots = ws.bots !== undefined ? normalizarBots(ws.bots) : botsDeAcceso(antes);
+    const nuevos = antes ? bots.filter((b) => !botsDeAcceso(antes).includes(b)) : bots;
+    if (nuevos.length) abiertos.push({ workspaceId: ws.workspaceId, bots: nuevos });
+    return { workspaceId: new Types.ObjectId(ws.workspaceId), role: ws.role, bots };
+  });
+  return { accesos, abiertos };
 }
 
 export interface CreateGlobalUserPayload {
   name?: string;
   email: string;
   password?: string;
-  workspaces: {
-    workspaceId: string;
-    role: "admin" | "colaborador";
-  }[];
+  workspaces: AccesoEntornoPayload[];
   phoneNumber?: string;
   phoneExtension?: string;
   isInternal?: boolean;
@@ -35,10 +73,7 @@ export interface UpdateGlobalUserPayload {
   name?: string;
   email?: string;
   password?: string;
-  workspaces?: {
-    workspaceId: string;
-    role: "admin" | "colaborador";
-  }[];
+  workspaces?: AccesoEntornoPayload[];
   phoneNumber?: string;
   phoneExtension?: string;
   isInternal?: boolean;
@@ -52,6 +87,7 @@ export interface UpdateUserPayload {
   role?: "admin" | "colaborador";
   phoneNumber?: string;
   phoneExtension?: string;
+  bots?: BotAcceso[];
 }
 
 export class WorkspaceService {
@@ -358,6 +394,7 @@ export class WorkspaceService {
       return {
         ...user,
         role: wsAccess?.role || (user.role === 'superadmin' || user.role === 'user' ? 'colaborador' : user.role), // show the workspace role specifically, or falcback
+        bots: botsDeAcceso(wsAccess),
         workspaceId // append workspaceId
       };
     });
@@ -468,6 +505,7 @@ export class WorkspaceService {
     if (!workspace) throw new Error("WORKSPACE_NOT_FOUND");
 
     let user = await models.users.findOne({ email: payload.email.toLowerCase().trim() });
+    const bots = normalizarBots(payload.bots);
 
     if (user) {
       if (!user.workspaces) user.workspaces = [];
@@ -495,7 +533,8 @@ export class WorkspaceService {
 
       user.workspaces.push({
         workspaceId: new Types.ObjectId(payload.workspaceId),
-        role: payload.role as "admin" | "colaborador"
+        role: payload.role as "admin" | "colaborador",
+        bots,
       });
 
       if (payload.phoneNumber !== undefined) user.phoneNumber = payload.phoneNumber;
@@ -513,7 +552,8 @@ export class WorkspaceService {
         role: "user",
         workspaces: [{
           workspaceId: new Types.ObjectId(payload.workspaceId),
-          role: payload.role as "admin" | "colaborador"
+          role: payload.role as "admin" | "colaborador",
+          bots,
         }],
         isActive: true,
         phoneNumber: payload.phoneNumber,
@@ -526,25 +566,8 @@ export class WorkspaceService {
       await models.workspaces.findByIdAndUpdate(payload.workspaceId, { adminId: user._id });
     }
 
-    // El onboarding arranca solo: con el entorno ya creado y su primer
-    // cliente dentro, sale el correo con Telegram y el acceso a la
-    // plataforma. Import diferido para no enredar servicios entre si.
-    import("./onboardingBot.service")
-      .then(({ onboardingBotService }) => onboardingBotService.enviarBienvenida(payload.workspaceId))
-      .catch((error) => console.error("[Onboarding] bienvenida al crear usuario:", error?.message || error));
-
-    // Y su invitacion al bot: el flujo cambio y lo que antes se hacia aqui
-    // ahora se resuelve por chat. Se manda sola, sin que nadie se acuerde.
-    await import("./invitacionBot.service")
-      .then(({ invitacionBotService }) => invitacionBotService.invitar(user!._id, [payload.workspaceId]))
-      .catch((error) => console.error("[Bot] invitacion al crear usuario:", error?.message || error));
-
-    // Y su acceso a Bakanology: contratar incluye la academia. Se ESPERA: en
-    // Vercel una promesa suelta se pierde cuando la funcion responde, y asi
-    // hubo altas que nunca recibieron su acceso.
-    await import("./bakanology.service")
-      .then(({ bakanologyService }) => bakanologyService.alDarDeAlta(user!._id))
-      .catch((error) => console.error("[Bakanology] al crear usuario:", error?.message || error));
+    const { lucas } = await this.enviarAccesos(user._id, [{ workspaceId: payload.workspaceId, bots }], { onboarding: true });
+    const invitacionLucas = lucas.includes(payload.workspaceId);
 
     const { password, ...userWithoutPassword } = user.toObject();
 
@@ -552,6 +575,8 @@ export class WorkspaceService {
     return {
       ...userWithoutPassword,
       role: payload.role,
+      bots,
+      invitacionLucas,
       workspaceId: payload.workspaceId
     };
   }
@@ -583,6 +608,17 @@ export class WorkspaceService {
     if (payload.password) user.password = await bcrypt.hash(payload.password, 10);
     if (payload.phoneNumber !== undefined) user.phoneNumber = payload.phoneNumber;
     if (payload.phoneExtension !== undefined) user.phoneExtension = payload.phoneExtension;
+
+    // Si se le abre un bot que antes no tenía, le llega su invitación a ese.
+    const botsNuevos: BotAcceso[] = [];
+    if (payload.bots !== undefined) {
+      const acceso = user.workspaces?.find((w: any) => w.workspaceId.toString() === workspaceId);
+      if (acceso) {
+        const antes = botsDeAcceso(acceso);
+        acceso.bots = normalizarBots(payload.bots);
+        botsNuevos.push(...acceso.bots.filter((b) => !antes.includes(b)));
+      }
+    }
 
     if (payload.role) {
       let roleApplied = false;
@@ -628,6 +664,10 @@ export class WorkspaceService {
       await models.workspaces.findByIdAndUpdate(workspaceId, { adminId: user._id });
     }
 
+    if (botsNuevos.length && !user.isInternal) {
+      await this.enviarAccesos(user._id, [{ workspaceId, bots: botsNuevos }], { onboarding: false });
+    }
+
     const updated = user.toObject();
     const wsAccess = updated.workspaces?.find((w: any) => w.workspaceId.toString() === workspaceId);
 
@@ -635,6 +675,7 @@ export class WorkspaceService {
     return {
       ...withoutPassword,
       role: wsAccess?.role || (updated.role === 'superadmin' || updated.role === 'user' ? 'colaborador' : updated.role),
+      bots: botsDeAcceso(wsAccess),
       workspaceId
     };
   }
@@ -813,7 +854,9 @@ export class WorkspaceService {
   async createGlobalUser(payload: CreateGlobalUserPayload) {
     let user = await models.users.findOne({ email: payload.email.toLowerCase().trim() });
     let newWorkspaceIds: string[] = [];
+    let abiertos: BotsAbiertos[] = [];
 
+    const esCuentaExistente = Boolean(user);
     if (user) {
       if (user.role === "superadmin") throw new Error("CANNOT_MOD_SUPERADMIN");
 
@@ -846,10 +889,9 @@ export class WorkspaceService {
           }
         });
       } else {
-        user.workspaces = payload.workspaces.map(ws => ({
-          workspaceId: new Types.ObjectId(ws.workspaceId),
-          role: ws.role
-        }));
+        const armado = armarAccesos(payload.workspaces, user.workspaces || []);
+        user.workspaces = armado.accesos;
+        abiertos = armado.abiertos;
       }
 
       await user.save();
@@ -857,16 +899,15 @@ export class WorkspaceService {
     } else {
       if (!payload.password) throw new Error("PASSWORD_REQUIRED");
       const hashed = await bcrypt.hash(payload.password, 10);
+      const armado = armarAccesos(payload.workspaces);
+      abiertos = armado.abiertos;
 
       user = await models.users.create({
         name: payload.name?.trim(),
         email: payload.email.toLowerCase().trim(),
         password: hashed,
         role: "user",
-        workspaces: payload.workspaces.map(ws => ({
-          workspaceId: new Types.ObjectId(ws.workspaceId),
-          role: ws.role
-        })),
+        workspaces: armado.accesos,
         isActive: true,
         phoneNumber: payload.phoneNumber,
         phoneExtension: payload.phoneExtension,
@@ -876,14 +917,6 @@ export class WorkspaceService {
       await user.populate("workspaces.workspaceId", "name");
       // All workspaces are new for a brand-new user
       newWorkspaceIds = payload.workspaces.map(ws => ws.workspaceId);
-
-      // Cliente nuevo (no del equipo): arranca su onboarding por correo.
-      if (!payload.isInternal) {
-        const entornos = [...newWorkspaceIds];
-        import("./onboardingBot.service")
-          .then(({ onboardingBotService }) => Promise.all(entornos.map((id) => onboardingBotService.enviarBienvenida(id))))
-          .catch((error) => console.error("[Onboarding] bienvenida al crear cliente:", error?.message || error));
-      }
     }
 
     // Fire notifications for newly assigned workspaces (non-blocking)
@@ -901,22 +934,17 @@ export class WorkspaceService {
           .catch(() => {});
       }
 
-      // Y su invitacion al bot: el flujo cambio y lo que antes se hacia en
-      // Metrics ahora se resuelve por chat.
-      if (!payload.isInternal) {
-        const destino = user._id;
-        const entornos = [...newWorkspaceIds];
-        await import("./invitacionBot.service")
-          .then(({ invitacionBotService }) => invitacionBotService.invitar(destino, entornos))
-          .catch((error) => console.error("[Bot] invitacion al crear cliente:", error?.message || error));
-        await import("./bakanology.service")
-          .then(({ bakanologyService }) => bakanologyService.alDarDeAlta(destino))
-          .catch((error) => console.error("[Bakanology] al crear cliente:", error?.message || error));
-      }
+    }
+
+    // Cliente (no del equipo): sus accesos salen ahora, solo los de los bots
+    // que se le abrieron. El onboarding arranca solo si es cuenta nueva.
+    let invitacionLucas: string[] = [];
+    if (!user.isInternal && abiertos.length) {
+      invitacionLucas = (await this.enviarAccesos(user._id, abiertos, { onboarding: !esCuentaExistente })).lucas;
     }
 
     const { password, ...withoutPassword } = user.toObject();
-    return withoutPassword;
+    return { ...withoutPassword, invitacionLucas };
   }
 
   async updateGlobalUser(userId: string, payload: UpdateGlobalUserPayload) {
@@ -943,16 +971,16 @@ export class WorkspaceService {
     if (payload.internalRole !== undefined) (user as any).internalRole = payload.internalRole;
 
     let newWorkspaceIds: string[] = [];
+    let abiertos: BotsAbiertos[] = [];
     if (payload.workspaces) {
       const oldIds = new Set((user.workspaces || []).map(w => w.workspaceId.toString()));
       newWorkspaceIds = payload.workspaces
         .filter(ws => !oldIds.has(ws.workspaceId))
         .map(ws => ws.workspaceId);
 
-      user.workspaces = payload.workspaces.map(ws => ({
-        workspaceId: new Types.ObjectId(ws.workspaceId),
-        role: ws.role
-      }));
+      const armado = armarAccesos(payload.workspaces, user.workspaces || []);
+      user.workspaces = armado.accesos;
+      abiertos = armado.abiertos;
     }
 
     await user.save();
@@ -972,20 +1000,53 @@ export class WorkspaceService {
           .catch(() => {});
       }
 
-      // Sumar a alguien a un entorno cuenta igual que darlo de alta: si es
-      // cliente, sus accesos salen ahora. Ninguno de los dos repite envios.
-      if (!user.isInternal) {
-        await Promise.allSettled([
-          import("./invitacionBot.service").then(({ invitacionBotService }) =>
-            invitacionBotService.invitar(user._id, newWorkspaceIds)
-          ),
-          import("./bakanology.service").then(({ bakanologyService }) => bakanologyService.alDarDeAlta(user._id)),
-        ]);
-      }
+    }
+
+    // Sumar a alguien a un entorno (o abrirle un bot) cuenta igual que darlo
+    // de alta: si es cliente, sus accesos salen ahora. Bakano no repite envios.
+    let invitacionLucas: string[] = [];
+    if (!user.isInternal && abiertos.length) {
+      invitacionLucas = (await this.enviarAccesos(user._id, abiertos, { onboarding: false })).lucas;
     }
 
     const { password, ...withoutPassword } = user.toObject();
-    return withoutPassword;
+    return { ...withoutPassword, invitacionLucas };
+  }
+
+  /**
+   * Los correos que le tocan a alguien por los bots que se le abrieron.
+   * Bakano: onboarding del entorno (si se pide), invitación a @BakanoAgencyBot
+   * y Bakanology. Lucas: su correo de acceso. Se ESPERA todo: en Vercel una
+   * promesa suelta se pierde cuando la función responde. Devuelve los
+   * entornos a los que sí salió el correo de Lucas.
+   */
+  private async enviarAccesos(
+    userId: Types.ObjectId,
+    abiertos: BotsAbiertos[],
+    opciones: { onboarding: boolean }
+  ): Promise<{ lucas: string[] }> {
+    const { invitacionBotService } = await import("./invitacionBot.service");
+    const conBakano = abiertos.filter((a) => a.bots.includes("bakano")).map((a) => a.workspaceId);
+    const conLucas = abiertos.filter((a) => a.bots.includes("lucas")).map((a) => a.workspaceId);
+
+    if (conBakano.length) {
+      if (opciones.onboarding) {
+        const { onboardingBotService } = await import("./onboardingBot.service");
+        await Promise.allSettled(conBakano.map((id) => onboardingBotService.enviarBienvenida(id)));
+      }
+      await invitacionBotService
+        .invitar(userId, conBakano)
+        .catch((error) => console.error("[Bot] invitacion:", error?.message || error));
+      await import("./bakanology.service")
+        .then(({ bakanologyService }) => bakanologyService.alDarDeAlta(userId))
+        .catch((error) => console.error("[Bakanology] al dar acceso:", error?.message || error));
+    }
+
+    const lucas: string[] = [];
+    for (const id of conLucas) {
+      if (await invitacionBotService.invitarLucas(userId, id)) lucas.push(id);
+    }
+    return { lucas };
   }
 
   async toggleWorkspaceActive(

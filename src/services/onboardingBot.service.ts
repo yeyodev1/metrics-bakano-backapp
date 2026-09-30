@@ -1,4 +1,5 @@
 import { Types } from "mongoose";
+import { botsDeAcceso } from "../models/user.model";
 import models from "../models";
 import type { ITelegramChat } from "../models/telegramChat.model";
 import type { EstadoSesionOnboarding } from "../models/workspace.model";
@@ -712,8 +713,12 @@ class OnboardingBotService {
 
     const clientes = await models.users
       .find({ isInternal: { $ne: true }, isActive: true, $or: [{ workspaceId: id }, { "workspaces.workspaceId": id }] })
-      .select("email name")
-      .lean();
+      .select("email name workspaces")
+      .lean()
+      // Los vendedores que solo tienen a Lucas no pasan por el onboarding.
+      .then((us) =>
+        us.filter((u) => botsDeAcceso((u.workspaces || []).find((w) => String(w.workspaceId) === String(id))).includes("bakano"))
+      );
     const destinatarios = clientes.map((c) => c.email).filter(Boolean);
     if (!destinatarios.length) return false;
 

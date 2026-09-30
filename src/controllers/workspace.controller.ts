@@ -1,7 +1,7 @@
 import type { Response, NextFunction } from "express";
 import { HttpStatusCode } from "axios";
 import { AuthRequest } from "../types/AuthRequest";
-import { WorkspaceService } from "../services/workspace.service";
+import { WorkspaceService, normalizarBots } from "../services/workspace.service";
 import { resendService } from "../services/resend.service";
 import { normalizarTelefono } from "../utils/telefono";
 
@@ -262,6 +262,7 @@ export async function createUser(req: AuthRequest, res: Response, next: NextFunc
   try {
     const workspaceId = req.params["workspaceId"] as string;
     const { name, email, password, role, phoneNumber, phoneExtension, sendWelcomeEmail } = req.body;
+    const bots = normalizarBots(req.body.bots);
 
     if (!email) {
       res.status(HttpStatusCode.BadRequest).send({ message: "Email is required." });
@@ -277,16 +278,21 @@ export async function createUser(req: AuthRequest, res: Response, next: NextFunc
     }
 
     // Sin telefono los avisos de WhatsApp (planificacion y revision de
-    // videos) nacen muertos para este usuario: se exige desde el alta.
-    const errorTelefono = validarTelefonoObligatorio(phoneNumber, phoneExtension);
-    if (errorTelefono) {
-      res.status(HttpStatusCode.BadRequest).send({ message: errorTelefono });
-      return;
+    // videos) nacen muertos para este usuario: se exige desde el alta. Esos
+    // avisos son del bot de Bakano; quien solo usa a Lucas no los recibe.
+    if (bots.includes("bakano")) {
+      const errorTelefono = validarTelefonoObligatorio(phoneNumber, phoneExtension);
+      if (errorTelefono) {
+        res.status(HttpStatusCode.BadRequest).send({ message: errorTelefono });
+        return;
+      }
     }
 
-    const user = await workspaceService.createUser({ name, email, password, role, workspaceId, phoneNumber, phoneExtension });
+    const user = await workspaceService.createUser({ name, email, password, role, workspaceId, phoneNumber, phoneExtension, bots });
 
-    if (sendWelcomeEmail && password) {
+    // El correo de bienvenida de Metrics (con contraseña) es parte del acceso
+    // de Bakano. El que solo tiene a Lucas recibe su propio correo de acceso.
+    if (sendWelcomeEmail && password && bots.includes("bakano")) {
       resendService.sendWelcomeEmail({ to: email, recipientName: name, email, password, isInternal: false })
         .catch((err) => console.error('[welcome-email] workspace createUser failed:', err?.message));
     }
@@ -316,8 +322,9 @@ export async function updateUser(req: AuthRequest, res: Response, next: NextFunc
     const workspaceId = req.params["workspaceId"] as string;
     const userId = req.params["userId"] as string;
     const { name, email, password, role, phoneNumber, phoneExtension } = req.body;
+    const bots = req.body.bots === undefined ? undefined : normalizarBots(req.body.bots);
 
-    if (!name && !email && !password && !role) {
+    if (!name && !email && !password && !role && !bots) {
       res.status(HttpStatusCode.BadRequest).send({ message: "At least one field is required to update." });
       return;
     }
@@ -330,7 +337,7 @@ export async function updateUser(req: AuthRequest, res: Response, next: NextFunc
       return;
     }
 
-    const user = await workspaceService.updateUser(workspaceId, userId, { name, email, password, role, phoneNumber, phoneExtension });
+    const user = await workspaceService.updateUser(workspaceId, userId, { name, email, password, role, phoneNumber, phoneExtension, bots });
     res.status(HttpStatusCode.Ok).send({ message: "User updated successfully.", user });
     return;
   } catch (error: any) {
@@ -374,9 +381,13 @@ export async function createGlobalUser(req: AuthRequest, res: Response, next: Ne
       return;
     }
 
+    // Quien solo entra a Lucas (vendedores del cliente) no pasa por nada de
+    // Bakano: ni avisos por WhatsApp ni bienvenida de Metrics.
+    const conBakano = Boolean(isInternal) || workspaces.some((w: any) => normalizarBots(w?.bots).includes("bakano"));
+
     // A los internos de Bakano no les mandamos avisos de cliente; a todos
     // los demas si, asi que el numero es obligatorio desde el alta.
-    if (!isInternal) {
+    if (!isInternal && conBakano) {
       const errorTelefono = validarTelefonoObligatorio(phoneNumber, phoneExtension);
       if (errorTelefono) {
         res.status(HttpStatusCode.BadRequest).send({ message: errorTelefono });
@@ -395,7 +406,7 @@ export async function createGlobalUser(req: AuthRequest, res: Response, next: Ne
       internalRole
     });
 
-    if (sendWelcomeEmail && password) {
+    if (sendWelcomeEmail && password && conBakano) {
       resendService.sendWelcomeEmail({ to: email, recipientName: name, email, password, isInternal: !!isInternal, internalRole })
         .catch((err) => console.error('[welcome-email] createGlobalUser failed:', err?.message));
     }

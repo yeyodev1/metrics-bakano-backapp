@@ -3,7 +3,7 @@ import jwt from "jsonwebtoken";
 import crypto from "crypto";
 import { Types } from "mongoose";
 import models from "../../models";
-import { WorkspaceService } from "../../services/workspace.service";
+import { WorkspaceService, normalizarBots } from "../../services/workspace.service";
 import { resendService } from "../../services/resend.service";
 import { normalizarTelefono } from "../../utils/telefono";
 import { correoBloqueado } from "../../utils/contactosBloqueados";
@@ -252,7 +252,7 @@ export const toolsEntornos: ToolMcp[] = [
     nombre: "agregar_persona_entorno",
     titulo: "Agregar a alguien a un entorno",
     descripcion:
-      "Da acceso a un entorno a una persona por su correo, como admin o colaborador. Si ya tiene cuenta, solo se le suma el entorno (si das contrasena, también se la cambia). Si es nueva, se crea la cuenta (el teléfono es obligatorio) con la contraseña que des o una generada fácil de dictar, te la muestra y le llega el correo de bienvenida con ella. Como en la plataforma, además arranca el onboarding del entorno si no había empezado, le llega la invitación al bot de Telegram y su acceso a Bakanology. Confirma con la persona antes. Solo superadmin.",
+      "Da acceso a un entorno a una persona por su correo, como admin o colaborador, y decide a qué bot entra: `bakano` (@BakanoAgencyBot: onboarding, guiones, producción), `lucas` (el asesor de ventas) o ambos (por defecto). Los vendedores de un cliente van solo con Lucas. Si ya tiene cuenta, solo se le suma el entorno (si das contrasena, también se la cambia). Si es nueva, se crea la cuenta (con bakano el teléfono es obligatorio; solo con Lucas no) y te muestra la contraseña. Con bakano: correo de bienvenida de Metrics, onboarding del entorno si no había empezado, invitación a @BakanoAgencyBot y acceso a Bakanology. Con lucas: su correo de acceso a Lucas. Confirma con la persona antes. Solo superadmin.",
     perfiles: ["direccion"],
     soloSuperadmin: true,
     escribe: true,
@@ -260,26 +260,36 @@ export const toolsEntornos: ToolMcp[] = [
       cliente: z.string().describe("Nombre o id del entorno"),
       correo: z.string().email(),
       rol: z.enum(["admin", "colaborador"]),
-      nombre: z.string().max(120).optional().describe("Obligatorio si la persona no tiene cuenta"),
+      nombre: z.string().max(120).optional().describe("Obligatorio si la persona no tiene cuenta y entra al bot de Bakano"),
       telefono: z.string().optional().describe("Obligatorio si la persona no tiene cuenta. Sin el código de país"),
       prefijo_pais: z.string().optional().describe("Código de país sin +. Por defecto 593 (Ecuador)"),
       contrasena: z.string().min(8).max(64).optional().describe("Mínimo 8 caracteres. Si es nueva y no se da, se genera"),
+      bots: z
+        .array(z.enum(["bakano", "lucas"]))
+        .min(1)
+        .optional()
+        .describe("A qué bot entra: ['bakano'], ['lucas'] o ambos. Por defecto ambos"),
     },
     async correr(a) {
       const correo = String(a.correo).toLowerCase().trim();
       if (await correoBloqueado(correo)) throw new Error("Ese contacto está bloqueado: no se le da acceso ni se le escribe.");
       const ref = await resolverCliente(a.cliente);
       const existe: any = await models.users.findOne({ email: correo }).select("name role").lean();
+      const bots = normalizarBots(a.bots);
       if (existe?.role === "superadmin") throw new Error("Es superadmin: ya ve todos los entornos.");
       let password: string | undefined;
       if (!existe) {
-        if (!a.nombre) throw new Error("No tiene cuenta todavía: dime su nombre.");
-        if (!a.telefono) throw new Error("No tiene cuenta todavía: el teléfono es obligatorio (sin él no le llegan los avisos por WhatsApp).");
-        const tel = normalizarTelefono(String(a.telefono), a.prefijo_pais || "593");
-        if (!tel.valido) throw new Error(tel.error || "El teléfono no es válido.");
+        // Solo con Lucas el nombre puede faltar: Lucas lo saluda con el de su Telegram.
+        if (!a.nombre && bots.includes("bakano")) throw new Error("No tiene cuenta todavía: dime su nombre.");
+        if (bots.includes("bakano") && !a.telefono)
+          throw new Error("No tiene cuenta todavía: con el bot de Bakano el teléfono es obligatorio (sin él no le llegan los avisos por WhatsApp).");
+        if (a.telefono) {
+          const tel = normalizarTelefono(String(a.telefono), a.prefijo_pais || "593");
+          if (!tel.valido) throw new Error(tel.error || "El teléfono no es válido.");
+        }
         password = a.contrasena ?? contrasenaFacil();
       }
-      await workspaceService
+      const creado: any = await workspaceService
         .createUser({
           name: a.nombre ?? existe?.name,
           email: correo,
@@ -287,10 +297,15 @@ export const toolsEntornos: ToolMcp[] = [
           role: a.rol,
           workspaceId: String(ref._id),
           ...(a.telefono ? { phoneNumber: String(a.telefono), phoneExtension: a.prefijo_pais || "593" } : {}),
+          bots,
         } as any)
         .catch(traducir);
+      // La bienvenida de Metrics es parte del acceso de Bakano. Solo con Lucas,
+      // su correo de acceso es el de Lucas (lo manda createUser).
       if (password) {
-        await resendService.sendWelcomeEmail({ to: correo, recipientName: a.nombre, email: correo, password, isInternal: false });
+        if (bots.includes("bakano")) {
+          await resendService.sendWelcomeEmail({ to: correo, recipientName: a.nombre, email: correo, password, isInternal: false });
+        }
       } else if (a.contrasena) {
         const p: any = await models.users.findOne({ email: correo }).select("_id").lean();
         await workspaceService.updateUser(String(ref._id), String(p._id), { password: a.contrasena }).catch(traducir);
@@ -304,6 +319,10 @@ export const toolsEntornos: ToolMcp[] = [
         correo,
         rol: a.rol,
         cuentaNueva: !existe,
+        bots,
+        ...(bots.includes("lucas")
+          ? { correoLucas: creado?.invitacionLucas ? "Le llegó su correo de acceso a Lucas." : "OJO: no se pudo mandar el correo de acceso a Lucas." }
+          : {}),
         ...(password
           ? {
               usuario: correo,
@@ -311,7 +330,9 @@ export const toolsEntornos: ToolMcp[] = [
               entraEn: "https://metrics.bakano.ec",
               aviso: existe
                 ? "Ya tenía cuenta: se le cambió la contraseña (la anterior ya no sirve). No se le mandó correo."
-                : "Le llegó el correo de bienvenida con esta contraseña. Si se la pasas tú, que sea por un canal privado.",
+                : bots.includes("bakano")
+                  ? "Le llegó el correo de bienvenida con esta contraseña. Si se la pasas tú, que sea por un canal privado."
+                  : "Solo tiene Lucas: la contraseña de Metrics no se le mandó (para Lucas no la necesita, entra con su correo y un código).",
             }
           : {}),
       };
