@@ -11,6 +11,7 @@ import { atencionClienteService, DIAS_ARIANA_A_PRODUCCION, fechaEcuador, type Da
 import { onboardingBotService } from "./onboardingBot.service";
 import { citasClienteService } from "./citasCliente.service";
 import { estadoMetricsService, type EstadoEnMetrics } from "./estadoMetrics.service";
+import { agentesEnTexto, equipoClienteService } from "./equipoCliente.service";
 import { AYUDA_CAMPO_MARCA, CAMPOS_MARCA, ENTREGABLES, onboardingDatosService } from "./onboardingDatos.service";
 import { metricasClienteService } from "./metricasCliente.service";
 import { claveDia, contextoParaLaIa, facturacionChatService, comoPlata } from "./facturacionChat.service";
@@ -501,6 +502,13 @@ BAKANOLOGY (la academia):
 - VA INCLUIDA en su suscripción: mientras siga con Bakano no paga nada aparte, sin costo adicional y sin fecha de corte. Dilo así si pregunta.
 - Entra en bakanology.com con el MISMO correo de Metrics, pero con una contraseña distinta. Son dos plataformas: Metrics para sus números, guiones y archivos; Bakanology para aprender.
 
+SU EQUIPO EN METRICS (solo si es administrador del negocio):
+- Puede agregar personas a cualquiera de sus entornos cuando quiera, o cambiarles el rol o los agentes, aquí mismo: usa verMiEquipo, agregarPersonaAMiEquipo y cambiarAccesoDePersona.
+- Para agregar necesitas: correo, si entra como administrador o colaborador, y a qué agentes: Bakano People (citas, guiones, producción y acceso a Metrics), Lucas (su asesor de ventas) o los dos. Pregúntale lo que falte, de a una cosa. Los vendedores suelen ir solo con Lucas.
+- Si la persona es nueva y entra a Bakano People, pide también nombre y teléfono.
+- Antes de agregar o cambiar, SIEMPRE léele el resumen y espera su sí.
+- Quitar a alguien se hace en metrics.bakano.ec → Configuración.
+
 CONTRATO:
 - Si pide ver, leer, revisar o que le mandes su contrato, usa enviarMiContrato: le llega el PDF aquí mismo. Puede pedirlo las veces que quiera. Si no lo firmó, es un borrador con sus datos; si ya lo firmó, es el firmado.
 - Si pide el contrato por correo (firmado o sin firmar, para revisarlo o firmarlo), usa enviarContratoAlCorreo: sale de team@bakano.ec con el PDF y, si no lo firmó, con el enlace para firmar. Lo puede pedir las veces que quiera: cada vez que lo pida, se lo vuelves a mandar. Nunca le digas que "solo llega por aquí".
@@ -553,6 +561,18 @@ Reglas:
 - Si una herramienta falla, discúlpate y ofrece pasar el mensaje al equipo.
 - Al confirmar una cita agendada, dile con quién es y el correo del responsable por si necesita escribirle.
 - Nunca menciones, recomiendes ni ofrezcas contactar a Luis Reyes, ni agendar con él. No es un canal de atención. Si el cliente lo pide, dile con buena onda que su equipo es quien lo atiende y ofrece a la persona que corresponda.`;
+  }
+
+  /** Los errores del equipo del cliente, en lo que la IA tiene que decirle. */
+  private motivoEquipo(e: any) {
+    const m = String(e?.message || "");
+    if (m === "no_es_admin")
+      return { ok: false, motivo: "No es administrador de ningún entorno: solo un administrador del negocio puede agregar o cambiar personas. Que se lo pida a su administrador." };
+    if (m.startsWith("elegir:")) return { ok: false, siguiente: `Es administrador de varios entornos (${m.slice(7)}): pregúntale a cuál.` };
+    if (m.startsWith("ambiguo:")) return { ok: false, siguiente: `Ese nombre coincide con varios de sus entornos (${m.slice(8)}): pregúntale cuál.` };
+    if (m.startsWith("no_es_suyo:")) return { ok: false, motivo: `Ese entorno no es suyo como administrador. Los suyos son: ${m.slice(11)}.` };
+    console.error("[Telegram IA] equipo del cliente:", m);
+    return { ok: false, motivo: "No pude hacerlo ahora: que lo intente en metrics.bakano.ec → Configuración, o le pasas el mensaje al equipo." };
   }
 
   private herramientas(chat: ITelegramChat, textoCliente: string, turno: { inicio: Date; propuesta: boolean }) {
@@ -876,6 +896,92 @@ Reglas:
                 siguiente: `Dile que le llegó a ${r.correo} el link para crear su contraseña nueva, que vence en una hora y que revise el spam si no lo ve.`,
               }
             : { ok: false, motivo: r.motivo };
+        },
+      },
+
+      verMiEquipo: {
+        description:
+          "Quién tiene acceso a un entorno del cliente (nombre, correo, rol y a qué agentes entra: Bakano People y/o Lucas), y en qué entornos es administrador quien escribe. Solo para administradores del cliente. 'entorno' es opcional: por defecto el de este chat.",
+        inputSchema: z.object({ entorno: z.string().optional().describe("Nombre de otro entorno suyo") }),
+        execute: async ({ entorno }: { entorno?: string }) => {
+          try {
+            const ws = await equipoClienteService.resolver(chat.userId, chat.workspaceId, entorno);
+            const [personas, suyos] = await Promise.all([
+              equipoClienteService.personas(ws.id),
+              equipoClienteService.entornosDondeEsAdmin(chat.userId),
+            ]);
+            return { entorno: ws.nombre, personas, esAdminDe: suyos.map((w) => w.nombre) };
+          } catch (e: any) {
+            return this.motivoEquipo(e);
+          }
+        },
+      },
+
+      agregarPersonaAMiEquipo: {
+        description:
+          "Da acceso a una persona a un entorno del cliente (cuando él quiera, a cualquiera de los entornos donde es administrador), como administrador o colaborador, y elige a qué agentes entra: 'bakano' (Bakano People: citas, guiones, producción y acceso a Metrics), 'lucas' (su asesor de ventas) o los dos. " +
+          "Si la persona es nueva y entra a Bakano People, hacen falta su nombre y su teléfono. Le llega el acceso por correo. " +
+          "SIEMPRE primero con confirmado=false: te devuelve el resumen para que se lo leas y confirme. Solo cuando diga que sí, vuelve a llamar con confirmado=true.",
+        inputSchema: z.object({
+          correo: z.string(),
+          rol: z.enum(["admin", "colaborador"]).describe("admin = administrador del entorno; colaborador = el resto (vendedores, etc.)"),
+          agentes: z.array(z.enum(["bakano", "lucas"])).min(1),
+          nombre: z.string().optional(),
+          telefono: z.string().optional().describe("Su número, sin el código de país si es de Ecuador"),
+          prefijoPais: z.string().optional().describe("Código de país sin +. Por defecto 593"),
+          entorno: z.string().optional().describe("A qué entorno suyo; por defecto el de este chat"),
+          confirmado: z.boolean(),
+        }),
+        execute: async (a: any) => {
+          try {
+            const ws = await equipoClienteService.resolver(chat.userId, chat.workspaceId, a.entorno);
+            const resumen = `${a.nombre || a.correo} (${a.correo}) entra a ${ws.nombre} como ${a.rol === "admin" ? "administrador" : "colaborador"}, con acceso a ${agentesEnTexto(a.agentes)}.`;
+            if (!a.confirmado) {
+              return { paraConfirmar: resumen, siguiente: "Léele este resumen tal cual y pregúntale si lo confirmas. Si dice que sí, vuelve a llamar con confirmado=true." };
+            }
+            const r = await equipoClienteService.agregar(ws.id, {
+              correo: a.correo,
+              nombre: a.nombre,
+              telefono: a.telefono,
+              prefijoPais: a.prefijoPais,
+              rol: a.rol,
+              bots: a.agentes,
+            });
+            if (r.ok) return r;
+            if (r.motivo === "falta_nombre") return { ok: false, siguiente: "Es una cuenta nueva con Bakano People: pídele el nombre y apellido de la persona." };
+            if (r.motivo === "falta_telefono") return { ok: false, siguiente: "Con Bakano People el teléfono es obligatorio (ahí le llegan los avisos): pídele su número." };
+            return r;
+          } catch (e: any) {
+            return this.motivoEquipo(e);
+          }
+        },
+      },
+
+      cambiarAccesoDePersona: {
+        description:
+          "Cambia el rol (administrador/colaborador) o los agentes (Bakano People y/o Lucas) de alguien que ya tiene acceso a un entorno del cliente. Si se le suma un agente, le llega el acceso. " +
+          "SIEMPRE primero con confirmado=false y léele el resumen; con confirmado=true solo cuando diga que sí. Quitar a alguien del entorno se hace en metrics.bakano.ec → Configuración.",
+        inputSchema: z.object({
+          correo: z.string(),
+          rol: z.enum(["admin", "colaborador"]).optional(),
+          agentes: z.array(z.enum(["bakano", "lucas"])).min(1).optional(),
+          entorno: z.string().optional(),
+          confirmado: z.boolean(),
+        }),
+        execute: async (a: any) => {
+          try {
+            const ws = await equipoClienteService.resolver(chat.userId, chat.workspaceId, a.entorno);
+            if (!a.confirmado) {
+              const cambios = [
+                a.rol ? `queda como ${a.rol === "admin" ? "administrador" : "colaborador"}` : "",
+                a.agentes?.length ? `entra a ${agentesEnTexto(a.agentes)}` : "",
+              ].filter(Boolean);
+              return { paraConfirmar: `En ${ws.nombre}, ${a.correo} ${cambios.join(" y ")}.`, siguiente: "Léeselo y pregúntale si lo confirma." };
+            }
+            return await equipoClienteService.cambiar(ws.id, { correo: a.correo, rol: a.rol, bots: a.agentes });
+          } catch (e: any) {
+            return this.motivoEquipo(e);
+          }
         },
       },
 
