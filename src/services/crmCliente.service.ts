@@ -178,6 +178,15 @@ export interface ConversacionCrm {
   noLeidos: number;
   canal: CanalHallazgoCrm;
   mensajes: MensajeCrm[];
+  /** Usuario del CRM (asesor) a cargo de la conversacion. */
+  asignadoA?: string | null;
+}
+
+/** Un usuario de la subcuenta: en el CRM del cliente, sus asesores de venta. */
+export interface UsuarioCrm {
+  id: string;
+  nombre: string;
+  email: string | null;
 }
 
 export interface OportunidadCrm {
@@ -192,6 +201,8 @@ export interface OportunidadCrm {
   actualizada: Date | null;
   ultimoCambioEtapa: Date | null;
   creada: Date | null;
+  /** Usuario del CRM (asesor) a cargo de la oportunidad. */
+  asignadoA?: string | null;
 }
 
 export interface ResultadoPruebaCrm {
@@ -435,7 +446,61 @@ export class CrmCliente {
       noLeidos: Number(c?.unreadCount) || 0,
       canal,
       mensajes,
+      asignadoA: texto(c?.assignedTo),
     };
+  }
+
+  // ── Para Lucas (asesores) ──────────────────────────────────────────────
+
+  /**
+   * Los usuarios de la subcuenta (los asesores del cliente). Si el token no
+   * tiene users.readonly devuelve [] y los asesores se muestran por su id.
+   */
+  async usuarios(): Promise<UsuarioCrm[]> {
+    const r = await this.get<{ users?: any[] }>("/users/", VERSION_CONTACTOS, { locationId: this.locationId });
+    if (!r.ok) return [];
+    return (r.data?.users || []).map((u) => ({
+      id: String(u.id),
+      nombre: texto(u.name) || texto([u.firstName, u.lastName].filter(Boolean).join(" ")) || "Sin nombre",
+      email: texto(u.email),
+    }));
+  }
+
+  /** La ultima conversacion de un contacto, con sus ultimos mensajes. */
+  async conversacionDeContacto(contactId: string): Promise<ConversacionCrm | null> {
+    if (!contactId) return null;
+    const r = await this.get<{ conversations?: any[] }>("/conversations/search", VERSION_CONVERSACIONES, {
+      locationId: this.locationId,
+      contactId,
+      limit: 1,
+      sort: "desc",
+      sortBy: "last_message_date",
+    });
+    const c = r.ok ? r.data?.conversations?.[0] : null;
+    return c ? this.conversacionConMensajes(c) : null;
+  }
+
+  /** Contacto por telefono (el lead que Lucas esta viendo), si existe en el CRM. */
+  async contactoPorTelefono(telefono: string): Promise<{ id: string; nombre: string | null; asignadoA: string | null } | null> {
+    const numero = String(telefono || "").replace(/[^\d+]/g, "");
+    if (numero.replace(/\D/g, "").length < 7) return null;
+    const r = await this.get<{ contact?: any }>("/contacts/search/duplicate", VERSION_CONTACTOS, {
+      locationId: this.locationId,
+      number: numero.startsWith("+") ? numero : `+${numero}`,
+    });
+    const c = r.ok ? r.data?.contact : null;
+    if (!c?.id) return null;
+    return {
+      id: String(c.id),
+      nombre: texto(c.name) || texto([c.firstName, c.lastName].filter(Boolean).join(" ")),
+      asignadoA: texto(c.assignedTo),
+    };
+  }
+
+  /** Todas las oportunidades (2 paginas de 100 como mucho), con pipeline y etapa. */
+  async todasLasOportunidades(): Promise<OportunidadCrm[]> {
+    const r = await this.oportunidades({ desde: new Date(0) });
+    return r.actualizadas;
   }
 
   /**
@@ -486,6 +551,7 @@ export class CrmCliente {
       actualizada: fecha(o.updatedAt),
       ultimoCambioEtapa: fecha(o.lastStageChangeAt ?? o.lastStatusChangeAt ?? o.updatedAt),
       creada: fecha(o.createdAt),
+      asignadoA: texto(o.assignedTo),
     }));
 
     const desde = opciones.desde.getTime();

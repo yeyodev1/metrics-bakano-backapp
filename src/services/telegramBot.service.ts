@@ -163,8 +163,8 @@ export class TelegramBotService {
     const instrucciones: Record<string, string> = {
       logo:
         "Dale, mándame tu logo por aquí 📎\n\n" +
-        "Importante: adjúntalo con el clip y elige <b>Archivo</b> (no Foto), y que sea <b>PNG con fondo transparente</b>. " +
-        "Si Telegram lo manda como foto, lo comprime y el logo pierde el fondo.\n\n" +
+        "Sirve como lo tengas: PNG, JPG, foto o PDF. Yo lo convierto a PNG y lo dejo en tu entorno. " +
+        "Si lo tienes con fondo transparente, mejor: mándalo con el clip 📎 como <b>Archivo</b> para que no pierda calidad.\n\n" +
         "Si tienes varias versiones, mándamelas una por una y las guardo todas.",
       linea_grafica:
         "Mándame tu línea gráfica por aquí 📎\n\n" +
@@ -218,12 +218,9 @@ export class TelegramBotService {
 
     if (!r.ok) {
       const explicacion: Record<string, string> = {
-        logo_comprimido:
-          "Ese logo me llegó como foto y Telegram lo comprime a JPG, así que pierde el fondo transparente 😕\n\n" +
-          "Mándamelo otra vez con el clip 📎 → <b>Archivo</b> (no como foto), en PNG.",
-        logo_no_png:
-          "Para el logo necesito un <b>PNG</b> con fondo transparente 🙏 Si lo tienes en .ai, .psd o .jpg, expórtalo a PNG y me lo mandas.",
-        tipo: "Ese formato no lo puedo guardar 😕 Acepto PNG, JPG, WEBP o PDF (y el logo siempre en PNG).",
+        logo_comprimido: "No pude guardar ese logo 😕 me lo reenvías? Puede ser foto, JPG, PNG o PDF.",
+        logo_no_png: "No pude convertir ese logo a PNG 😕 me lo mandas como imagen (JPG, PNG) o PDF?",
+        tipo: "Ese formato no lo puedo guardar 😕 Acepto PNG, JPG, WEBP, fotos o PDF (el logo lo convierto yo a PNG).",
         peso: "Ese archivo pesa más de 10 MB y no me entra 😅 Mándamelo más liviano.",
         sin_entorno: "Primero elige de qué entorno hablamos y te lo guardo.",
         error: "No pude guardarlo 😕 inténtalo de nuevo o súbelo desde metrics.bakano.ec.",
@@ -252,7 +249,9 @@ export class TelegramBotService {
 
     await telegramService.sendMessage(
       chat.chatId,
-      `Listo, guardé tu <b>${ETIQUETA_CATEGORIA[r.categoria]}</b> en tu entorno ✅\n\nYa le avisé al equipo para que lo revise.\n\nSeguimos con lo que falta 👇`,
+      `Listo, guardé tu <b>${ETIQUETA_CATEGORIA[r.categoria]}</b> en tu entorno ✅` +
+        (r.convertidoAPng ? "\n\nMe llegó en otro formato, así que lo convertí a <b>PNG</b> por ti 🙌" : "") +
+        "\n\nYa le avisé al equipo para que lo revise.\n\nSeguimos con lo que falta 👇",
       await this.botonesDeLoQueFalta(chat)
     );
   }
@@ -288,6 +287,18 @@ export class TelegramBotService {
       // Viene de Metrics tras aprobar sus guiones (t.me/...?start=produccion).
       if (/^\/start\s+produccion/i.test(texto.trim()) && chat.estado === "listo" && chat.workspaceId) {
         return this.mostrarHorariosProduccion(chat);
+      }
+      // Viene de "Agenda" en Metrics: todo se agenda aquí.
+      if (/^\/start\s+agendar/i.test(texto.trim()) && chat.estado === "listo" && chat.workspaceId) {
+        return this.elegirTemaReunion(chat);
+      }
+      if (/^\/start\s+citas/i.test(texto.trim()) && chat.estado === "listo" && chat.workspaceId) {
+        return this.mostrarCitas(chat);
+      }
+      // Viene del correo de bienvenida (t.me/...?start=onb_crm): directo a los horarios.
+      const onb = /^\/start\s+onb_(\w+)/i.exec(texto.trim());
+      if (onb && chat.estado === "listo" && chat.workspaceId && onb[1] in SESIONES_ONBOARDING) {
+        return this.mostrarHorariosOnboarding(chat, onb[1] as SesionOnboarding);
       }
       if (chat.estado === "listo" && chat.workspaceId) {
         const nombre = chat.firstName ? `, ${escaparHtml(chat.firstName)}` : "";
@@ -707,7 +718,7 @@ export class TelegramBotService {
         r.ok
           ? `Perfecto, lo dejé como <b>${ETIQUETA_CATEGORIA[categoria as CategoriaRecurso]}</b> ✅ ya le avisé al equipo.`
           : r.motivo === "logo_no_png"
-            ? `Para el logo necesito un <b>PNG</b> con fondo transparente 🙏 "${escaparHtml(r.nombre || "ese archivo")}" no lo es, así que lo dejé guardado igual. Mándame el PNG cuando puedas (con el clip 📎 → Archivo).`
+            ? `No pude convertir "${escaparHtml(r.nombre || "ese archivo")}" a PNG 😕 lo dejé guardado igual. Mándame tu logo como imagen (JPG, PNG o foto) y lo convierto yo.`
             : "No encontré ese archivo 😕 me lo reenvías?",
         await this.botonesDeLoQueFalta(chat)
       );
@@ -718,6 +729,15 @@ export class TelegramBotService {
       return this.recuperarContrasena(chat, data.slice(7) as Plataforma);
     }
     if (data === "contrato:estado") return this.mostrarEstadoContrato(chat);
+    // Botones viejos de un contrato que ya se firmó en Metrics: no se vuelve a
+    // llenar ni a firmar, se le muestra que está listo.
+    if (
+      (data === "contrato:llenar" || data === "contrato:link" || data === "contrato:corregir" || data.startsWith("contrato:campo:")) &&
+      chat.workspaceId &&
+      (await contratoChatService.firmado(chat.workspaceId))
+    ) {
+      return this.mostrarEstadoContrato(chat);
+    }
     if (data === "contrato:llenar") return this.preguntarSiguienteDatoContrato(chat);
     if (data === "contrato:link") return this.mandarLinkFirma(chat);
     if (data === "contrato:ver") return this.mandarPdfContrato(chat);
@@ -1257,7 +1277,7 @@ export class TelegramBotService {
     if (estado.completo) {
       await telegramService.sendMessage(
         chat.chatId,
-        `📝 <b>Tu contrato</b>\n\n${estado.texto}\n\nEstá todo listo ✅ La copia firmada está en tu correo, y si la quieres aquí, pídemela cuando quieras.`,
+        `📝 <b>Tu contrato</b>\n\n${estado.texto}\n\nYa lo firmaste en metrics.bakano.ec, no tienes que hacer nada más ✅ La copia firmada está en tu correo, y si la quieres aquí, pídemela cuando quieras.`,
         [
           [{ text: "📄 Ver mi contrato", callback_data: "contrato:ver" }],
           [{ text: "🚀 Ver mi onboarding", callback_data: "menu:onboarding" }],
@@ -1565,8 +1585,7 @@ export class TelegramBotService {
       await telegramService.sendMessage(
         chat.chatId,
         `${intro}${def.emoji} No pude ver los horarios de <b>${escaparHtml(def.responsable.nombre)}</b> ahora mismo 😅\n\n` +
-          `Puedes agendar desde aquí: ${def.link}\n\nO cuéntame qué día te queda mejor y se lo paso. ` +
-          `Si quieres agilizarlo, también puedes escribirle a ${def.responsable.email}`
+          "Cuéntame aquí qué día y a qué hora te queda mejor y se lo paso para que te confirme por este mismo chat 🙌"
       );
       chat.tema = "atencion";
       await chat.save();
@@ -1574,7 +1593,7 @@ export class TelegramBotService {
     }
 
     const botones = this.botonesHorarios(horarios, (h) => `onbs:${sesion}:${Math.floor(h.getTime() / 1000)}`);
-    botones.push([{ text: "🔗 Prefiero el link", callback_data: `onbl:${sesion}` }, { text: "📋 Menú", callback_data: "menu:ver" }]);
+    botones.push([{ text: "📋 Menú", callback_data: "menu:ver" }]);
 
     await telegramService.sendMessage(
       chat.chatId,
@@ -1694,7 +1713,7 @@ export class TelegramBotService {
    * lento o caido, el cliente igual puede cambiar su cita.
    */
   private async mostrarCitas(chat: ITelegramChat): Promise<void> {
-    const citas = await citasClienteService.listar(chat);
+    const citas = await citasClienteService.conEnlaces(await citasClienteService.listar(chat));
     if (!citas.length) {
       // Aquí solo van las futuras. Si tiene una sesión cuya fecha ya pasó y
       // nadie la cerró, se le dice: si no, en el onboarding la ve con fecha y
@@ -1735,9 +1754,12 @@ export class TelegramBotService {
       if (urgente) urgentes++;
       lineas.push(
         `<b>${n}.</b> 🗓️ <b>${escaparHtml(cita.etiqueta)}</b>\n     ${fechaEcuador(cita.inicio)}\n     con ${escaparHtml(cita.con)}` +
+          (cita.enlace ? `\n     🎥 <a href="${escaparHtml(cita.enlace)}">Entrar a la reunión (Meet)</a>` : "") +
+          (cita.lugar ? `\n     📍 ${escaparHtml(cita.lugar)}` : "") +
           (urgente ? "\n     ⏰ falta menos de 2 días: la cambio igual, pero aviso a todo el equipo" : "")
       );
       // Hasta dos días antes la cambia él. Más cerca, el botón avisa al equipo.
+      if (cita.enlace) botones.push([{ text: `🎥 Entrar a la ${n} (Meet)`, url: cita.enlace }]);
       botones.push([
         { text: `🔄 Mover ${n}`, callback_data: `cc:m:${cita.ref}` },
         { text: `✖️ Cancelar ${n}`, callback_data: `cc:c:${cita.ref}` },
@@ -1876,15 +1898,12 @@ export class TelegramBotService {
     );
   }
 
+  /**
+   * Botones viejos de "Prefiero el link": ya no se pasan links del CRM, todo
+   * se agenda aquí. Se le muestran los horarios.
+   */
   private async enviarLinkOnboarding(chat: ITelegramChat, sesion: SesionOnboarding): Promise<void> {
-    if (!(sesion in SESIONES_ONBOARDING)) return this.mostrarOnboarding(chat);
-    const def = SESIONES_ONBOARDING[sesion];
-    await telegramService.sendMessage(
-      chat.chatId,
-      `${def.emoji} Dale, agenda tu sesión de <b>${def.etiqueta}</b> con <b>${escaparHtml(def.responsable.nombre)}</b> aquí:\n${def.link}\n\n` +
-        "Apenas la agendes me entero y la marco en tu onboarding 🙌",
-      [[{ text: "📋 Volver al menú", callback_data: "menu:ver" }]]
-    );
+    return this.mostrarHorariosOnboarding(chat, sesion);
   }
 
   private async agendarOnboarding(chat: ITelegramChat, sesion: SesionOnboarding, segundos: string): Promise<void> {
@@ -1912,9 +1931,8 @@ export class TelegramBotService {
       await telegramService.sendMessage(
         chat.chatId,
         `Uy, el calendario no me dejó reservarlo desde aquí 😕\n\n` +
-          `Agéndalo en este link y quedamos listos: ${def.link}\n\n` +
-          `Apenas lo agendes me entero y lo marco en tu onboarding. Ya le avisé al equipo para que lo revisen.`,
-        [[{ text: "🚀 Ver mi onboarding", callback_data: "menu:onboarding" }], [{ text: "📋 Volver al menú", callback_data: "menu:ver" }]]
+          `Prueba con otro horario, o cuéntame aquí qué día te queda mejor y ${escaparHtml(def.responsable.nombre.split(" ")[0])} te confirma por este mismo chat. Ya le avisé al equipo para que lo revisen.`,
+        [[{ text: "🗓️ Ver otros horarios", callback_data: `onb:${sesion}` }], [{ text: "📋 Volver al menú", callback_data: "menu:ver" }]]
       );
       return;
     }
@@ -1922,7 +1940,9 @@ export class TelegramBotService {
     const def = SESIONES_ONBOARDING[sesion];
     await telegramService.sendMessage(
       chat.chatId,
-      `Listo, quedó agendada 🎉\n\n${def.emoji} <b>${def.etiqueta}</b>\n📅 <b>${r.cuando}</b> (hora Ecuador)\n👤 Con <b>${escaparHtml(r.responsable)}</b> (${def.responsable.email})\n\n` +
+      `Listo, quedó agendada 🎉\n\n${def.emoji} <b>${def.etiqueta}</b>\n📅 <b>${r.cuando}</b> (hora Ecuador)\n👤 Con <b>${escaparHtml(r.responsable)}</b> (${def.responsable.email})\n` +
+        (r.enlace ? `🎥 Entras por Meet aquí: ${escaparHtml(r.enlace)}\n` : "") +
+        "\n" +
         `Ya le avisé. Recuerda tener listo:\n${def.requisitos.map((x) => `• ${x}`).join("\n")}`
     );
     return this.mostrarOnboarding(chat);
@@ -2067,12 +2087,12 @@ export class TelegramBotService {
     // aquí mismo y el equipo de contenido ya quedó avisado.
     const estadoOnb = await onboardingBotService.estado(chat.workspaceId!).catch(() => null);
     const crmPendiente = Boolean(
-      estadoOnb?.sesiones.find((x) => x.sesion === "especializacion" && x.estado !== "cumplida" && x.estado !== "no_aplica" && !x.agendada)
+      estadoOnb?.sesiones.find((x) => x.sesion === "crm" && x.estado !== "cumplida" && x.estado !== "no_aplica" && !x.agendada)
     );
     const botones: InlineButton[][] = [
       [{ text: "📋 Ver mi planificación", url: `${APP_URL}/app/workspaces/${chat.workspaceId}/planning` }],
     ];
-    if (crmPendiente) botones.push([{ text: `📅 Agendar con ${SESIONES_ONBOARDING.especializacion.responsable.nombre.split(" ")[0]}`, callback_data: "onb:crm" }]);
+    if (crmPendiente) botones.push([{ text: `🗂️ Agendar mi CRM con ${SESIONES_ONBOARDING.crm.responsable.nombre.split(" ")[0]}`, callback_data: "onb:crm" }]);
     botones.push([{ text: "🗓️ Ver mis citas", callback_data: "citas:ver" }], [{ text: "📋 Volver al menú", callback_data: "menu:ver" }]);
 
     await telegramService.sendMessage(
@@ -2228,7 +2248,7 @@ export class TelegramBotService {
         chat.chatId,
         `Perfecto, estamos en <b>${escaparHtml(entorno.name)}</b> 💛\n\n` +
           (perfil.tipo === "nuevo"
-            ? "Te acompaño desde el inicio: son tres sesiones cortas y después grabamos tu primera producción."
+            ? "Te acompaño desde el inicio: son tres sesiones cortas, todas se agendan aquí, y después grabamos tu primera producción."
             : "Sigamos donde quedamos, te falta poco para grabar tu primera producción.")
       );
       return this.mostrarOnboarding(chat);

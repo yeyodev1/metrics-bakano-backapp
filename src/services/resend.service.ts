@@ -1954,7 +1954,8 @@ export class ResendService {
 
   /**
    * Arranque del onboarding: le dice al cliente que todo se maneja por el bot
-   * de Telegram y le deja los links de las tres sesiones tecnicas.
+   * de Telegram y le deja, por cada sesion, el boton que abre el bot directo
+   * en sus horarios (nada se agenda por fuera del chat).
    */
   async sendOnboardingBienvenida(params: {
     to: string[];
@@ -1979,7 +1980,7 @@ export class ResendService {
             <p style="margin:0 0 4px;font-size:12px;font-weight:800;color:#e6285c;letter-spacing:1px;">PASO ${i + 1}</p>
             <p style="margin:0 0 6px;font-size:16px;font-weight:700;color:#1e293b;">${esc(s.etiqueta)} · con ${esc(s.responsable)}</p>
             <p style="margin:0 0 12px;font-size:14px;color:#475569;line-height:1.6;">${esc(s.resumen)}</p>
-            <a href="${s.link}" style="display:inline-block;background:#1e293b;color:#ffffff;text-decoration:none;padding:9px 18px;border-radius:8px;font-size:13px;font-weight:700;">Agendar esta sesión</a>
+            <a href="${s.link}" style="display:inline-block;background:#1e293b;color:#ffffff;text-decoration:none;padding:9px 18px;border-radius:8px;font-size:13px;font-weight:700;">Agendar por Telegram</a>
           </td></tr>
         </table>
       </td></tr>`
@@ -2038,9 +2039,9 @@ export class ResendService {
               </td></tr>
             </table>
 
-            <p style="margin:20px 0 16px;font-size:15px;color:#1e293b;font-weight:700;">Tus tres sesiones de arranque</p>
+            <p style="margin:20px 0 16px;font-size:15px;color:#1e293b;font-weight:700;">Tus sesiones de arranque</p>
             <p style="margin:0 0 14px;font-size:14px;color:#475569;line-height:1.7;">
-              El asistente te las agenda por el chat, sin que salgas de Telegram. Si prefieres hacerlo tú, aquí están los links:
+              Todo se agenda por el chat de Telegram, sin salir de ahí. Toca el botón de cada sesión y el asistente te muestra los horarios:
             </p>
             <table width="100%" cellpadding="0" cellspacing="0">${filas}</table>
           </td>

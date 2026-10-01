@@ -20,31 +20,31 @@ export const PASOS: PasoOnboarding[] = [...ORDEN_SESIONES, "produccion"];
 const ETIQUETA_PASO: Record<PasoOnboarding, string> = {
   bienvenida: BIENVENIDA.etiqueta,
   especializacion: SESIONES_ONBOARDING.especializacion.etiqueta,
+  crm: SESIONES_ONBOARDING.crm.etiqueta,
   levantamiento: SESIONES_ONBOARDING.levantamiento.etiqueta,
   produccion: "Primera producción",
   // Proceso anterior: se conservan para leer el historial.
   meta: "Conexión de cuentas Meta",
-  crm: "Configuración de CRM y Metrics",
   estrategia: "Estrategia y guiones",
 };
 
 const RESPONSABLE_PASO: Record<PasoOnboarding, string> = {
   bienvenida: BIENVENIDA.responsable.nombre,
   especializacion: SESIONES_ONBOARDING.especializacion.responsable.nombre,
+  crm: SESIONES_ONBOARDING.crm.responsable.nombre,
   levantamiento: SESIONES_ONBOARDING.levantamiento.responsable.nombre,
   produccion: equipoAtencionService.nombres("produccion"),
   meta: "Joel Jimenez",
-  crm: "David Robles",
   estrategia: "Ariana Vera",
 };
 
 const CORREO_PASO: Record<PasoOnboarding, string[]> = {
   bienvenida: [BIENVENIDA.responsable.email],
   especializacion: [SESIONES_ONBOARDING.especializacion.responsable.email],
+  crm: [SESIONES_ONBOARDING.crm.responsable.email],
   levantamiento: [SESIONES_ONBOARDING.levantamiento.responsable.email],
   produccion: equipoAtencionService.correos("produccion"),
   meta: ["jjimenez@bakano.ec"],
-  crm: ["drobles@bakano.ec"],
   estrategia: ["avera@bakano.ec"],
 };
 

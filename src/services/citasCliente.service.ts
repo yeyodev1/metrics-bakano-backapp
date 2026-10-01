@@ -71,7 +71,15 @@ export interface CitaCliente {
    * aqui y se le avisa al equipo, porque no hay cita del CRM que tocar.
    */
   soloEnMetrics?: boolean;
+  /** Link de la videollamada (Google Meet) que el CRM le puso a la cita. Lo llena `conEnlaces`. */
+  enlace?: string;
+  /** Lugar fisico, si la cita no es por videollamada. Lo llena `conEnlaces`. */
+  lugar?: string;
 }
+
+/** El link de Meet no cambia: se cachea para no pedirle al CRM cada vez que alguien abre sus citas. */
+const ENLACE_TTL_MS = 10 * 60_000;
+const cacheEnlaces = new Map<string, { address: string; en: number }>();
 
 export type ResultadoCambio =
   | { ok: true; accion: "cancelada" | "reprogramada"; cita: string; antes: string; ahora?: string; con: string }
@@ -84,6 +92,52 @@ function sumarMeses(fecha: Date, meses: number): Date {
 }
 
 class CitasClienteService {
+  /**
+   * Le pone a cada cita el link de su videollamada (el `address` de la cita en
+   * el CRM: ahi va el Meet del responsable) o el lugar si es presencial. Solo
+   * para mostrar: lo que mueve o cancela citas no lo necesita.
+   */
+  async conEnlaces(citas: CitaCliente[]): Promise<CitaCliente[]> {
+    await Promise.all(
+      citas.map(async (c) => {
+        if (!c.appointmentId) return;
+        const cache = cacheEnlaces.get(c.appointmentId);
+        let address = cache && Date.now() - cache.en < ENLACE_TTL_MS ? cache.address : null;
+        if (address === null) {
+          const cita = await ghlService.getAppointment(c.appointmentId).catch(() => null);
+          if (!cita) return;
+          address = String(cita.address || cita.meetingLocation || cita.location || "").trim();
+          cacheEnlaces.set(c.appointmentId, { address, en: Date.now() });
+        }
+        if (!address) return;
+        if (/^https?:\/\//i.test(address)) c.enlace = address;
+        else c.lugar = address;
+      })
+    );
+    return citas;
+  }
+
+  /**
+   * Las citas futuras del entorno sin un chat de por medio (Metrics, el MCP,
+   * Lucas): producciones, sesiones del onboarding y las reuniones que se
+   * agendaron desde cualquier chat de ese entorno.
+   */
+  async listarDeEntorno(workspaceId: Types.ObjectId | string): Promise<CitaCliente[]> {
+    const chats = await models.telegramChats
+      .find({ "citas.workspaceId": workspaceId })
+      .select("citas")
+      .lean();
+    // Sin userId: aqui se ven las de todas las personas del entorno.
+    const citas = chats.flatMap((c: any) =>
+      (c.citas || []).filter((x: any) => String(x.workspaceId) === String(workspaceId)).map((x: any) => ({ ...x, userId: undefined }))
+    );
+    // Un "chat" de solo lectura: listar no escribe nada.
+    const vista = { workspaceId, userId: undefined, citas } as unknown as ITelegramChat;
+    const lista = await this.listar(vista);
+    const vistas = new Set<string>();
+    return lista.filter((c) => (vistas.has(c.ref) ? false : (vistas.add(c.ref), true)));
+  }
+
   /** Citas futuras del entorno que el bot puede gestionar. */
   async listar(chat: ITelegramChat): Promise<CitaCliente[]> {
     const ahora = new Date();

@@ -259,14 +259,14 @@ class ProduccionPlanificacionService {
 
   /** Lo que se le dice al cliente cuando acaba de agendar su produccion. */
   textoParaElCliente(estado: EstadoPlanificacion | null, workspaceId: Types.ObjectId | string, faltaCrm: boolean): string {
-    const crm = SESIONES_ONBOARDING.especializacion;
+    const crm = SESIONES_ONBOARDING.crm;
     return (
       "\n\n📋 <b>Toda producción necesita su planificación</b>: los guiones de lo que vamos a grabar tienen que estar listos y aprobados por ti <b>antes</b> de la grabación. " +
       (estado?.guiones
         ? `Ya tienes <b>${estado.guiones} guion${estado.guiones === 1 ? "" : "es"}</b> en tu planificación, revísalos aquí:\n${APP_URL}/app/workspaces/${workspaceId}/planning`
         : "Todavía no tienes guiones cargados, así que ya avisé a tu equipo de contenido y a Genesis Benalcazar para que los preparen y te los pasen a revisar.") +
       (faltaCrm
-        ? `\n\n🗓️ Y falta algo clave: agenda tu sesión de <b>${crm.etiqueta}</b> con <b>${crm.responsable.nombre}</b>. Él deja listo tu CRM y todo lo que necesitamos para que lo que grabemos llegue a tus clientes.`
+        ? `\n\n🗓️ Y falta algo clave: agenda tu sesión de <b>${crm.etiqueta}</b> con <b>${crm.responsable.nombre}</b>. Él deja listo tu CRM y todo lo que necesitamos (se agenda aquí mismo, con el botón de abajo) para que lo que grabemos llegue a tus clientes.`
         : "")
     );
   }

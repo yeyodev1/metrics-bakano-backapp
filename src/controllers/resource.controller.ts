@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from "express";
 import { WorkspaceModel } from "../models/workspace.model";
 import cloudinary from "../config/cloudinary";
 import { AuthRequest } from "../types/AuthRequest";
+import { esTipoDeLogo, nombrePng, subirLogoComoPng } from "../services/logoPng.service";
 
 export const uploadResource = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
@@ -18,12 +19,11 @@ export const uploadResource = async (req: AuthRequest, res: Response, next: Next
       return res.status(400).send({ message: invalida, error: invalida });
     }
 
-    // Los logos van a los videos y a las piezas: se necesitan en PNG (fondo
-    // transparente). Un JPG con fondo blanco o un PDF no sirven.
-    if (categoria === "logo" && file.mimetype !== "image/png") {
-      const soloPng =
-        "El logo tiene que ser un archivo PNG. Si lo tienes en otro formato (.ai, .jpg, .pdf), expórtalo a PNG con fondo transparente y súbelo de nuevo.";
-      return res.status(400).send({ message: soloPng, error: soloPng });
+    // El logo se acepta en cualquier imagen o PDF y se guarda convertido a
+    // PNG (logoPng.service): exigir exportarlo era donde se trababa el cliente.
+    if (categoria === "logo" && !esTipoDeLogo(file.mimetype)) {
+      const formato = "Ese formato no se puede usar como logo. Súbelo como imagen (PNG, JPG, WEBP) o PDF y lo convertimos a PNG.";
+      return res.status(400).send({ message: formato, error: formato });
     }
 
     const workspace = await WorkspaceModel.findById(workspaceId);
@@ -31,8 +31,11 @@ export const uploadResource = async (req: AuthRequest, res: Response, next: Next
       return res.status(404).send({ message: "Entorno no encontrado.", error: "Workspace not found" });
     }
 
+    const esLogo = categoria === "logo";
     const isPdf = file.mimetype === "application/pdf";
-    const cloudinaryResult = await new Promise<{ url: string; public_id: string }>((resolve, reject) => {
+    const cloudinaryResult = esLogo
+      ? await subirLogoComoPng(file.buffer, `resources/${workspaceId}`)
+      : await new Promise<{ url: string; public_id: string }>((resolve, reject) => {
       const stream = cloudinary.uploader.upload_stream(
         {
           folder: `resources/${workspaceId}`,
@@ -51,10 +54,10 @@ export const uploadResource = async (req: AuthRequest, res: Response, next: Next
     });
 
     const resource = {
-      nombre: file.originalname,
+      nombre: esLogo ? nombrePng(file.originalname) : file.originalname,
       url: cloudinaryResult.url,
       publicId: cloudinaryResult.public_id,
-      tipo: file.mimetype,
+      tipo: esLogo ? "image/png" : file.mimetype,
       categoria,
       uploadedBy: req.user!._id,
       createdAt: new Date(),

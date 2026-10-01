@@ -117,10 +117,12 @@ export interface IOnboardingSesiones {
   bienvenida?: ISesionOnboarding;
   especializacion?: ISesionOnboarding;
   levantamiento?: ISesionOnboarding;
-  /** Claves del proceso anterior (Meta/CRM/Estrategia). Se conservan: el
+  /** Configuracion del CRM con David. Volvio al proceso el 2026-10-01 con la
+   *  misma clave del proceso anterior: quien ya la hizo no la repite. */
+  crm?: ISesionOnboarding;
+  /** Claves del proceso anterior (Meta/Estrategia). Se conservan: el
    *  historial de quien ya paso por ahi no se borra por cambiar el proceso. */
   meta?: ISesionOnboarding;
-  crm?: ISesionOnboarding;
   estrategia?: ISesionOnboarding;
 }
 
@@ -246,6 +248,12 @@ export interface IWorkspace extends Document {
   driveFolderLink?: string;
   /** Último envío del contrato por correo, para no mandarlo dos veces seguidas. */
   contratoCorreoEnviado?: { correo: string; en: Date; id?: string };
+  /**
+   * La subcuenta (location) de GoHighLevel del cliente: con este ID se
+   * reconoce al negocio en el CRM. Lo pone el equipo desde el panel. Leer el
+   * CRM es otra cosa (CrmIntegration): con el token de agencia, este ID basta.
+   */
+  crmSubcuenta?: { locationId: string; vinculadoEn: Date; vinculadoPorNombre?: string };
   createdAt: Date;
   updatedAt: Date;
 }
@@ -481,6 +489,10 @@ const WorkspaceSchema = new Schema<IWorkspace>(
     driveFolderId: { type: String, trim: true },
     driveFolderLink: { type: String, trim: true },
     contratoCorreoEnviado: { type: { correo: String, en: Date, id: String }, default: undefined },
+    crmSubcuenta: {
+      type: { locationId: { type: String, trim: true }, vinculadoEn: Date, vinculadoPorNombre: String },
+      default: undefined,
+    },
   },
   {
     timestamps: true,

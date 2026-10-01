@@ -38,7 +38,9 @@ export interface IOnboardingEvento extends Document {
 const OnboardingEventoSchema = new Schema<IOnboardingEvento>(
   {
     workspaceId: { type: Schema.Types.ObjectId, ref: "Workspace", required: true },
-    paso: { type: String, enum: ["meta", "crm", "estrategia", "produccion"], required: true },
+    // Debe cubrir TODOS los PasoOnboarding: con el enum viejo cada evento del
+    // proceso nuevo fallaba la validacion en silencio.
+    paso: { type: String, enum: ["bienvenida", "especializacion", "crm", "levantamiento", "produccion", "meta", "estrategia"], required: true },
     estado: { type: String, enum: ["pendiente", "agendada", "cumplida", "bloqueada", "no_aplica"], required: true },
     motivo: { type: String, trim: true, maxlength: 1000 },
     nota: { type: String, trim: true, maxlength: 1000 },

@@ -23,7 +23,8 @@ const TEMAS: Record<TemaSoporte, { etiqueta: string; emoji: string; correos: () 
   atencion: { etiqueta: "Atención, pagos y contrato", emoji: "🤝", correos: () => equipoAtencionService.correos("atencion") },
   meta_ads: { etiqueta: "Meta Ads y campañas", emoji: "📣", correos: () => ["dquimi@bakano.ec"] },
   crm: { etiqueta: "CRM", emoji: "🗂️", correos: () => ["drobles@bakano.ec"] },
-  tecnologia: { etiqueta: "metrics.bakano.ec y tecnología", emoji: "💻", correos: () => ["dreyes@bakano.ec"] },
+  // David atiende al cliente; Diego (direccion) no agenda ni atiende, solo se entera.
+  tecnologia: { etiqueta: "metrics.bakano.ec y tecnología", emoji: "💻", correos: () => ["drobles@bakano.ec", "dreyes@bakano.ec"] },
 };
 const TEMAS_IDS = Object.keys(TEMAS) as [TemaSoporte, ...TemaSoporte[]];
 
