@@ -81,10 +81,14 @@ export async function sendBillingReminder(req: AuthRequest, res: Response) {
     const now = new Date();
     const monthLabel = now.toLocaleDateString("es-EC", { month: "long", year: "numeric" });
 
-    // Fetch all active external collaborators of this workspace
+    // Solo los administradores del entorno: a los colaboradores no les llega
+    // ningun correo de la venta del dia.
     const users = await models.users
       .find({
-        $or: [{ workspaceId: wsId }, { "workspaces.workspaceId": wsId }],
+        $or: [
+          { workspaces: { $elemMatch: { workspaceId: wsId, role: "admin" } } },
+          { workspaceId: wsId, role: "admin", "workspaces.workspaceId": { $ne: wsId } },
+        ],
         isActive: true,
         isInternal: { $ne: true },
       })
@@ -92,7 +96,7 @@ export async function sendBillingReminder(req: AuthRequest, res: Response) {
       .lean();
 
     if (!users.length) {
-      return res.status(404).json({ message: "No hay colaboradores externos en este entorno" });
+      return res.status(404).json({ message: "No hay administradores del cliente en este entorno" });
     }
 
     // Send in-app notification + email concurrently for each user

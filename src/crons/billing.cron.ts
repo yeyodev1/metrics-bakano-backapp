@@ -29,14 +29,16 @@ async function runDailyBillingReminder(slot: "10AM" | "7PM") {
 
     for (const workspace of workspaces) {
       try {
-        // Get all external (non-internal) users with access to this workspace
+        // Solo los administradores del entorno: a los colaboradores no les
+        // llega ningun correo de la venta del dia.
         const users = await models.users
           .find({
             isActive: true,
             isInternal: { $ne: true },
             $or: [
-              { workspaceId: workspace._id },
-              { "workspaces.workspaceId": workspace._id },
+              { workspaces: { $elemMatch: { workspaceId: workspace._id, role: "admin" } } },
+              // Cuentas viejas con un solo entorno: el rol vive arriba.
+              { workspaceId: workspace._id, role: "admin", "workspaces.workspaceId": { $ne: workspace._id } },
             ],
           })
           .lean();
