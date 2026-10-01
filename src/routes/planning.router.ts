@@ -11,7 +11,9 @@ import {
   listMine,
   monthlyStatus,
   syncCrmRange,
+  marcarRealizada,
 } from "../controllers/planning.controller";
+import { internalOrSuperadminMiddleware } from "../middlewares/internalOrSuperadmin.middleware";
 
 const planningRouter = Router();
 
@@ -32,6 +34,8 @@ planningRouter.post("/crm-sync", syncCrmRange);
 planningRouter.get("/:workspaceId", workspaceAccessMiddleware, listEntries);
 planningRouter.post("/:workspaceId", workspaceAdminMiddleware, createEntry);
 planningRouter.put("/:entryId", workspaceAdminMiddleware, updateEntry);
+// La marca el equipo (produccion, PM, direccion), no el cliente.
+planningRouter.patch("/:entryId/cumplida", internalOrSuperadminMiddleware, marcarRealizada);
 planningRouter.delete("/:entryId", workspaceAdminMiddleware, deleteEntry);
 
 export default planningRouter;

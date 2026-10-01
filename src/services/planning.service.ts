@@ -105,7 +105,9 @@ export class PlanningService {
       const mueve = Math.abs(nueva.getTime() - new Date(actual.date).getTime()) > 60_000;
       if (mueve) fechaAnterior = new Date(actual.date);
 
-      if (mueve && actual.source === "crm" && actual.crm?.appointmentId) {
+      // Tambien las manuales que el sync vinculo a su cita del CRM: si no, el
+      // sync las devolveria a la fecha del CRM.
+      if (mueve && actual.crm?.appointmentId) {
         try {
           await ghlService.updateAppointment(actual.crm.appointmentId, { startTime: nueva, forzar: true });
         } catch (error: any) {
@@ -165,6 +167,34 @@ export class PlanningService {
       { $set: set },
       { new: true }
     );
+  }
+
+  /**
+   * El equipo marca a mano que la produccion se hizo (o lo deshace). Antes
+   * solo se marcaba al poner un guion en GRABADO, asi que las producciones sin
+   * guiones cargados (o pasadas) quedaban pendientes para siempre. No avisa
+   * al cliente: muchas son de semanas atras.
+   */
+  async marcarRealizada(
+    entryId: string,
+    realizada: boolean,
+    actor: { id?: string; nombre?: string }
+  ): Promise<IPlanning> {
+    if (!Types.ObjectId.isValid(entryId)) throw new Error("INVALID_ID");
+    const entry = await models.planning.findById(entryId);
+    if (!entry) throw new Error("NOT_FOUND");
+    if (realizada) {
+      if (entry.cancelada || /^CANCELADA/.test(entry.title)) throw new Error("PRODUCCION_CANCELADA");
+      if (entry.date.getTime() > Date.now() + 12 * 3_600_000) throw new Error("PRODUCCION_FUTURA");
+      if (entry.cumplida) return entry;
+      return (await this.marcarCumplida(entryId, actor)) || entry;
+    }
+    const r = await models.planning.findByIdAndUpdate(
+      entryId,
+      { $set: { cumplida: false }, $unset: { cumplidaEn: 1, cumplidaPorId: 1, cumplidaPorNombre: 1 } },
+      { new: true }
+    );
+    return r!;
   }
 
   /**

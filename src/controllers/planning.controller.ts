@@ -303,3 +303,29 @@ export async function syncCrmRange(req: AuthRequest, res: Response, next: NextFu
     res.status(HttpStatusCode.Ok).send({ message: "No se pudo sincronizar con el CRM.", cambios: 0, error: error.message });
   }
 }
+
+/**
+ * PATCH /api/planning/:entryId/cumplida { realizada: boolean } (equipo).
+ * Marca o desmarca a mano que la produccion ya se hizo.
+ */
+export async function marcarRealizada(req: AuthRequest, res: Response, next: NextFunction) {
+  try {
+    const realizada = req.body?.realizada !== false;
+    const u = req.user as any;
+    const entry = await planningService.marcarRealizada(String(req.params.entryId), realizada, {
+      id: u?._id ? String(u._id) : undefined,
+      nombre: u?.name || u?.email,
+    });
+    res.status(200).send({ entry });
+  } catch (error: any) {
+    const mensajes: Record<string, [number, string]> = {
+      INVALID_ID: [400, "Identificador inválido."],
+      NOT_FOUND: [404, "Producción no encontrada."],
+      PRODUCCION_CANCELADA: [409, "Esa producción está cancelada: no se puede marcar como realizada."],
+      PRODUCCION_FUTURA: [409, "Esa producción todavía no llega: se marca cuando ya se hizo."],
+    };
+    const m = mensajes[error?.message];
+    if (m) return res.status(m[0]).send({ message: m[1] });
+    next(error);
+  }
+}

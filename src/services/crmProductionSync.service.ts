@@ -44,6 +44,7 @@ export type AccionCita =
   | "creada"
   | "reprogramada"
   | "sin_cambios"
+  | "vinculada"
   | "cancelada"
   | "sin_entorno"
   | "ignorada";
@@ -426,6 +427,32 @@ class CrmProductionSyncService {
       return { accion: "sin_entorno", motivo: "no se pudo asociar la cita a un entorno" };
     }
 
+    // El equipo ya la cargo a mano: no se crea otra, se le pega la cita del
+    // CRM a la que existe. Sin esto salian duplicadas (13 de 31 lo eran).
+    const gemela = await this.manualGemela(entorno._id as Types.ObjectId, cita.startsAt);
+    if (gemela) {
+      gemela.crm = {
+        appointmentId: cita.appointmentId,
+        calendarId: cita.calendarId,
+        calendarName: cita.calendarName,
+        contactId: cita.contact.id,
+        contactName: cita.contact.name,
+        contactEmail: cita.contact.email,
+        contactPhone: cita.contact.phone,
+        status: cita.status,
+        syncedAt: new Date(),
+      } as any;
+      if (!gemela.endsAt && cita.endsAt) gemela.endsAt = cita.endsAt;
+      try {
+        await gemela.save();
+      } catch (err: any) {
+        if (err?.code === 11000) return this.aplicarCita(cita, origen);
+        throw err;
+      }
+      console.log(`[CRM Producción] vinculada a la manual ${gemela._id} (${origen}): ${cita.appointmentId}`);
+      return { accion: "vinculada", entry: gemela, workspaceId: entorno._id.toString() };
+    }
+
     const entry = new models.planning({
       workspaceId: entorno._id,
       title: this.tituloDe(cita),
@@ -457,6 +484,27 @@ class CrmProductionSyncService {
     return { accion: "creada", entry, workspaceId: entorno._id.toString() };
   }
 
+  /**
+   * Produccion cargada a mano (sin cita del CRM) del mismo entorno y el mismo
+   * dia (hora Ecuador), a menos de 3 horas de la cita: es la misma grabacion.
+   */
+  private async manualGemela(workspaceId: Types.ObjectId, inicio: Date): Promise<IPlanning | null> {
+    const VENTANA_MS = 3 * 3_600_000;
+    const candidatas = await models.planning.find({
+      workspaceId,
+      date: { $gte: new Date(inicio.getTime() - VENTANA_MS), $lte: new Date(inicio.getTime() + VENTANA_MS) },
+      $or: [{ "crm.appointmentId": { $exists: false } }, { "crm.appointmentId": null }, { "crm.appointmentId": "" }],
+      cancelada: { $ne: true },
+      title: { $not: /^CANCELADA/ },
+    });
+    const dia = (d: Date) => new Date(d.getTime() - 5 * 3_600_000).toISOString().slice(0, 10);
+    return (
+      candidatas
+        .filter((c) => dia(c.date) === dia(inicio))
+        .sort((a, b) => Math.abs(a.date.getTime() - inicio.getTime()) - Math.abs(b.date.getTime() - inicio.getTime()))[0] || null
+    );
+  }
+
   private nombres = new Map<string, string>();
   private async nombreEntorno(workspaceId: string): Promise<string> {
     if (!this.nombres.has(workspaceId)) {
@@ -474,7 +522,9 @@ class CrmProductionSyncService {
     // trabajo huerfano. Se marca cancelada y el equipo decide que hacer.
     const conGuiones = await models.videoPlanning.exists({ planningEntryId: entry._id });
     const workspaceId = entry.workspaceId.toString();
-    if (conGuiones) {
+    // Una produccion cargada a mano (y luego vinculada a su cita) no se borra
+    // nunca por el CRM: se marca cancelada y el equipo decide.
+    if (conGuiones || entry.source !== "crm") {
       entry.crm = { ...(entry.crm as any), status: cita.status, syncedAt: new Date() };
       if (!/^CANCELADA · /.test(entry.title)) entry.title = `CANCELADA · ${entry.title}`;
       entry.cancelada = true;
