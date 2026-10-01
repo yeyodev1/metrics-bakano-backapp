@@ -1,4 +1,5 @@
 import axios from "axios";
+import { TelegramChatModel } from "../models/telegramChat.model";
 
 /**
  * Cliente minimo de la Bot API de Telegram (https://core.telegram.org/bots/api).
@@ -75,13 +76,34 @@ export class TelegramService {
   }
 
   async sendMessage(chatId: number, text: string, botones?: InlineButton[][]): Promise<void> {
-    await axios.post(`${this.api}/sendMessage`, {
+    const { data } = await axios.post(`${this.api}/sendMessage`, {
       chat_id: chatId,
       text,
       parse_mode: "HTML",
       link_preview_options: { is_disabled: true },
       ...(botones ? { reply_markup: { inline_keyboard: botones } } : {}),
     });
+    // Solo el ultimo mensaje conserva sus opciones. Los que son solo links
+    // (pagar, firmar, entrar al Meet) no cuentan: esos no se tocan por error.
+    if (botones?.some((fila) => fila.some((b) => b.callback_data))) {
+      await this.quedarseConElUltimoTeclado(chatId, data?.result?.message_id).catch(() => undefined);
+    }
+  }
+
+  private async quedarseConElUltimoTeclado(chatId: number, messageId?: number): Promise<void> {
+    if (!messageId) return;
+    const previo = await TelegramChatModel.findOneAndUpdate({ chatId }, { $set: { ultimoTeclado: messageId } }, { new: false })
+      .select("ultimoTeclado")
+      .lean();
+    const anterior = (previo as any)?.ultimoTeclado;
+    if (anterior && anterior !== messageId) await this.quitarBotones(chatId, anterior);
+  }
+
+  /** Le quita los botones a un mensaje ya enviado (el texto queda). */
+  async quitarBotones(chatId: number, messageId: number): Promise<void> {
+    await axios
+      .post(`${this.api}/editMessageReplyMarkup`, { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: [] } })
+      .catch(() => undefined);
   }
 
   /** Manda un archivo (el PDF del contrato) con un texto y botones abajo. */

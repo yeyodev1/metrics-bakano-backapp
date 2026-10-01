@@ -46,6 +46,12 @@ export interface ITelegramChat extends Document {
   /** Ultima alerta a la project manager: evita repetirla mas de una vez al dia. */
   ultimaAlerta?: { estado: string; en: Date };
   /**
+   * Ultimo mensaje con botones de opciones. Al mandar otro, a ese se le quitan:
+   * con varios teclados en pantalla el cliente tocaba uno viejo sin querer al
+   * hacer scroll.
+   */
+  ultimoTeclado?: number;
+  /**
    * Borrador de correcciones de guiones: se van anotando en la conversacion y
    * se envian todas juntas, porque la revision del cliente se recibe una vez.
    */
@@ -122,6 +128,7 @@ const TelegramChatSchema = new Schema<ITelegramChat>(
     },
     ultimoAnimo: { estado: String, motivo: String, en: Date },
     ultimaAlerta: { estado: String, en: Date },
+    ultimoTeclado: { type: Number },
     citas: {
       type: [
         {

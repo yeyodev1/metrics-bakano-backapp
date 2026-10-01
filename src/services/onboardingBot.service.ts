@@ -195,7 +195,8 @@ class OnboardingBotService {
         calendarId: def.calendarioId,
         contactId,
         startTime: inicio,
-        title: `${cliente.entorno} · ${def.etiqueta} (Telegram)`,
+        // Mismo formato que los titulos del CRM: el sync lo lee igual.
+        title: `${cliente.entorno} / ${cliente.nombre} - ${def.etiqueta} (Bakano · Telegram)`,
       });
     } catch (error: any) {
       console.error("[Onboarding] no se pudo agendar:", error.response?.data || error.message);
@@ -206,7 +207,8 @@ class OnboardingBotService {
     await this.avisar(workspaceId, sesion, cliente.entorno, cliente.nombre, inicio, "telegram");
     // El Meet lo pone el CRM al crear la cita (sala del responsable).
     const cita = await ghlService.getAppointment(appointmentId).catch(() => null);
-    const address = String(cita?.address || "").trim();
+    const crudo = String(cita?.address || "").trim();
+    const address = /^meet\.google\.com\//i.test(crudo) ? `https://${crudo}` : crudo;
     return { ok: true, cuando: fechaEcuador(inicio), responsable: def.responsable.nombre, enlace: /^https?:\/\//i.test(address) ? address : undefined };
   }
 
