@@ -377,11 +377,16 @@ export class BillingService {
   /**
    * Returns all external collaborator emails for a workspace.
    */
+  /**
+   * A quien del cliente le llega el correo de cada venta registrada: solo a
+   * los administradores del entorno. A los colaboradores no les llega ninguno
+   * (pedido de direccion 2026-10-01): era ruido para quien no maneja los numeros.
+   */
   private async getExternalCollaboratorEmails(workspaceId: string): Promise<{ email: string; name: string }[]> {
     const externals = await models.users.find({
-      isInternal: false,
+      isInternal: { $ne: true },
       isActive: true,
-      "workspaces.workspaceId": new Types.ObjectId(workspaceId),
+      workspaces: { $elemMatch: { workspaceId: new Types.ObjectId(workspaceId), role: "admin" } },
     }).lean();
     return externals.map(u => ({ email: u.email, name: u.name || u.email }));
   }
