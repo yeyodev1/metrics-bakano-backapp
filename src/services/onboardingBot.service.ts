@@ -67,7 +67,7 @@ export interface EstadoOnboarding {
 }
 
 export type ResultadoAgenda =
-  | { ok: true; cuando: string; responsable: string }
+  | { ok: true; cuando: string; responsable: string; enlace?: string }
   | { ok: false; motivo: "ya_agendada" | "sin_calendario" | "ocupado" | "error" | "en_curso" | "pasado" | "muy_cerca_de_produccion" };
 
 function normalizar(texto: string): string {
@@ -204,7 +204,10 @@ class OnboardingBotService {
 
     await this.marcar(workspaceId, sesion, { fecha: inicio, appointmentId, origen: "telegram" });
     await this.avisar(workspaceId, sesion, cliente.entorno, cliente.nombre, inicio, "telegram");
-    return { ok: true, cuando: fechaEcuador(inicio), responsable: def.responsable.nombre };
+    // El Meet lo pone el CRM al crear la cita (sala del responsable).
+    const cita = await ghlService.getAppointment(appointmentId).catch(() => null);
+    const address = String(cita?.address || "").trim();
+    return { ok: true, cuando: fechaEcuador(inicio), responsable: def.responsable.nombre, enlace: /^https?:\/\//i.test(address) ? address : undefined };
   }
 
   private async marcar(
@@ -736,7 +739,8 @@ class OnboardingBotService {
         sesiones: ORDEN_SESIONES.map((s) => ({
           etiqueta: SESIONES_ONBOARDING[s].etiqueta,
           responsable: SESIONES_ONBOARDING[s].responsable.nombre,
-          link: SESIONES_ONBOARDING[s].link,
+          // Al bot, no al CRM: todo se agenda por Telegram.
+          link: `${BOT_URL}?start=onb_${s}`,
           resumen: SESIONES_ONBOARDING[s].resumen,
         })),
       });

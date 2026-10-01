@@ -44,6 +44,11 @@ export const uploadDocument = multer({
       "image/jpeg",
       "image/png",
       "image/webp",
+      // Para logos: se convierten a PNG al subir (logoPng.service).
+      "image/heic",
+      "image/heif",
+      "image/gif",
+      "image/svg+xml",
       // El catálogo se puede escribir a mano desde la plataforma y se envía
       // como .txt: el servidor lo rechazaba y esa opción nunca funcionó.
       "text/plain",
@@ -53,7 +58,7 @@ export const uploadDocument = multer({
     } else {
       cb(
         rechazo(
-          "Solo se permiten PDF, PNG, JPG o WEBP. Si tienes el archivo en .ai, .psd o .eps, expórtalo antes de subirlo (los logos van en PNG)."
+          "Solo se permiten PDF, PNG, JPG o WEBP. Si tienes el archivo en .ai, .psd o .eps, sube una captura o un PDF (el logo lo convertimos a PNG)."
         )
       );
     }

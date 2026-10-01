@@ -3,11 +3,13 @@
  *
  * El proceso cambio: arranca un dia despues del pago con una bienvenida de 15
  * minutos donde Genesis crea el entorno frente al cliente, y sigue con las
- * reuniones de especializacion y levantamiento. La configuracion tecnica ya no
- * es una sesion aparte con David: se resuelve dentro de la especializacion.
+ * reuniones de especializacion (Joel), configuracion del CRM (David) y
+ * levantamiento (Ariana). La del CRM se ofrece apenas agenda con Joel: puede
+ * ir a la par, no tiene que esperar a que la de Joel se cumpla.
  *
  * Telegram es el canal oficial. El bot no configura nada: enruta al cliente a
  * la reunion que toca, la agenda en el calendario del responsable y avisa.
+ * TODO se agenda desde el chat: al cliente no se le pasan links del CRM.
  */
 /**
  * Las sesiones que el cliente AGENDA. La bienvenida no esta aqui a proposito:
@@ -15,7 +17,7 @@
  * (ahi Genesis creo el entorno, sumo su correo y salio la invitacion).
  * Ofrecerle agendarla seria pedirle que repita lo que acaba de pasar.
  */
-export type SesionOnboarding = "especializacion" | "levantamiento";
+export type SesionOnboarding = "especializacion" | "crm" | "levantamiento";
 
 export interface DefinicionSesion {
   orden: number;
@@ -23,7 +25,10 @@ export interface DefinicionSesion {
   emoji: string;
   responsable: { nombre: string; email: string };
   calendarioId: string;
-  /** Link publico del CRM, por si el cliente prefiere agendar desde la web. */
+  /**
+   * Link publico del CRM. Solo para el equipo: al cliente NUNCA se le pasa,
+   * todo se agenda por el bot de Telegram.
+   */
   link: string;
   /** Cuanto dura, para decirselo sin que pregunte. */
   duracion: string;
@@ -76,8 +81,31 @@ export const SESIONES_ONBOARDING: Record<SesionOnboarding, DefinicionSesion> = {
       "Configuración del método de pago en la cuenta publicitaria",
     ],
   },
-  levantamiento: {
+  crm: {
     orden: 2,
+    etiqueta: "Configuración de tu CRM con David",
+    emoji: "🗂️",
+    responsable: { nombre: "David Robles", email: "drobles@bakano.ec" },
+    calendarioId: "aaHn06pmWuNFuF7tjDST",
+    link: "https://api.leadconnectorhq.com/widget/bookings/soporte-tecnico-crm",
+    duracion: "1 hora",
+    requisitos: [
+      "Conéctate desde una computadora",
+      "Ten a la mano el WhatsApp Business del negocio",
+      "Ten claro cómo atiendes hoy a tus clientes: quién responde y cómo cierras una venta",
+    ],
+    resumen:
+      "Dejamos listo tu CRM: tu WhatsApp conectado, tus etapas de venta y tu equipo, para que cada persona que llegue por los anuncios quede registrada y nadie se pierda.",
+    temas: [
+      "Acceso a tu CRM y a tu subcuenta",
+      "Conexión de tu WhatsApp Business al CRM",
+      "Tus etapas de venta (pipeline) y cómo mover a cada cliente",
+      "Usuarios de tu equipo de ventas dentro del CRM",
+      "Dirección y link de tráfico al que llegan tus anuncios",
+    ],
+  },
+  levantamiento: {
+    orden: 3,
     etiqueta: "Levantamiento de información con Ariana",
     emoji: "📝",
     responsable: { nombre: "Ariana Vera", email: "avera@bakano.ec" },
@@ -114,6 +142,7 @@ export type EtapaRecorrido =
   | "datosMarca"
   | "bienvenida"
   | "especializacion"
+  | "crm"
   | "levantamiento"
   | "guiones"
   | "aprobacionGuiones"
@@ -144,6 +173,7 @@ const ANGEL = { nombre: "Ángel Sánchez", email: "asanchez@bakano.ec" };
 const JAVIER = { nombre: "Javier León", email: "jleon@bakano.ec" };
 const JOEL = { nombre: "Joel Jimenez", email: "jjimenez@bakano.ec" };
 const GENESIS = { nombre: "Genesis Benalcazar", email: "gbenalcazar@bakano.ec" };
+const DAVID = { nombre: "David Robles", email: "drobles@bakano.ec" };
 
 export const RECORRIDO: Record<EtapaRecorrido, DefinicionEtapa> = {
   bienvenida: {
@@ -189,8 +219,17 @@ export const RECORRIDO: Record<EtapaRecorrido, DefinicionEtapa> = {
     que: "Dejamos listas tus cuentas de Meta para poder anunciar.",
     seMarca: "automatico",
   },
-  levantamiento: {
+  crm: {
     orden: 6,
+    etiqueta: "Configuración de tu CRM con David",
+    emoji: "🗂️",
+    deQuien: "cliente",
+    responsable: DAVID,
+    que: "Dejamos tu CRM listo para que cada persona que llegue por los anuncios quede registrada y la atiendas a tiempo.",
+    seMarca: "automatico",
+  },
+  levantamiento: {
+    orden: 7,
     etiqueta: "Levantamiento con Ariana",
     emoji: "📝",
     deQuien: "cliente",
@@ -199,7 +238,7 @@ export const RECORRIDO: Record<EtapaRecorrido, DefinicionEtapa> = {
     seMarca: "automatico",
   },
   guiones: {
-    orden: 7,
+    orden: 8,
     etiqueta: "Creación de tus guiones",
     emoji: "✍️",
     deQuien: "equipo",
@@ -208,7 +247,7 @@ export const RECORRIDO: Record<EtapaRecorrido, DefinicionEtapa> = {
     seMarca: "automatico",
   },
   aprobacionGuiones: {
-    orden: 8,
+    orden: 9,
     etiqueta: "Tu aprobación de los guiones",
     emoji: "✅",
     deQuien: "cliente",
@@ -216,7 +255,7 @@ export const RECORRIDO: Record<EtapaRecorrido, DefinicionEtapa> = {
     seMarca: "automatico",
   },
   produccion: {
-    orden: 9,
+    orden: 10,
     etiqueta: "Producción y levantamiento de tu avatar",
     emoji: "🎬",
     deQuien: "cliente",
@@ -225,7 +264,7 @@ export const RECORRIDO: Record<EtapaRecorrido, DefinicionEtapa> = {
     seMarca: "automatico",
   },
   avatares: {
-    orden: 10,
+    orden: 11,
     etiqueta: "Creación de tus avatares",
     emoji: "🧬",
     deQuien: "equipo",
@@ -234,7 +273,7 @@ export const RECORRIDO: Record<EtapaRecorrido, DefinicionEtapa> = {
     seMarca: "manual",
   },
   escenas: {
-    orden: 11,
+    orden: 12,
     etiqueta: "Creación de las escenas",
     emoji: "🎞️",
     deQuien: "equipo",
@@ -243,7 +282,7 @@ export const RECORRIDO: Record<EtapaRecorrido, DefinicionEtapa> = {
     seMarca: "manual",
   },
   edicion: {
-    orden: 12,
+    orden: 13,
     etiqueta: "Edición de tus videos",
     emoji: "✂️",
     deQuien: "equipo",
@@ -252,7 +291,7 @@ export const RECORRIDO: Record<EtapaRecorrido, DefinicionEtapa> = {
     seMarca: "automatico",
   },
   aprobacionVideos: {
-    orden: 13,
+    orden: 14,
     etiqueta: "Tu aprobación de los videos",
     emoji: "👀",
     deQuien: "cliente",
@@ -260,7 +299,7 @@ export const RECORRIDO: Record<EtapaRecorrido, DefinicionEtapa> = {
     seMarca: "manual",
   },
   salidaVentas: {
-    orden: 14,
+    orden: 15,
     etiqueta: "Salida a ventas",
     emoji: "🚀",
     deQuien: "equipo",
@@ -269,7 +308,7 @@ export const RECORRIDO: Record<EtapaRecorrido, DefinicionEtapa> = {
     seMarca: "manual",
   },
   bakanology: {
-    orden: 15,
+    orden: 16,
     etiqueta: "Apertura a Bakanology",
     emoji: "🎓",
     deQuien: "equipo",
@@ -292,7 +331,7 @@ export const ETAPAS_MANUALES = ORDEN_RECORRIDO.filter((e) => RECORRIDO[e].seMarc
 export const PROCESO_ONBOARDING = {
   envios: [
     {
-      que: "Tus logos en PNG (fondo transparente) y tu línea gráfica",
+      que: "Tus logos (en cualquier formato: se convierten solos a PNG) y tu línea gráfica",
       donde: "por el chat del bot, o en metrics.bakano.ec en Recursos de marca",
     },
     {
@@ -324,6 +363,7 @@ export const PROCESO_ONBOARDING = {
       nombre: "Especialización y estrategia",
       pasos: [
         "Reunión de especialización con Joel Jimenez: tus cuentas listas para anunciar",
+        "Configuración de tu CRM con David Robles (se agenda a la par de la de Joel)",
         "Levantamiento de información con Ariana Vera: qué vamos a promocionar",
         "Ariana escribe tus guiones y tú los apruebas",
       ],
@@ -358,7 +398,7 @@ export function procesoOnboardingEnTexto(): string {
   const sesiones = (Object.keys(SESIONES_ONBOARDING) as SesionOnboarding[])
     .map((s) => {
       const d = SESIONES_ONBOARDING[s];
-      return `${d.etiqueta} con ${d.responsable.nombre} (${d.responsable.email}), ${d.duracion}:\n  Requisitos: ${d.requisitos.join("; ")}\n  Temas: ${d.temas.join("; ")}\n  Link: ${d.link}`;
+      return `${d.etiqueta} con ${d.responsable.nombre} (${d.responsable.email}), ${d.duracion}:\n  Requisitos: ${d.requisitos.join("; ")}\n  Temas: ${d.temas.join("; ")}\n  Se agenda aquí mismo por el chat (nunca con un link).`;
     })
     .join("\n");
   const recorrido = ORDEN_RECORRIDO.map((e) => {

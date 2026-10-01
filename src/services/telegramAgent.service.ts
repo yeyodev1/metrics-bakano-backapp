@@ -10,6 +10,7 @@ import { accesosClienteService } from "./accesosCliente.service";
 import { atencionClienteService, DIAS_ARIANA_A_PRODUCCION, fechaEcuador, type DatosCliente } from "./atencionCliente.service";
 import { onboardingBotService } from "./onboardingBot.service";
 import { citasClienteService } from "./citasCliente.service";
+import { estadoMetricsService, type EstadoEnMetrics } from "./estadoMetrics.service";
 import { AYUDA_CAMPO_MARCA, CAMPOS_MARCA, ENTREGABLES, onboardingDatosService } from "./onboardingDatos.service";
 import { metricasClienteService } from "./metricasCliente.service";
 import { claveDia, contextoParaLaIa, facturacionChatService, comoPlata } from "./facturacionChat.service";
@@ -155,9 +156,16 @@ class TelegramAgentService {
     const turno = { inicio: new Date(), propuesta: false, usadas: new Set<string>() };
     try {
       const { generateText, isStepCount } = await cargarAi();
-      const [datos, perfil] = await Promise.all([
+      // Lo que HAY en Metrics (contrato, archivos, citas, guiones...): con
+      // eso no se le pide al cliente lo que ya hizo en la plataforma. Con
+      // tope de tiempo: si tarda, la respuesta sale igual sin la foto.
+      const [datos, perfil, enMetrics] = await Promise.all([
         atencionClienteService.datosCliente(chat),
         perfilClienteService.de(chat.workspaceId!, chat.userId),
+        Promise.race([
+          estadoMetricsService.de(chat.workspaceId!).catch(() => null),
+          new Promise<null>((r) => setTimeout(() => r(null), 8_000)),
+        ]),
       ]);
       cliente = datos;
       // Cliente arrancando: lo pendiente va en las instrucciones y el modelo
@@ -172,7 +180,7 @@ class TelegramAgentService {
 
       const resultado = await generateText({
         model: modelo(),
-        system: this.instrucciones(datos, perfil, pendientes),
+        system: this.instrucciones(datos, perfil, pendientes, enMetrics),
         messages: [...historial, { role: "user", content: texto }],
         tools: this.registrarUso(this.herramientas(chat, texto, turno), turno.usadas, chat),
         stopWhen: isStepCount(6),
@@ -333,7 +341,8 @@ class TelegramAgentService {
   private instrucciones(
     cliente: DatosCliente,
     perfil: PerfilCliente,
-    pendientes: Awaited<ReturnType<typeof onboardingDatosService.pendientes>> | null
+    pendientes: Awaited<ReturnType<typeof onboardingDatosService.pendientes>> | null,
+    enMetrics: EstadoEnMetrics | null = null
   ): string {
     const equipo = (Object.keys(EQUIPO_ATENCION) as TemaAtencion[])
       .map(
@@ -352,6 +361,19 @@ Hoy es ${fechaEcuador(new Date())} (hora Ecuador).
 
 En qué punto está este cliente: ${perfilClienteService.describir(perfil)}
 ${
+  enMetrics
+    ? `
+LO QUE HAY EN METRICS AHORA MISMO (dato real y en vivo, manda por encima de lo que diga el historial del chat):
+${estadoMetricsService.enTexto(enMetrics)}
+
+Reglas con esto:
+- Lo que ya está en Metrics NO se pide ni se sugiere, aunque no lo haya hecho por este chat. Si sale el tema, dile que ya está listo en Metrics (por ejemplo: "tu contrato ya está firmado en Metrics, no tienes que hacer nada más").
+- Si tiene citas agendadas (sesiones, reuniones o producción), díselo cuando venga al caso, con fecha, con quién y el link de Meet si lo tiene. No le ofrezcas agendar algo que ya tiene agendado.
+- Si pregunta por sus guiones o videos aprobados, dile cuántos hay y dónde verlos (su planificación en Metrics).
+- Si necesitas más detalle o algo cambió en este turno, usa verEstadoEnMetrics.
+`
+    : ""
+}${
   pendientes
     ? `Lo que le falta ahora mismo (dato real, no hace falta llamar verPendientesOnboarding salvo que registres algo):
 - Sesiones sin agendar: ${pendientes.sesionesPendientes.map((x) => `${x.etiqueta} con ${x.con} (${x.sesion})`).join("; ") || "ninguna"}
@@ -394,12 +416,12 @@ Revisión y corrección de guiones:
 - Al enviar, confírmale que le llegó a ${equipoAtencionService.nombres("guiones")} y al equipo, y hasta cuándo se corrigen.
 
 Onboarding (arranque del cliente):
-- Son tres sesiones técnicas, en este orden: Conexión de cuentas Meta con Joel Jimenez, Configuración de CRM y Metrics con David Robles, y Estrategia y guiones con Ariana Vera. Después viene la primera producción.
+- Son tres sesiones, en este orden: especialización con Joel Jimenez (sus cuentas de Meta), configuración del CRM con David Robles (se ofrece apenas agenda con Joel, a la par) y levantamiento con Ariana Vera. Después viene la primera producción.
 - Tú no resuelves la configuración técnica por chat: cada tema se ve en su sesión. Tu trabajo es decirle en qué paso va, qué necesita tener listo y agendarle la sesión que le toca.
 - Usa verOnboarding para saber el estado real, verHorariosOnboarding para ofrecer 3 o 4 horarios y agendarSesionOnboarding cuando elija uno.
 - Si el cliente pregunta por algo que se ve en una sesión (conectar Instagram, pagos de Meta, el CRM, los guiones), explícale en una línea que eso se resuelve en esa sesión y ofrécele agendarla.
-- Si prefiere agendar por su cuenta, pásale el link de esa sesión.
-- Manda links (agendamiento, metrics.bakano.ec) solo cuando correspondan al paso en el que está el cliente, no todos de golpe.
+- Si prefiere otro día, pregúntale cuál y pásaselo al responsable con pasarMensajeAlEquipo: la conversación se queda aquí, nunca lo mandes a un calendario externo.
+- Manda links de metrics.bakano.ec solo cuando correspondan al paso en el que está el cliente, no todos de golpe.
 - Para que todo funcione el cliente necesita un entorno creado en metrics.bakano.ec; si te dice que no puede entrar o no ve su información, recuérdaselo.
 
 Arrancar el onboarding (tú tomas la iniciativa):
@@ -409,8 +431,8 @@ Arrancar el onboarding (tú tomas la iniciativa):
 - Si te dice que no sabe, que no lo tiene o que no entiende: NO insistas. Usa pedirAyudaConDato y dile con tranquilidad que el equipo lo arma con él en esa sesión y que ya avisaste al responsable.
 - Datos de marca: pregúntale de forma natural, uno por mensaje (por ejemplo "cuéntame, a quién le vendes?"). Cuando responda algo concreto, guárdalo con registrarDatoMarca usando sus palabras, y confírmale en pocas palabras que quedó en el sistema. Si responde algo vago, pídele un poco más de detalle antes de guardar.
 - Todo lo que entrega va POR LA PLATAFORMA, nunca por correo: pásale el link de SU entorno (el de arriba, ya trae su id) y dile en una línea qué sube ahí. La única excepción es la invitación al portafolio de Meta, que se hace dentro de Meta Business.
-- Puede mandarte los archivos por aquí mismo: dile que los adjunte con el clip 📎 y, si es el logo, que lo envíe como Archivo (no como foto) en PNG, porque Telegram comprime las fotos y el logo pierde el fondo transparente. Tú los guardas solo en su entorno.
-- Los logos tienen que ser PNG con fondo transparente. Si te dice que los tiene en .ai, .psd o .jpg, pídele que los exporte a PNG antes de subirlos; la plataforma no acepta otro formato para el logo.
+- Puede mandarte los archivos por aquí mismo con el clip 📎. Tú los guardas solo en su entorno.
+- EL LOGO SE ACEPTA COMO VENGA: PNG, JPG, foto, WEBP o PDF. El sistema lo convierte solo a PNG. Nunca le pidas que lo exporte ni lo rechaces por el formato; solo si lo tiene con fondo transparente, que lo mande como Archivo para no perder calidad. Si lo tiene en .ai o .psd (no son imágenes), que te mande una captura o un PDF y listo.
 - Cuando te diga que ya lo subió, regístralo con registrarEntregable: así el responsable lo verifica. No lo marques si solo dice que lo va a hacer.
 - Si el cliente está apurado o pregunta otra cosa, atiéndelo primero y retoma lo pendiente después, sin presionar.
 - Si es un cliente en marcha, no le ofrezcas sesiones del onboarding ni le pidas envíos. Solo si faltan datos de su marca, pídele uno al final de la conversación y sin insistir.
@@ -463,7 +485,9 @@ Producciones (grabaciones):
 - QUÉ ES LA PRODUCCIÓN: es la grabación para crear su AVATAR y grabar sus PRODUCTOS. No es una grabación de videos sueltos ni una sesión de contenido mensual: con ese material armamos todos los videos del periodo. Dilo así siempre que pregunte.
 - CADA CUÁNTO: una producción cada 6 MESES, contados desde la última. En la práctica, para la mayoría es una vez al año. Si ya tiene una agendada, no puede agendar otra.
 - Puede volver a grabar antes de los 6 meses si la estrategia lo pide (productos nuevos, cambio de marca, se acabó el contenido). Eso lo habilita el equipo: si lo pide, díselo así y pásale el mensaje con pasarMensajeAlEquipo.
-- Orden del onboarding: 1) especialización con Joel, 2) levantamiento con Ariana, 3) primera producción. La primera producción SOLO se agenda cuando ya tiene su reunión con Ariana, y al menos ${DIAS_ARIANA_A_PRODUCCION} días después de ella: en esa reunión se define qué se graba y Ariana necesita esos días para los guiones. Si pide producción sin Ariana, explícale eso y ofrécele agendar con Ariana primero.
+- Orden del onboarding: 1) especialización con Joel, 2) configuración del CRM con David Robles, 3) levantamiento con Ariana, 4) primera producción. La del CRM con David se ofrece APENAS agenda con Joel (puede ir a la par, no espera a que la de Joel pase).
+- TODO SE AGENDA AQUÍ, POR ESTE CHAT: nunca le pases links de calendarios ni le digas que agende en otra página. Si no hay horarios, pregúntale qué día le queda mejor y pásaselo al responsable con pasarMensajeAlEquipo.
+- Diego Reyes es dirección: NO atiende reuniones ni sesiones con clientes. Nunca ofrezcas agendar con él. La primera producción SOLO se agenda cuando ya tiene su reunión con Ariana, y al menos ${DIAS_ARIANA_A_PRODUCCION} días después de ella: en esa reunión se define qué se graba y Ariana necesita esos días para los guiones. Si pide producción sin Ariana, explícale eso y ofrécele agendar con Ariana primero.
 - Para agendar: usa verHorariosProduccion, ofrece 3 o 4 horarios y, cuando el cliente elija uno concreto, usa agendarProduccion con el valor "inicio" exacto. Confirma fecha, hora y que lo atienden ${equipoAtencionService.nombres("produccion")}.
 - Si todavía no puede agendar, explica la regla con naturalidad y dile desde qué fecha puede.
 - El cliente es UNO SOLO: nunca le agendes dos cosas a la misma hora, aunque sean con personas distintas del equipo. Los horarios que te devuelven las herramientas ya vienen filtrados; si aun así te sale "ya_tiene_esa_hora", dile qué cita tiene a esa hora y con quién, y ofrécele otro horario o mover la que ya tiene.
@@ -490,7 +514,7 @@ CONTRASEÑAS:
 - LO QUE QUIERE DESTACAR: si cuenta qué producto, servicio o promoción quiere destacar (o responde a la pregunta de "qué destacamos"), guárdalo con guardarQueDestacar con sus palabras y dile que Ariana arma sus próximos guiones en base a eso. Si es vago ("todo"), pregúntale cuál primero.
 - LA FRECUENCIA DE PRODUCCIÓN NO ES UN ABSOLUTO: si necesita grabar antes de la fecha que le toca, NUNCA le digas que no se puede. Pregúntale el motivo y usa pedirProduccionAntes: lo decide Ariana y él se entera por aquí apenas responda.
 - SIN PAGO NO HAY GUIONES NI PRODUCCIÓN: con pagos vencidos no ve ni aprueba guiones ni agenda producción. Cuando apruebe sus guiones, puede agendar su producción al instante con verHorariosProduccion.
-- Y para que lo que grabemos llegue a sus clientes hace falta el CRM: si todavía no hizo su sesión de Configuración de CRM y Metrics con David Robles, dile que la agende. Sin eso, los videos no tienen a dónde llevar a la gente.
+- Y para que lo que grabemos llegue a sus clientes hace falta el CRM: si todavía no hizo su sesión de configuración del CRM con David Robles, ofrécele agendarla aquí mismo (verHorariosOnboarding con sesion=crm). Sin eso, los videos no tienen a dónde llevar a la gente.
 
 Mover o cancelar citas (producción, sesiones del onboarding y reuniones):
 - Usa verMisCitas para ver sus citas. Solo puedes tocar las que salen ahí.
@@ -510,7 +534,7 @@ Mover o cancelar citas (producción, sesiones del onboarding y reuniones):
 Reglas:
 - Nunca inventes datos. Para producciones, guiones, horarios o métricas usa siempre las herramientas.
 - Si no hay dato o no sabes la respuesta, no inventes: dile que el encargado de ese tema se comunica con él en breve, y que si quiere agilizarlo puede escribirle directo a su correo (dale el correo del encargado). Y pásale el mensaje con pasarMensajeAlEquipo.
-- Otros encargados por tema: Meta Ads y campañas → Denisse Quimi (dquimi@bakano.ec); CRM → David Robles (drobles@bakano.ec); metrics.bakano.ec y tecnología → Diego Reyes (dreyes@bakano.ec).
+- Otros encargados por tema: Meta Ads y campañas → Denisse Quimi (dquimi@bakano.ec); CRM, metrics.bakano.ec y tecnología → David Robles (drobles@bakano.ec).
 - Si el cliente quiere hablar con alguien o tiene algo que no puedes resolver, ofrécele dos caminos: agendar una reunión (guiones y atención tienen calendario de reuniones; producción se agenda con agendarProduccion) o pasarle su mensaje a la persona.
 - Para agendar: consulta horarios libres, ofrece 3 o 4 opciones y agenda solo cuando el cliente elija un horario concreto. Usa exactamente el valor "inicio" que devuelve la herramienta.
 - Antes de pasar un mensaje al equipo asegúrate de entender qué necesita. Después confírmale a quién se lo enviaste.
@@ -744,7 +768,7 @@ Reglas:
 
       verOnboarding: {
         description:
-          "Estado real del onboarding del cliente: qué sesiones técnicas ya agendó (Meta con Joel, CRM y Metrics con David, Estrategia con Ariana), cuál sigue, qué necesita tener listo y su link de agendamiento.",
+          "Estado real del onboarding del cliente: qué sesiones ya agendó (especialización con Joel, configuración del CRM con David, levantamiento con Ariana), cuál sigue y qué necesita tener listo. Todo se agenda aquí por el chat con verHorariosOnboarding: nunca le pases links.",
         inputSchema: z.object({}),
         execute: async () => {
           const estado = await onboardingBotService.estado(chat.workspaceId!);
@@ -762,7 +786,6 @@ Reglas:
               queSeVe: s.resumen,
               temas: SESIONES_ONBOARDING[s.sesion].temas,
               requisitos: s.requisitos,
-              link: s.link,
               correoResponsable: SESIONES_ONBOARDING[s.sesion].responsable.email,
             })),
             envios: PROCESO_ONBOARDING.envios,
@@ -790,10 +813,9 @@ Reglas:
               : {}),
             con: def.responsable.nombre,
             etiqueta: def.etiqueta,
-            link: def.link,
             horariosQuitadosPorSuAgenda: libres.quitados,
             horarios: !libres.horarios.length
-              ? `No pude ver los horarios: pásale el link ${def.link}`
+              ? `No pude ver los horarios ahora. Pregúntale qué día y hora le queda mejor y pásaselo a ${def.responsable.nombre} con pasarMensajeAlEquipo (nunca le pases un link).`
               : libres.horarios.slice(0, 12).map((h) => ({ inicio: h.toISOString(), texto: fechaEcuador(h) })),
           };
         },
@@ -820,10 +842,10 @@ Reglas:
           const r = await onboardingBotService.agendar(chat, sesion, fecha);
           const def = SESIONES_ONBOARDING[sesion];
           return r.ok
-            ? { ok: true, cuando: r.cuando, con: r.responsable, correo: def.responsable.email, llevarListo: def.requisitos }
+            ? { ok: true, cuando: r.cuando, con: r.responsable, correo: def.responsable.email, linkMeet: r.enlace ?? null, llevarListo: def.requisitos, siguiente: sesion === "especializacion" ? "Ofrécele al toque agendar también su configuración del CRM con David (verHorariosOnboarding con sesion=crm): va a la par." : undefined }
             : r.motivo === "muy_cerca_de_produccion"
               ? { ok: false, motivo: r.motivo, siguiente: `Ese horario queda a menos de ${DIAS_ARIANA_A_PRODUCCION} días de su producción. Ofrécele un horario anterior o mover la producción.` }
-              : { ok: false, motivo: r.motivo, link: def.link };
+              : { ok: false, motivo: r.motivo, siguiente: `Ofrécele otro horario de verHorariosOnboarding o pregúntale qué día le queda mejor y pásaselo a ${def.responsable.nombre} con pasarMensajeAlEquipo. Nunca le pases un link.` };
         },
       },
 
@@ -1026,12 +1048,24 @@ Reglas:
         },
       },
 
-      verMisCitas: {
+      verEstadoEnMetrics: {
         description:
-          "Citas futuras del cliente (producción, sesiones del onboarding y reuniones), con su ref, con quién y si es sobre la hora (menos de 2 días: se cambia igual, avisando a todo el equipo).",
+          "Lo que hay HOY en metrics.bakano.ec de este cliente, en vivo: contrato (firmado o no), logo, línea gráfica y catálogo subidos, datos de marca, facturación, Meta, CRM, sesiones del onboarding, citas agendadas con su link de Meet, guiones y videos (aprobados o por revisar). Úsala antes de pedirle algo, para no pedir lo que ya hizo.",
         inputSchema: z.object({}),
         execute: async () => {
-          const citas = await citasClienteService.listar(chat);
+          const e = await estadoMetricsService.de(chat.workspaceId!);
+          if (!e) return { nota: "No pude leer el entorno ahora." };
+          const { entorno, generadoEn, ...resto } = e;
+          return resto;
+        },
+      },
+
+      verMisCitas: {
+        description:
+          "Citas futuras del cliente (producción, sesiones del onboarding y reuniones), con su ref, con quién, el link de Meet para entrar (si la cita es por videollamada) y si es sobre la hora (menos de 2 días: se cambia igual, avisando a todo el equipo).",
+        inputSchema: z.object({}),
+        execute: async () => {
+          const citas = await citasClienteService.conEnlaces(await citasClienteService.listar(chat));
           if (!citas.length) return { citas: [], nota: "No tiene citas futuras que se puedan gestionar desde aquí." };
           return {
             citas: citas.map((c) => ({
@@ -1040,6 +1074,8 @@ Reglas:
               cuando: fechaEcuador(c.inicio),
               con: c.con,
               correos: c.correos,
+              linkMeet: c.enlace ?? null,
+              lugar: c.lugar ?? null,
               sePuedeCambiar: citasClienteService.editable(c),
               sobreLaHora: citasClienteService.esUrgente(c),
             })),

@@ -41,7 +41,7 @@ export const ENTREGABLES: Record<
 > = {
   archivosMarca: {
     etiqueta: "Logos e identidad de marca",
-    que: "Sube tus logos en PNG (con fondo transparente) y tu línea gráfica: colores, tipografías y ejemplos de piezas",
+    que: "Sube tus logos (en el formato que los tengas: los convertimos a PNG) y tu línea gráfica: colores, tipografías y ejemplos de piezas",
     ruta: "/resources",
     responsable: DENISSE,
   },
@@ -140,15 +140,15 @@ export const PREGUNTA_MARCA: Record<string, string> = {
  * con el equipo en su sesion, y al responsable le llega el aviso.
  */
 export const AYUDA_CAMPO_MARCA: Record<string, { responsable: { nombre: string; email: string }; donde: string }> = {
-  trafficDirection: { responsable: DAVID, donde: "tu sesión de Configuración de CRM y Metrics" },
-  trafficLink: { responsable: DAVID, donde: "tu sesión de Configuración de CRM y Metrics" },
+  trafficDirection: { responsable: DAVID, donde: "tu sesión de configuración del CRM con David" },
+  trafficLink: { responsable: DAVID, donde: "tu sesión de configuración del CRM con David" },
 };
 
 class OnboardingDatosService {
   /** Todo lo que le falta al cliente para arrancar, en el orden del proceso. */
   async pendientes(workspaceId: Types.ObjectId) {
     const [workspace, estado, diasFacturacion] = await Promise.all([
-      models.workspaces.findById(workspaceId).select("name brandProfile onboardingEntregables metaAds").lean(),
+      models.workspaces.findById(workspaceId).select("name brandProfile onboardingEntregables metaAds resources").lean(),
       onboardingBotService.estado(workspaceId),
       models.dailyBilling
         .distinct("date", { workspaceId, date: { $gte: new Date(Date.now() - 180 * 86_400_000) } })
@@ -157,6 +157,15 @@ class OnboardingDatosService {
     ]);
     const marca = ((workspace as any)?.brandProfile || {}) as Record<string, unknown>;
     const entregas = ((workspace as any)?.onboardingEntregables || {}) as Record<string, { estado?: string }>;
+    // Lo que YA esta en Metrics cuenta como entregado aunque no lo haya dicho
+    // por el chat: lo subio en la web y el bot se lo seguia pidiendo.
+    const recursos = ((workspace as any)?.resources || []) as { categoria?: string }[];
+    const hay = (c: string) => recursos.some((r) => r.categoria === c);
+    const enMetrics: Partial<Record<Entregable, boolean>> = {
+      archivosMarca: hay("logo") || hay("linea_grafica"),
+      catalogo: hay("catalogo"),
+      facturacion: diasFacturacion > 0,
+    };
 
     return {
       entorno: workspace?.name,
@@ -170,7 +179,7 @@ class OnboardingDatosService {
         // El link es de ESTE entorno: se lo puedes pasar tal cual.
         link: linkEntregable(k, workspaceId),
         invitarA: ENTREGABLES[k].a,
-        estado: entregas[k]?.estado || "pendiente",
+        estado: enMetrics[k] ? "verificado" : entregas[k]?.estado || "pendiente",
       })),
       perfilDeMarca: `${APP_URL}/app/workspaces/${workspaceId}/brand-profile`,
       datosMarcaFaltantes: Object.keys(CAMPOS_MARCA)

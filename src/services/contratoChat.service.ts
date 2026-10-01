@@ -97,6 +97,7 @@ class ContratoChatService {
 
   /** Campos que todavia faltan, en orden. */
   async faltantes(workspaceId: Types.ObjectId | string): Promise<CampoContrato[]> {
+    if (await this.firmado(workspaceId)) return [];
     const datos = await this.datos(workspaceId);
     return CAMPOS_CONTRATO.filter((c) => !String(datos[c] ?? "").trim());
   }
@@ -359,13 +360,22 @@ class ContratoChatService {
     completo: boolean;
   }> {
     const [datos, firmado] = await Promise.all([this.datos(workspaceId), this.firmado(workspaceId)]);
-    const faltan = CAMPOS_CONTRATO.filter((c) => !String(datos[c] ?? "").trim());
-    const lineas = CAMPOS_CONTRATO.map((c) => {
+    // Firmado en Metrics = listo, aunque falte un dato: 34 de 36 contratos
+    // firmados se hicieron con la version anterior (sin presupuesto de pauta)
+    // y el bot se los seguia pidiendo. Lo firmado no se vuelve a pedir.
+    const faltan = firmado ? [] : CAMPOS_CONTRATO.filter((c) => !String(datos[c] ?? "").trim());
+    const lineas = CAMPOS_CONTRATO.flatMap((c) => {
       const valor = mostrarDatoContrato(c, datos[c]).trim();
-      return valor ? `✅ <b>${ETIQUETA_CONTRATO[c]}:</b> ${valor}` : `⬜ <b>${ETIQUETA_CONTRATO[c]}:</b> falta`;
+      if (valor) return [`✅ <b>${ETIQUETA_CONTRATO[c]}:</b> ${valor}`];
+      return firmado ? [] : [`⬜ <b>${ETIQUETA_CONTRATO[c]}:</b> falta`];
     });
-    lineas.push(firmado ? "✅ <b>Tu firma:</b> listo" : "⬜ <b>Tu firma:</b> pendiente");
-    return { texto: lineas.join("\n"), faltan, firmado, completo: !faltan.length && firmado };
+    const firmadoEn = datos.firmadoEn ? new Date(datos.firmadoEn) : null;
+    lineas.push(
+      firmado
+        ? `✅ <b>Tu firma:</b> listo en metrics.bakano.ec${firmadoEn && !Number.isNaN(firmadoEn.getTime()) ? ` (${firmadoEn.toLocaleDateString("es-EC", { day: "numeric", month: "long", year: "numeric", timeZone: "America/Guayaquil" })})` : ""}`
+        : "⬜ <b>Tu firma:</b> pendiente"
+    );
+    return { texto: lineas.join("\n"), faltan, firmado, completo: firmado };
   }
 }
 

@@ -6,6 +6,7 @@ import { workspaceAccessMiddleware } from "../middlewares/workspaceAccess.middle
 import { workspaceAdminMiddleware } from "../middlewares/workspaceAdmin.middleware";
 import { uploadDocument } from "../middlewares/upload.middleware";
 import { ghlController } from "../controllers/ghl.controller";
+import { getCrmSubcuenta, getEstadoMetrics, putCrmSubcuenta } from "../controllers/estadoEntorno.controller";
 import {
   createWorkspace,
   listWorkspaces,
@@ -74,6 +75,10 @@ workspaceRouter.post(
 );
 
 // ── SPECIFIC Workspace Actions (Superadmin, Admin or Collaborator) ─────────
+workspaceRouter.get("/:workspaceId/estado-metrics", workspaceAccessMiddleware, getEstadoMetrics);
+// El ID de la subcuenta del CRM lo vincula el equipo, no el cliente.
+workspaceRouter.get("/:workspaceId/crm-subcuenta", internalOrSuperadminMiddleware, getCrmSubcuenta);
+workspaceRouter.put("/:workspaceId/crm-subcuenta", internalOrSuperadminMiddleware, putCrmSubcuenta);
 workspaceRouter.get("/:workspaceId", workspaceAccessMiddleware, getWorkspace);
 workspaceRouter.put("/:workspaceId", workspaceAdminMiddleware, updateWorkspace);
 workspaceRouter.patch("/:workspaceId/toggle-active", superadminMiddleware, toggleWorkspaceActive);

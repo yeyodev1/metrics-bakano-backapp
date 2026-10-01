@@ -4,6 +4,7 @@ import cloudinary from "../config/cloudinary";
 import type { ITelegramChat } from "../models/telegramChat.model";
 import type { ArchivoDeTelegram } from "./telegram.service";
 import { onboardingDatosService } from "./onboardingDatos.service";
+import { esTipoDeLogo, nombrePng, subirLogoComoPng } from "./logoPng.service";
 
 /**
  * Archivos que el cliente manda POR EL CHAT.
@@ -37,7 +38,7 @@ const ENTREGABLE_DE: Partial<Record<CategoriaRecurso, string>> = {
 };
 
 export type ResultadoArchivo =
-  | { ok: true; categoria: CategoriaRecurso; nombre: string; recursoId: string; preguntarCategoria: boolean }
+  | { ok: true; categoria: CategoriaRecurso; nombre: string; recursoId: string; preguntarCategoria: boolean; convertidoAPng?: boolean }
   | { ok: false; motivo: "sin_entorno" | "tipo" | "peso" | "logo_no_png" | "logo_comprimido" | "error" };
 
 class ArchivosClienteService {
@@ -98,16 +99,15 @@ class ArchivosClienteService {
     categoria: CategoriaRecurso | null
   ): Promise<ResultadoArchivo> {
     if (!chat.workspaceId) return { ok: false, motivo: "sin_entorno" };
-    if (!TIPOS_PERMITIDOS.includes(archivo.mime)) return { ok: false, motivo: "tipo" };
     if (archivo.buffer.length > MAX_BYTES) return { ok: false, motivo: "peso" };
 
-    // El logo va a los videos y a las piezas: se necesita PNG. Una foto que
-    // Telegram comprimio llega como JPG y pierde la transparencia, asi que se
-    // le pide que la mande "como archivo".
+    // El logo se acepta en cualquier imagen (foto incluida) y se convierte a
+    // PNG: exigirle exportarlo era donde el cliente se trababa.
     if (categoria === "logo") {
-      if (archivo.comprimido) return { ok: false, motivo: "logo_comprimido" };
-      if (archivo.mime !== "image/png") return { ok: false, motivo: "logo_no_png" };
+      if (!esTipoDeLogo(archivo.mime)) return { ok: false, motivo: "tipo" };
+      return this.guardarLogo(chat, archivo);
     }
+    if (!TIPOS_PERMITIDOS.includes(archivo.mime)) return { ok: false, motivo: "tipo" };
 
     // Si no dijo qué es, se guarda como "otro" y después se le pregunta: así
     // el archivo nunca se pierde por no saber en qué cajón va.
@@ -148,9 +148,40 @@ class ArchivosClienteService {
     }
   }
 
+  /** El logo, convertido a PNG, a su entorno. */
+  private async guardarLogo(chat: ITelegramChat, archivo: ArchivoDeTelegram): Promise<ResultadoArchivo> {
+    try {
+      const subido = await subirLogoComoPng(archivo.buffer, `resources/${chat.workspaceId}`);
+      const nombre = nombrePng(archivo.nombre);
+      const recurso = {
+        _id: new Types.ObjectId(),
+        nombre,
+        url: subido.url,
+        publicId: subido.public_id,
+        tipo: "image/png",
+        categoria: "logo" as const,
+        uploadedBy: chat.userId,
+        createdAt: new Date(),
+      };
+      await models.workspaces.updateOne({ _id: chat.workspaceId }, { $push: { resources: recurso as any } });
+      await this.marcarEntregable(chat, "logo", nombre);
+      return {
+        ok: true,
+        categoria: "logo",
+        nombre,
+        recursoId: String(recurso._id),
+        preguntarCategoria: false,
+        convertidoAPng: archivo.mime !== "image/png",
+      };
+    } catch (error: any) {
+      console.error("[Archivos] no se pudo guardar el logo:", error?.message || error);
+      return { ok: false, motivo: "error" };
+    }
+  }
+
   /**
-   * El cliente dice qué era el archivo que ya subimos como "otro". Cambiar a
-   * logo exige PNG: si mandó un JPG, se queda donde está y se le explica.
+   * El cliente dice qué era el archivo que ya subimos como "otro". Si lo
+   * marca como logo y no era PNG, se sube de nuevo convertido a PNG.
    */
   async recategorizar(
     chat: ITelegramChat,
@@ -161,7 +192,37 @@ class ArchivosClienteService {
     const workspace = await models.workspaces.findById(chat.workspaceId).select("resources").lean();
     const recurso = (workspace?.resources || []).find((r: any) => String(r._id) === recursoId) as any;
     if (!recurso) return { ok: false, motivo: "no_encontrado" };
-    if (categoria === "logo" && recurso.tipo !== "image/png") return { ok: false, motivo: "logo_no_png", nombre: recurso.nombre };
+    if (categoria === "logo" && recurso.tipo !== "image/png") {
+      if (!esTipoDeLogo(recurso.tipo)) return { ok: false, motivo: "logo_no_png", nombre: recurso.nombre };
+      // Se convierte desde la copia que ya esta en Cloudinary.
+      try {
+        const subido = await new Promise<{ url: string; public_id: string }>((resolve, reject) =>
+          cloudinary.uploader.upload(
+            recurso.url,
+            { folder: `resources/${chat.workspaceId}`, resource_type: "image", format: "png" },
+            (error, result) => (error || !result ? reject(error) : resolve({ url: result.secure_url, public_id: result.public_id }))
+          )
+        );
+        const nombre = nombrePng(recurso.nombre);
+        await models.workspaces.updateOne(
+          { _id: chat.workspaceId, "resources._id": new Types.ObjectId(recursoId) },
+          {
+            $set: {
+              "resources.$.categoria": "logo",
+              "resources.$.url": subido.url,
+              "resources.$.publicId": subido.public_id,
+              "resources.$.tipo": "image/png",
+              "resources.$.nombre": nombre,
+            },
+          }
+        );
+        await this.marcarEntregable(chat, "logo", nombre);
+        return { ok: true, nombre };
+      } catch (error: any) {
+        console.error("[Archivos] no se pudo convertir el logo:", error?.message || error);
+        return { ok: false, motivo: "logo_no_png", nombre: recurso.nombre };
+      }
+    }
 
     await models.workspaces.updateOne(
       { _id: chat.workspaceId, "resources._id": new Types.ObjectId(recursoId) },

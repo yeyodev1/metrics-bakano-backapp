@@ -81,6 +81,16 @@ incidentes. `analizar_conversacion_telegram` (dirección y PM) cruza chat + hech
 Gateway) y devuelve resumen, dónde se trabó y por qué, promesas del bot cumplidas o no, lo ya resuelto, lo que
 falta del cliente y siguientes pasos con responsable.
 
+## Estado en Metrics y subcuenta del CRM
+
+`estado_en_metrics` (todos) devuelve la foto en vivo de `estadoMetrics.service.ts`: contrato, archivos,
+datos de marca, facturación, Meta, CRM, sesiones, citas con link de Meet, guiones, videos, pagos y las
+listas `yaEsta` / `falta`. Es la misma que lee el bot de Telegram (system prompt + `verEstadoEnMetrics`),
+la vista "Estado en Metrics" del panel y Lucas (`GET /lucas/estado/:workspaceId`).
+`vincular_crm_subcuenta` (dirección y PM) guarda `workspace.crmSubcuenta.locationId` (una subcuenta por
+entorno) y, si hay token de agencia, conecta el CRM en modo agencia. `ver_crm_subcuenta` (todos) la muestra
+o dice de qué cliente es un locationId.
+
 ## Lucas
 
 `lucas_cliente` pide a Lucas `GET /api/metrics/entornos/:id/resumen` con `x-metrics-key` =

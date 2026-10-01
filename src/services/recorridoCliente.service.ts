@@ -107,7 +107,7 @@ class RecorridoClienteService {
         const s = sesion("bienvenida");
         estado = chatVinculado || s?.estado === "cumplida" ? "listo" : s?.estado === "no_aplica" ? "no_aplica" : "en_curso";
         detalle = chatVinculado ? "Ya estás conectado al bot" : undefined;
-      } else if (clave === "especializacion" || clave === "levantamiento") {
+      } else if (clave === "especializacion" || clave === "crm" || clave === "levantamiento") {
         const s = sesion(clave);
         estado = s?.estado === "cumplida" ? "listo" : s?.estado === "no_aplica" ? "no_aplica" : s?.agendada ? "en_curso" : "pendiente";
         detalle = s?.fecha ? fechaEcuador(new Date(s.fecha)) : undefined;

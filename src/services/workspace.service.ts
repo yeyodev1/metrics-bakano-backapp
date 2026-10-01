@@ -239,7 +239,19 @@ export class WorkspaceService {
       models.workspaces.countDocuments(query)
     ]);
 
+    // El CRM del cliente (subcuenta de GoHighLevel) vinculado a cada entorno:
+    // el panel lo muestra en la tarjeta y lo edita desde el menu.
+    const crms = await models.crmIntegrations
+      .find({ workspaceId: { $in: workspaces.map((w: any) => w._id) } })
+      .select("workspaceId locationId estado modo")
+      .lean()
+      .catch(() => []);
+    const crmDe = new Map(crms.map((c: any) => [String(c.workspaceId), c]));
+
     const enrichedWorkspaces = workspaces.map((ws: any) => {
+      const crm = crmDe.get(String(ws._id));
+      const locationId = ws.crmSubcuenta?.locationId || crm?.locationId || null;
+      ws.crm = locationId ? { locationId, conectado: crm?.estado === "conectado", modo: crm?.modo ?? null } : null;
       if (ws.metaAds && !ws.metaAds.pictureUrl) {
         if (ws.metaAds.pageId) {
           ws.metaAds.pictureUrl = `https://graph.facebook.com/${ws.metaAds.pageId}/picture?type=normal`;
