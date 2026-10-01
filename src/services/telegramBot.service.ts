@@ -26,6 +26,7 @@ import { perfilClienteService } from "./perfilCliente.service";
 import { CAMPOS_MARCA, OPCIONES_MARCA, PREGUNTA_MARCA, onboardingDatosService } from "./onboardingDatos.service";
 import { citasClienteService } from "./citasCliente.service";
 import { estadoMetricsService } from "./estadoMetrics.service";
+import { equipoClienteService } from "./equipoCliente.service";
 import { equipoEnTexto, DIRECCION } from "./equipoBakano.service";
 import { comoPlata, contextoParaLaIa, facturacionChatService, claveDia, nombreDia, parsearMonto } from "./facturacionChat.service";
 import { archivosClienteService, ETIQUETA_CATEGORIA, type CategoriaRecurso } from "./archivosCliente.service";
@@ -700,6 +701,7 @@ export class TelegramBotService {
       return this.mostrarMenu(chat);
     }
     if (data === "menu:todo") return this.mostrarTodasLasOpciones(chat);
+    if (data === "equipo:mio") return this.mostrarMiEquipo(chat);
     if (data === "menu:agendar") return this.elegirTemaReunion(chat);
     if (data === "menu:onboarding") return this.mostrarOnboarding(chat);
     if (data === "cita:si" || data === "cita:no") return this.responderCambioCita(chat, data === "cita:si");
@@ -2326,6 +2328,33 @@ export class TelegramBotService {
     return filas;
   }
 
+  /**
+   * Su equipo en Metrics: quién entra y cómo agregar a alguien. Agregar se
+   * hace conversando (la IA tiene las herramientas, con confirmación).
+   */
+  private async mostrarMiEquipo(chat: ITelegramChat): Promise<void> {
+    const suyos = await equipoClienteService.entornosDondeEsAdmin(chat.userId);
+    if (!suyos.length) {
+      await telegramService.sendMessage(
+        chat.chatId,
+        "Agregar o cambiar personas lo puede hacer el administrador de tu negocio 🙌 Si necesitas sumar a alguien, pídeselo a él (o escríbeme y le paso el mensaje al equipo)."
+      );
+      return;
+    }
+    const actual = suyos.find((w) => w.id === String(chat.workspaceId)) || suyos[0]!;
+    const personas = await equipoClienteService.personas(actual.id);
+    const lista = personas.length
+      ? personas.map((p) => `• <b>${escaparHtml(p.nombre || p.correo)}</b> · ${p.rol} · ${escaparHtml(p.agentes)}`).join("\n")
+      : "Todavía no hay nadie más.";
+    await telegramService.sendMessage(
+      chat.chatId,
+      `👥 <b>Tu equipo en ${escaparHtml(actual.nombre)}</b>\n\n${lista}\n\n` +
+        "Para sumar a alguien, escríbeme algo como:\n<i>agrega a juan@miempresa.com como colaborador, solo con Lucas</i>\n\n" +
+        "Te pregunto lo que falte y te confirmo antes de hacerlo." +
+        (suyos.length > 1 ? `\n\nTambién eres administrador de: ${suyos.filter((w) => w.id !== actual.id).map((w) => escaparHtml(w.nombre)).join(", ")}. Dime en cuál y lo hago ahí.` : "")
+    );
+  }
+
   /** Todas las opciones, compactas en dos columnas. Solo cuando las pide. */
   private async mostrarTodasLasOpciones(chat: ITelegramChat): Promise<void> {
     await telegramService.sendMessage(chat.chatId, "Esto es todo lo que puedo hacer por ti 👇 (o escríbeme y lo vemos)", [
@@ -2335,6 +2364,7 @@ export class TelegramBotService {
       [{ text: "✍️ Mi contrato", callback_data: "contrato:estado" }, { text: "💳 Mis pagos", callback_data: "pago:ver" }],
       [{ text: "💬 Escribir al equipo", callback_data: "menu:atencion" }, { text: "👥 Quién es quién", callback_data: "menu:equipo" }],
       [{ text: "🔑 Accesos", callback_data: "acceso:ver" }, { text: "🔌 Mi CRM", callback_data: "crm:ver" }],
+      [{ text: "👥 Mi equipo en Metrics", callback_data: "equipo:mio" }],
       [{ text: "🔄 Cambiar de entorno", callback_data: "menu:entorno" }],
     ]);
   }
