@@ -25,6 +25,7 @@ import { CAMPOS_CONTRATO, ETIQUETA_CONTRATO, PREGUNTA_CONTRATO, contratoChatServ
 import { perfilClienteService } from "./perfilCliente.service";
 import { CAMPOS_MARCA, OPCIONES_MARCA, PREGUNTA_MARCA, onboardingDatosService } from "./onboardingDatos.service";
 import { citasClienteService } from "./citasCliente.service";
+import { estadoMetricsService } from "./estadoMetrics.service";
 import { equipoEnTexto, DIRECCION } from "./equipoBakano.service";
 import { comoPlata, contextoParaLaIa, facturacionChatService, claveDia, nombreDia, parsearMonto } from "./facturacionChat.service";
 import { archivosClienteService, ETIQUETA_CATEGORIA, type CategoriaRecurso } from "./archivosCliente.service";
@@ -114,6 +115,9 @@ export class TelegramBotService {
       const chat = cq.message?.chat;
       await telegramService.answerCallbackQuery(cq.id).catch(() => undefined);
       if (!chat || chat.type !== "private" || !cq.data) return;
+      // El boton tocado ya cumplio: se quitan las opciones de ese mensaje
+      // para que no se toque otra sin querer al volver a subir en el chat.
+      if (cq.message?.message_id) await telegramService.quitarBotones(chat.id, cq.message.message_id);
       const doc = await this.cargarChat(chat.id, cq.from);
       if (!(await this.esNuevo(doc, update.update_id))) return;
       this.registrarUso(doc, cq.data, "boton");
@@ -312,6 +316,14 @@ export class TelegramBotService {
         chat,
         "Listo, desconecté tu cuenta de este chat 👋 Cuando quieras volver, escribe /start. Aquí te espero! 💛"
       );
+    }
+    // Atajos del botón "Menú" de Telegram: no ocupan espacio en el chat.
+    if (chat.estado === "listo" && chat.workspaceId) {
+      if (comando === "/menu") return this.mostrarMenu(chat);
+      if (comando === "/opciones") return this.mostrarTodasLasOpciones(chat);
+      if (comando === "/citas") return this.mostrarCitas(chat);
+      if (comando === "/contrato") return this.mostrarEstadoContrato(chat);
+      if (comando === "/onboarding") return this.mostrarOnboarding(chat);
     }
     if (comando === "/entorno") {
       if (!chat.userId) return this.reiniciar(chat, PEDIR_CORREO);
@@ -687,6 +699,7 @@ export class TelegramBotService {
       await chat.save();
       return this.mostrarMenu(chat);
     }
+    if (data === "menu:todo") return this.mostrarTodasLasOpciones(chat);
     if (data === "menu:agendar") return this.elegirTemaReunion(chat);
     if (data === "menu:onboarding") return this.mostrarOnboarding(chat);
     if (data === "cita:si" || data === "cita:no") return this.responderCambioCita(chat, data === "cita:si");
@@ -743,12 +756,13 @@ export class TelegramBotService {
     if (data === "contrato:ver") return this.mandarPdfContrato(chat);
     if (data === "contrato:correo") return this.reenviarContratoAlCorreo(chat);
     if (data === "contrato:corregir") {
+      // Conversando, no con una lista de campos: "¿Cuál corrijo?" con cinco
+      // botones confundía. Lo que escriba lo entiende la IA (guardarDatosContrato).
+      const resumen = await contratoChatService.resumen(chat.workspaceId!);
       await telegramService.sendMessage(
         chat.chatId,
-        "¿Cuál corrijo?",
-        CAMPOS_CONTRATO.map((c) => [{ text: ETIQUETA_CONTRATO[c], callback_data: `contrato:campo:${c}` }]).concat([
-          [{ text: "📋 Volver al menú", callback_data: "menu:ver" }],
-        ])
+        `Dale 🙌 estos son los datos de tu contrato ahora:\n\n${resumen}\n\n` +
+          "Escríbeme qué cambio y cómo queda. Por ejemplo: <i>el correo es facturacion@miempresa.com</i> o <i>la razón social es Mi Empresa S.A.</i>"
       );
       return;
     }
@@ -2276,30 +2290,53 @@ export class TelegramBotService {
             pagos.vencidas ? ` (${pagos.vencidas === 1 ? "1 factura vencida" : `${pagos.vencidas} facturas vencidas`})` : ""
           }. Lo puedes pagar aquí mismo 👇\n\n`
         : "";
+    // Conversacional: el cliente escribe lo que necesita. Solo van 2 o 3
+    // atajos de lo que le toca AHORA, y el resto en "Ver todo". El menu de 11
+    // botones llenaba la pantalla y se tocaban opciones sin querer al subir.
+    const sugeridos = await this.atajosDelMomento(chat, pagos.saldo, crmPorConectar);
     await telegramService.sendMessage(
       chat.chatId,
       `${saludo ? `${saludo}\n\n` : ""}Estás en <b>${escaparHtml(nombre)}</b> 💛\n\n` +
         pago +
-        "Escríbeme como le escribirías a una persona. Por ejemplo:\n" +
-        "· <i>cómo van mis guiones?</i>\n" +
-        "· <i>quiero mover mi grabación al jueves</i>\n" +
-        "· <i>cómo va mi facturación este mes?</i>\n\n" +
-        "O toca una opción 👇",
-      [
-        ...(pagos.saldo > 0 ? [[{ text: `💳 Pagar mi saldo (${comoDolares(pagos.saldo)})`, callback_data: "pago:ver" }]] : []),
-        [{ text: "💵 Mi facturación del día", callback_data: "fact:ver" }],
-        [{ text: "🗓️ Mis citas (mover o cancelar)", callback_data: "citas:ver" }],
-        [{ text: "🚀 Cómo va mi onboarding", callback_data: "menu:onboarding" }],
-        [{ text: "🎬 Mis producciones", callback_data: "menu:produccion" }],
-        [{ text: "📝 Revisar mis guiones", callback_data: "menu:guiones" }],
-        [{ text: "📅 Agendar una reunión", callback_data: "menu:agendar" }],
-        [{ text: "💬 Escribirle a mi equipo", callback_data: "menu:atencion" }],
-        [{ text: "👥 Quién es quién en Bakano", callback_data: "menu:equipo" }],
-        [{ text: "🔑 Mis accesos y contraseñas", callback_data: "acceso:ver" }],
-        ...(crmPorConectar ? [[{ text: "🔌 Conectar mi CRM", callback_data: "crm:ver" }]] : []),
-        [{ text: "🔄 Cambiar de entorno", callback_data: "menu:entorno" }],
-      ]
+        "Cuéntame qué necesitas, como si me escribieras por WhatsApp. Por ejemplo: <i>cómo van mis guiones?</i> o <i>quiero mover mi grabación al jueves</i>",
+      [...sugeridos, [{ text: "☰ Ver todas las opciones", callback_data: "menu:todo" }]]
     );
+  }
+
+  /** Lo que le toca ahora, como mucho 3 botones, a partir de lo que hay en Metrics. */
+  private async atajosDelMomento(chat: ITelegramChat, saldo: number, crmPorConectar: boolean): Promise<InlineButton[][]> {
+    const atajos: InlineButton[] = [];
+    if (saldo > 0) atajos.push({ text: `💳 Pagar (${comoDolares(saldo)})`, callback_data: "pago:ver" });
+    const e = await Promise.race([
+      estadoMetricsService.de(chat.workspaceId!).catch(() => null),
+      new Promise<null>((r) => setTimeout(() => r(null), 4_000)),
+    ]);
+    if (e) {
+      if (!e.contrato.firmado) atajos.push({ text: "✍️ Mi contrato", callback_data: "contrato:estado" });
+      if (e.guiones.porRevisar) atajos.push({ text: `📝 Revisar guiones (${e.guiones.porRevisar})`, callback_data: "menu:guiones" });
+      if (e.onboarding.siguiente) atajos.push({ text: "🚀 Lo que sigue", callback_data: "menu:onboarding" });
+      if (e.citas.length) atajos.push({ text: "🗓️ Mis citas", callback_data: "citas:ver" });
+    }
+    if (crmPorConectar && atajos.length < 3) atajos.push({ text: "🔌 Conectar mi CRM", callback_data: "crm:ver" });
+    if (!atajos.length) atajos.push({ text: "🗓️ Mis citas", callback_data: "citas:ver" }, { text: "🎬 Mis producciones", callback_data: "menu:produccion" });
+    // De a dos por fila: ocupan la mitad de alto.
+    const filas: InlineButton[][] = [];
+    const tres = atajos.slice(0, 3);
+    for (let i = 0; i < tres.length; i += 2) filas.push(tres.slice(i, i + 2));
+    return filas;
+  }
+
+  /** Todas las opciones, compactas en dos columnas. Solo cuando las pide. */
+  private async mostrarTodasLasOpciones(chat: ITelegramChat): Promise<void> {
+    await telegramService.sendMessage(chat.chatId, "Esto es todo lo que puedo hacer por ti 👇 (o escríbeme y lo vemos)", [
+      [{ text: "🗓️ Mis citas", callback_data: "citas:ver" }, { text: "📅 Agendar reunión", callback_data: "menu:agendar" }],
+      [{ text: "📝 Mis guiones", callback_data: "menu:guiones" }, { text: "🎬 Producciones", callback_data: "menu:produccion" }],
+      [{ text: "🚀 Mi onboarding", callback_data: "menu:onboarding" }, { text: "💵 Facturación", callback_data: "fact:ver" }],
+      [{ text: "✍️ Mi contrato", callback_data: "contrato:estado" }, { text: "💳 Mis pagos", callback_data: "pago:ver" }],
+      [{ text: "💬 Escribir al equipo", callback_data: "menu:atencion" }, { text: "👥 Quién es quién", callback_data: "menu:equipo" }],
+      [{ text: "🔑 Accesos", callback_data: "acceso:ver" }, { text: "🔌 Mi CRM", callback_data: "crm:ver" }],
+      [{ text: "🔄 Cambiar de entorno", callback_data: "menu:entorno" }],
+    ]);
   }
 
   /**

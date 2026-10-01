@@ -110,7 +110,9 @@ class CitasClienteService {
           cacheEnlaces.set(c.appointmentId, { address, en: Date.now() });
         }
         if (!address) return;
-        if (/^https?:\/\//i.test(address)) c.enlace = address;
+        // Hay salas guardadas sin https:// ("meet.google.com/xxx"): igual son el link.
+        const url = /^(meet\.google\.com|([\w-]+\.)?zoom\.us|teams\.microsoft\.com)\//i.test(address) ? `https://${address}` : address;
+        if (/^https?:\/\//i.test(url)) c.enlace = url;
         else c.lugar = address;
       })
     );

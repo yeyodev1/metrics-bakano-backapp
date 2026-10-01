@@ -236,7 +236,7 @@ class AtencionClienteService {
           calendarId: calendarioId,
           contactId,
           startTime: inicio,
-          title: `${cliente.entorno} · Reunión de ${etiqueta} (Telegram)`,
+          title: `${cliente.entorno} / ${cliente.nombre} - Reunión de ${etiqueta} con ${equipoAtencionService.nombres(tema).split(" ")[0]} (Bakano · Telegram)`,
         });
         // Se guarda para poder moverla o cancelarla despues desde el chat.
         const cita = {

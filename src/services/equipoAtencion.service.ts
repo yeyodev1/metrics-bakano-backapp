@@ -39,12 +39,12 @@ export const EQUIPO_ATENCION: Record<TemaAtencion, EquipoTema> = {
   guiones: {
     etiqueta: "revisión de guiones",
     personas: [{ nombre: "Ariana Vera", email: "avera@bakano.ec" }],
-    calendarioId: "JDzGl2qjoWwAk5TvBNUp", // "Ariana - CONTENT STRATEGIST"
+    calendarioId: "JDzGl2qjoWwAk5TvBNUp", // "Ariana Vera · Estrategia de contenido y guiones"
   },
   atencion: {
     etiqueta: "atención al cliente",
     personas: [{ nombre: "Genesis Benalcazar", email: "gbenalcazar@bakano.ec" }],
-    calendarioId: "FWL0e2jCKpbamtlj31io", // "Project Manager"
+    calendarioId: "FWL0e2jCKpbamtlj31io", // "Genesis Benalcazar · Atención al cliente" (su único calendario activo)
   },
 };
 

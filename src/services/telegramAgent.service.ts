@@ -34,7 +34,7 @@ import { escaparHtml, telegramService } from "./telegram.service";
 import { notificationService } from "./notification.service";
 import { resendService } from "./resend.service";
 import { slackService } from "./slack.service";
-import { contratoChatService } from "./contratoChat.service";
+import { CAMPOS_CONTRATO, ETIQUETA_CONTRATO, contratoChatService, type CampoContrato } from "./contratoChat.service";
 import { PAUTA_MINIMA, PAUTA_TEMPORADA_ALTA } from "./contratoTexto";
 
 /**
@@ -398,6 +398,10 @@ Cómo hablas:
 - Texto plano: sin markdown, sin asteriscos, sin almohadillas.
 - No repitas el saludo en cada mensaje: saluda solo al empezar la conversación.
 - Siempre nombras a las personas del equipo con nombre y apellido.
+- UNA pregunta por mensaje. Si necesitas varios datos, pídelos de a uno.
+- Si su respuesta es corta y puede referirse a varias cosas ("a las 3", "mañana", "ese", "sí"), NO adivines ni actúes: pregúntale en una línea a qué se refiere (por ejemplo "a las 3 para tu reunión con David o para mover la grabación?"). Agendar o mover algo que no pidió es peor que preguntar.
+- Nunca le digas que su proceso está "parado", "detenido" o "estancado". Dile en positivo qué ya está hecho y cuál es el siguiente paso.
+- Si te dice que no puede ir en persona o que está en otra ciudad, aclárale que las sesiones (Joel, David, Ariana, Genesis) son por Google Meet; si es por la producción, pásale el mensaje a ${equipoAtencionService.nombres("produccion")} con pasarMensajeAlEquipo.
 
 Quién atiende a este cliente:
 ${equipo}
@@ -872,6 +876,42 @@ Reglas:
                 siguiente: `Dile que le llegó a ${r.correo} el link para crear su contraseña nueva, que vence en una hora y que revise el spam si no lo ve.`,
               }
             : { ok: false, motivo: r.motivo };
+        },
+      },
+
+      guardarDatosContrato: {
+        description:
+          "Guarda o corrige datos del CONTRATO que el cliente te escribe o te pega (puede venir todo junto en un mensaje): RUC o cédula, nombre o razón social, representante legal, correo para el contrato e inversión mensual en anuncios. " +
+          "Úsala cuando mande esos datos (aunque no diga 'contrato') o cuando pida corregir uno. Solo funciona si todavía no firmó. No son datos de facturación: no los pases al equipo.",
+        inputSchema: z.object({
+          rucCliente: z.string().optional().describe("RUC (13 dígitos) o cédula (10 dígitos)"),
+          nombreCliente: z.string().optional().describe("Nombre o razón social de la empresa"),
+          representanteCliente: z.string().optional().describe("Nombre del representante legal"),
+          email: z.string().optional().describe("Correo para el contrato"),
+          presupuestoPauta: z.string().optional().describe("Inversión mensual en anuncios, en dólares"),
+        }),
+        execute: async (datos: Partial<Record<CampoContrato, string>>) => {
+          if (await contratoChatService.firmado(chat.workspaceId!)) {
+            return { ok: false, motivo: "ya_firmado", siguiente: "Su contrato ya está firmado en Metrics: díselo. Si necesita cambiar algo del contrato firmado, pásale el mensaje a Genesis Benalcazar con pasarMensajeAlEquipo." };
+          }
+          const guardados: string[] = [];
+          const errores: { campo: string; motivo?: string }[] = [];
+          for (const campo of CAMPOS_CONTRATO) {
+            const valor = datos[campo];
+            if (!valor || !String(valor).trim()) continue;
+            const r = await contratoChatService.guardar(chat, campo, String(valor).trim());
+            if (r.ok) guardados.push(ETIQUETA_CONTRATO[campo]);
+            else errores.push({ campo: ETIQUETA_CONTRATO[campo], motivo: r.motivo });
+          }
+          const faltan = (await contratoChatService.faltantes(chat.workspaceId!)).map((c) => ETIQUETA_CONTRATO[c]);
+          return {
+            guardados,
+            errores,
+            faltan,
+            siguiente: faltan.length
+              ? `Confírmale lo que guardaste en una línea y pídele el siguiente dato que falta (${faltan[0]}).`
+              : "Ya están todos los datos: dile que solo falta su firma y llama enviarMiContrato si quiere verlo, o pásale el link para firmar (está en su contrato).",
+          };
         },
       },
 
