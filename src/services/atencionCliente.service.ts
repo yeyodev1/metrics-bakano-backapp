@@ -5,6 +5,7 @@ import type { NotificationType } from "../models/notification.model";
 import { resendService } from "./resend.service";
 import { notificationService } from "./notification.service";
 import { ghlService } from "./ghl.service";
+import { tituloCita } from "./tituloCita.service";
 import { slackService } from "./slack.service";
 import { crmProductionSyncService } from "./crmProductionSync.service";
 import { contenidoClienteService, type ReservaContenido } from "./contenidoCliente.service";
@@ -236,7 +237,12 @@ class AtencionClienteService {
           calendarId: calendarioId,
           contactId,
           startTime: inicio,
-          title: `${cliente.entorno} / ${cliente.nombre} - Reunión de ${etiqueta} con ${equipoAtencionService.nombres(tema).split(" ")[0]} (Bakano · Telegram)`,
+          title:
+            tituloCita(
+              calendarioId,
+              { nombre: cliente.firstName, apellido: cliente.lastName, nombreCompleto: cliente.nombre, empresa: cliente.entorno },
+              `Reunión de ${etiqueta} con ${equipoAtencionService.nombres(tema).split(" ")[0]}`
+            ) ?? `${cliente.entorno} - Reunión de ${etiqueta}`,
         });
         // Se guarda para poder moverla o cancelarla despues desde el chat.
         const cita = {
