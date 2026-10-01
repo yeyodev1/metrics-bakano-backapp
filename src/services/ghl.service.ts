@@ -5,7 +5,8 @@ const GHL_API_BASE = "https://services.leadconnectorhq.com";
 const GHL_VERSION = "2021-04-15"; // standard version for GHL APIs
 
 export class GhlService {
-  private getHeaders() {
+  /** Publico: tituloCita.service renombra citas con los mismos permisos. */
+  getHeaders() {
     const token = process.env.GHL_PIT_TOKEN;
     if (!token) throw new Error("GHL_PIT_TOKEN no configurado en variables de entorno");
     
@@ -143,6 +144,18 @@ export class GhlService {
       });
       return response.data?.contact || null;
     } catch (error: any) {
+      // GHL_PIT_TOKEN_CONTACTOS vencido o revocado: el token principal ya lee
+      // contactos, asi que se reintenta con ese antes de rendirse.
+      if (error.response?.status === 401 && process.env.GHL_PIT_TOKEN_CONTACTOS && process.env.GHL_PIT_TOKEN) {
+        try {
+          const r = await axios.get(`${GHL_API_BASE}/contacts/${contactId}`, {
+            headers: { Authorization: `Bearer ${process.env.GHL_PIT_TOKEN}`, Version: "2021-07-28", Accept: "application/json" },
+          });
+          return r.data?.contact || null;
+        } catch {
+          /* cae al log de abajo */
+        }
+      }
       console.error("[GHL] contacto:", error.response?.data || error.message);
       return null;
     }

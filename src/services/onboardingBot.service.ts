@@ -4,6 +4,7 @@ import models from "../models";
 import type { ITelegramChat } from "../models/telegramChat.model";
 import type { EstadoSesionOnboarding } from "../models/workspace.model";
 import { ghlService } from "./ghl.service";
+import { tituloCita } from "./tituloCita.service";
 import { slackService } from "./slack.service";
 import { resendService } from "./resend.service";
 import { notificationService } from "./notification.service";
@@ -195,8 +196,14 @@ class OnboardingBotService {
         calendarId: def.calendarioId,
         contactId,
         startTime: inicio,
-        // Mismo formato que los titulos del CRM: el sync lo lee igual.
-        title: `${cliente.entorno} / ${cliente.nombre} - ${def.etiqueta} (Bakano · Telegram)`,
+        // "📣 Nombre Apellido · Empresa - Que con quien" (tituloCita.service).
+        title:
+          tituloCita(def.calendarioId, {
+            nombre: cliente.firstName,
+            apellido: cliente.lastName,
+            nombreCompleto: cliente.nombre,
+            empresa: cliente.entorno,
+          }) ?? `${cliente.entorno} - ${def.etiqueta}`,
       });
     } catch (error: any) {
       console.error("[Onboarding] no se pudo agendar:", error.response?.data || error.message);

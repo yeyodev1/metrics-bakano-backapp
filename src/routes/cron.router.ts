@@ -220,10 +220,14 @@ cronRouter.get("/onboarding-sync", async (req: Request, res: Response) => {
   }
   try {
     const { onboardingBotService } = await import("../services/onboardingBot.service");
-    const [sync, bienvenidas] = await Promise.all([
+    const { tituloCitaService } = await import("../services/tituloCita.service");
+    const [sync, bienvenidas, titulos] = await Promise.all([
       onboardingBotService.sincronizarDesdeCrm(),
       onboardingBotService.enviarBienvenidasPendientes(),
+      // Titulo claro a las citas que entraron por el link del CRM.
+      tituloCitaService.ordenar().catch((e: any) => ({ revisadas: 0, corregidas: 0, error: e?.message })),
     ]);
+    console.log(`[Cron] Títulos de citas — revisadas: ${titulos.revisadas}, corregidas: ${titulos.corregidas}`);
     console.log(
       `[Cron] Onboarding — citas revisadas: ${sync.revisadas}, marcadas: ${sync.marcadas}, ` +
         `cumplidas desde el CRM: ${sync.cumplidas}, bienvenidas: ${bienvenidas.enviadas}, ` +
