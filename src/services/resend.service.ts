@@ -2688,6 +2688,52 @@ export class ResendService {
       html,
     });
   }
+
+  /**
+   * Reporte semanal (cliente o consolidado). El HTML se arma aparte para
+   * poder previsualizarlo sin enviar; los bloques vienen de
+   * reporteSemanal.service.
+   */
+  htmlReporteSemanal(params: {
+    titulo: string;
+    subtitulo: string;
+    bloques: string;
+    boton?: { texto: string; url: string };
+    pie?: string;
+  }): string {
+    return `
+<!DOCTYPE html>
+<html lang="es">
+<head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><title>${params.titulo}</title></head>
+<body style="margin:0;padding:0;background-color:#f0f2f5;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f0f2f5;padding:40px 16px;">
+    <tr><td align="center">
+      <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.10);">
+        ${barraMarca()}
+        <tr>
+          <td style="background:linear-gradient(135deg,#191423 0%,#2b2438 100%);padding:32px 40px;text-align:center;">
+            <h1 style="margin:0;color:#ffffff;font-size:22px;font-weight:700;line-height:1.3;">${params.titulo}</h1>
+            <p style="margin:8px 0 0;color:rgba(255,255,255,0.65);font-size:14px;">${params.subtitulo}</p>
+          </td>
+        </tr>
+        ${params.bloques}
+        ${params.boton ? `<tr><td style="padding:24px 40px 8px;text-align:center;"><a href="${params.boton.url}" style="display:inline-block;background:#e6285c;color:#ffffff;font-size:14px;font-weight:700;text-decoration:none;padding:13px 28px;border-radius:12px;">${params.boton.texto}</a></td></tr>` : ""}
+        <tr>
+          <td style="padding:16px 40px 30px;text-align:center;">
+            <p style="margin:0;font-size:12px;color:#9ca3af;line-height:1.5;">${params.pie ?? ""}</p>
+          </td>
+        </tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+  }
+
+  async sendReporteSemanal(params: { to: string[]; asunto: string; html: string }): Promise<void> {
+    if (!params.to.length) return;
+    await this.client.emails.send({ from: this.from, to: params.to, subject: params.asunto, html: params.html });
+  }
 }
 
 export const resendService = new ResendService();

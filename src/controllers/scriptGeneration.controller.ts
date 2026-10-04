@@ -6,6 +6,7 @@ import models from "../models";
 import { geminiService } from "../services/gemini.service";
 import type { GeminiFileResult, ScriptContext } from "../services/gemini.service";
 import { engramService } from "../services/engram.service";
+import { actividadService } from "../services/actividad.service";
 
 const TIPO_REEL_TO_GUION: Record<string, "TOFU" | "MOFU" | "BOFU"> = {
   "Educativo": "TOFU",
@@ -224,6 +225,22 @@ export async function generateScript(
         },
       }
     );
+
+    // Reporte semanal: cuando nacio el guion (solo la primera vez).
+    const primeraVez = await models.videoPlanning.updateOne(
+      { _id: planning._id, items: { $elemMatch: { _id: new Types.ObjectId(videoItemId), guionCreadoEn: { $exists: false } } } },
+      { $set: { "items.$.guionCreadoEn": new Date() } }
+    );
+    if (primeraVez.modifiedCount) {
+      actividadService.registrar({
+        workspaceId: planning.workspaceId,
+        tipo: "guion_escrito",
+        actorId: (req as any).user?._id,
+        planningId: planning._id,
+        itemId: videoItemId,
+        detalle: "Generado con IA",
+      });
+    }
 
     // Return updated item
     const updatedPlanning = await models.videoPlanning.findById(planning._id).lean();

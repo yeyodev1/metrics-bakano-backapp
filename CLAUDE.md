@@ -212,6 +212,38 @@ facturación real, ritmo del mes, equipo asignado y recordatorios.
 - Bitácora `actividades` (`actividad.model.ts`, `actividadService.registrar`): base del
   reporte semanal.
 
+### Reporte semanal: viernes 6 pm Ecuador (2026-10-04)
+- **Fechas de etapa** en cada item (`guionCreadoEn`, `guionAprobadoEn`, `grabadoEn`,
+  `editadoEn`, `videoAprobadoEn`, `publicadoEn`) + `versiones[].en` y
+  `correccionesVideo[].en`. Se estampan en la transición (`updateItem`,
+  `submitClientApproval`, generación de guion IA, `conectar`, revisión del cliente).
+  Lo histórico sin fecha es "sin dato". El PUT de items (`upsert`) conserva
+  `CAMPOS_DEL_SERVIDOR` si el front no los manda.
+- **Bitácora** `actividades`: guion escrito/aprobado/corregido, producción realizada
+  (`planningService.marcarCumplida`), video subido / revisado interno / corregido /
+  aprobado / publicado.
+- **Servicio** `reporteSemanal.service.ts`: semana = 7 días hasta el viernes 18:00 EC
+  (23:00 UTC), clave `semana` = fecha del viernes. Por cliente: guiones escritos /
+  aprobados / corregidos (ReviewEvent cliente-contenido), producciones (`cumplidaEn`),
+  videos entregados / nuevas versiones / aprobados / rondas / publicados, tiempos
+  promedio por etapa con quién (guion → aprobado, aprobado → grabado [o fecha de la
+  producción cumplida], grabado → 1ª versión, versión vigente → aprobado, ronda →
+  versión que la resolvió), pendientes y CRM (`crmMetricasService.rango(7)`).
+  Funciones puras: `rangoSemana`, `medirItems`, `resumirTiempos`, `textoTelegram`.
+- **Envío**: Telegram a chats del cliente (sin internos ni bloqueados) + correo
+  (`resendService.htmlReporteSemanal` / `sendReporteSemanal`) a
+  `planningNotificationService.destinatarios`. Solo `isActive: true`; sin movimiento
+  ni pendientes → `omitido`. Consolidado a superadmins (correo + Telegram) armado
+  con los `datos` guardados de cada cliente: totales, tiempos por etapa y persona,
+  pendientes por cliente.
+- **Cron** `/api/cron/reporte-semanal` (`0,10,20,30,40,50 23 * * 5`): `reportessemanales`
+  (único `semana + workspaceId`; `workspaceId: null` = consolidado) es el candado;
+  presupuesto 45 s por corrida, la siguiente sigue. El consolidado sale cuando ya no
+  falta ningún cliente.
+- **Previsualizar** (solo equipo): `GET /api/reporte-semanal/:workspaceId/preview`,
+  `GET /api/reporte-semanal/consolidado/preview`, `POST /api/reporte-semanal/:workspaceId/prueba`
+  `{ correo }` (solo a ese correo). MCP `reporte_semanal` (dirección, PM).
+
 ## Notas importantes
 - No hay cron jobs instalados aún — usar `node-cron`
 - Los emails tienen plantillas HTML inline (ver patrón en `resend.service.ts`)

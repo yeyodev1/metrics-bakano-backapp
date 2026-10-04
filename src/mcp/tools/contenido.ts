@@ -6,6 +6,7 @@ import { PlanningService } from "../../services/planning.service";
 import { VideoPlanningService } from "../../services/videoPlanning.service";
 import { atencionClienteService } from "../../services/atencionCliente.service";
 import { destacarClienteService } from "../../services/destacarCliente.service";
+import { reporteSemanalService, duracionHoras } from "../../services/reporteSemanal.service";
 import type { PerfilMcp, UsuarioMcp } from "../perfiles";
 import { fecha, leerFecha, recortar, resolverCliente, type ToolMcp } from "./base";
 
@@ -287,6 +288,32 @@ export const toolsContenido: ToolMcp[] = [
       const vp: any = await videoPlanningService.updateItem(a.planning_id, a.item_id, campos, rol, undefined, { id: u._id, nombre: u.nombre });
       const item = vp.items.find((i: any) => String(i._id) === a.item_id);
       return { listo: true, video: item ? { numero: item.numero, tema: item.tema, edicion: item.edicion, grabacion: item.estadoProduccion, link: item.linkVideo } : null };
+    },
+  },
+  {
+    nombre: "reporte_semanal",
+    titulo: "Reporte semanal (previsualizar)",
+    descripcion:
+      "Lo que recibirá un cliente el viernes a las 6 pm: qué hizo Bakano en la semana, cuánto tardó cada etapa y quién, lo pendiente y su CRM. Sin cliente, el consolidado de dirección. Solo lectura: no envía nada.",
+    perfiles: ["direccion", "pm"],
+    entrada: { cliente: z.string().optional() },
+    async correr(a) {
+      if (!a.cliente) {
+        const c = await reporteSemanalService.consolidado();
+        return {
+          clientesConMovimiento: c.filas.length,
+          tiempos: c.equipo.map((t) => ({
+            etapa: t.etiqueta,
+            promedio: duracionHoras(t.promedioHoras),
+            sinDato: t.sinDato,
+            porPersona: t.quienes.map((q) => ({ nombre: q.nombre, promedio: duracionHoras(q.promedioHoras), videos: q.muestras })),
+          })),
+          telegram: c.telegram,
+        };
+      }
+      const ws = await resolverCliente(a.cliente);
+      const p = await reporteSemanalService.previsualizar(String(ws._id));
+      return { reporte: p.reporte, telegram: p.telegram };
     },
   },
 ];

@@ -36,6 +36,7 @@ import billingPortalRouter from "./billingPortal.router";
 import crmIntegracionRouter from "./crmIntegracion.router";
 import flagsRouter from "./flags.router";
 import driveRouter from "./drive.router";
+import reporteSemanalRouter from "./reporteSemanal.router";
 import internalPulseRouter from "./internalPulse.router";
 import mcpCuentaRouter from "./mcpCuenta.router";
 
@@ -81,6 +82,7 @@ function routerApi(app: Application) {
   router.use("/workspaces", billingPortalRouter);
   router.use("/flags", flagsRouter);
   router.use("/drive", driveRouter);
+  router.use("/reporte-semanal", reporteSemanalRouter);
   router.use("/internal-pulse", internalPulseRouter);
   router.use("/mcp", mcpCuentaRouter);
 

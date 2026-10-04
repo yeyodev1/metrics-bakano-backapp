@@ -420,6 +420,30 @@ cronRouter.get("/ghl-production-sync", async (req: Request, res: Response) => {
   }
 });
 
+// GET /api/cron/reporte-semanal — viernes desde las 18:00 de Ecuador (23:00
+// UTC), cada 10 min hasta las 18:50. Cada cliente activo recibe por Telegram y
+// correo lo que Bakano hizo en la semana; al final, direccion recibe el
+// consolidado. ReporteSemanal es el candado: nada sale dos veces y cada
+// corrida sigue donde quedo la anterior.
+cronRouter.get("/reporte-semanal", async (req: Request, res: Response) => {
+  const secret = process.env.CRON_SECRET;
+  if (!secret || req.headers["authorization"] !== `Bearer ${secret}`) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  try {
+    const { reporteSemanalService } = await import("../services/reporteSemanal.service");
+    const r = await reporteSemanalService.correr();
+    console.log(
+      `[Cron] Reporte semanal ${r.semana} — enviados: ${r.enviados}, omitidos: ${r.omitidos}, fallidos: ${r.fallidos}, pendientes: ${r.pendientes}, consolidado: ${r.consolidado}`
+    );
+    res.status(200).json({ ok: true, ...r });
+  } catch (error: any) {
+    console.error("[Cron] Reporte semanal error:", error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // GET /api/cron/crm-metricas — cada 30 min (a los 5 y 35). Deja pendiente
 // el dia de ayer de cada CRM conectado (y los ultimos 7 la primera vez) y
 // calcula las metricas diarias que falten: conversaciones por dia, contactos

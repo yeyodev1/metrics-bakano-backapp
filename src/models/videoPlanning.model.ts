@@ -195,8 +195,18 @@ export interface IVideoItem {
   correccionesVideo?: ICorreccionVideo[];
   /** Rondas de correccion ya usadas (maximo 2 por video). */
   rondasUsadas?: number;
+  /**
+   * Fechas de cada etapa, para medir cuanto tarda cada cosa (reporte
+   * semanal). Se estampan en la transicion; lo historico no las tiene y el
+   * reporte lo muestra como "sin dato", no se inventa.
+   */
+  guionCreadoEn?: Date;
+  /** El cliente aprobo el guion. */
+  guionAprobadoEn?: Date;
+  grabadoEn?: Date;
   /** Cuando el editor entrego (marco EDITADO) la version vigente. */
   editadoEn?: Date;
+  publicadoEn?: Date;
   /** Cuando el cliente aprobo el video terminado. */
   videoAprobadoEn?: Date;
   fechaPublicacion?: Date;
@@ -366,6 +376,10 @@ const VideoItemSchema = new Schema<IVideoItem>(
       default: undefined,
     },
     rondasUsadas: { type: Number, min: 0 },
+    guionCreadoEn: { type: Date },
+    guionAprobadoEn: { type: Date },
+    grabadoEn: { type: Date },
+    publicadoEn: { type: Date },
     editadoEn: { type: Date },
     videoAprobadoEn: { type: Date },
     fechaPublicacion: { type: Date },

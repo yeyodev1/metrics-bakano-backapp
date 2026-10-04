@@ -3,6 +3,7 @@ import models from "../models";
 import { IPlanning } from "../models/planning.model";
 import { ghlService } from "./ghl.service";
 import { avisoContenidoProduccionService } from "./avisoContenidoProduccion.service";
+import { actividadService } from "./actividad.service";
 
 export class PlanningService {
   async createEntry(data: {
@@ -162,11 +163,21 @@ export class PlanningService {
     const set: Record<string, unknown> = { cumplida: true, cumplidaEn: new Date() };
     if (actor?.id && Types.ObjectId.isValid(actor.id)) set.cumplidaPorId = new Types.ObjectId(actor.id);
     if (actor?.nombre) set.cumplidaPorNombre = actor.nombre;
-    return await models.planning.findOneAndUpdate(
+    const entry = await models.planning.findOneAndUpdate(
       { _id: new Types.ObjectId(entryId.toString()), cumplida: { $ne: true } },
       { $set: set },
       { new: true }
     );
+    if (entry?.workspaceId) {
+      actividadService.registrar({
+        workspaceId: entry.workspaceId,
+        tipo: "produccion_realizada",
+        actorId: actor?.id,
+        actorNombre: actor?.nombre,
+        detalle: entry.title,
+      });
+    }
+    return entry;
   }
 
   /**

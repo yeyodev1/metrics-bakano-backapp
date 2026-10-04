@@ -207,6 +207,26 @@ const EDITOR_ALLOWED_FIELDS = new Set(["estadoProduccion", "edicion", "linkVideo
 
 const planningService = new PlanningService();
 
+/** Campos que solo escribe el servidor: un PUT de items no los borra. */
+const CAMPOS_DEL_SERVIDOR = [
+  "versiones",
+  "correccionesVideo",
+  "rondasUsadas",
+  "guionCreadoEn",
+  "guionAprobadoEn",
+  "grabadoEn",
+  "editadoEn",
+  "videoAprobadoEn",
+  "publicadoEn",
+  "videoClienteAprobacion",
+  "videoClienteMotivo",
+  "videoClienteRevisadoEn",
+  "edicionRevisada",
+  "edicionRevisadaPorId",
+  "edicionRevisadaNombre",
+  "edicionRevisadaEn",
+] as const;
+
 /**
  * Personas de contenido que SIEMPRE reciben el aviso de guiones rechazados,
  * por nombre (sin acentos ni mayusculas). Ariana Vera es quien corrige los
@@ -292,6 +312,20 @@ export class VideoPlanningService {
     const existing = await models.videoPlanning.findOne({
       planningEntryId: new Types.ObjectId(entryId),
     });
+
+    // El PUT reemplaza los items con lo que manda el front: lo que solo
+    // escribe el servidor (versiones, cambios del cliente, fechas de etapa)
+    // no se puede perder si el front no lo devuelve.
+    const ahora = new Date();
+    const previos = new Map((existing?.items ?? []).map((i) => [i._id.toString(), i]));
+    for (const item of normalised as any[]) {
+      const previo: any = item._id ? previos.get(String(item._id)) : null;
+      if (previo) {
+        for (const campo of CAMPOS_DEL_SERVIDOR) if (item[campo] === undefined && previo[campo] !== undefined) item[campo] = previo[campo];
+      }
+      const tieneGuion = Boolean((typeof item.guion === "string" && item.guion.trim()) || item.guionIA?.gancho || item.guionIA?.cuerpo);
+      if (tieneGuion && !item.guionCreadoEn) item.guionCreadoEn = ahora;
+    }
 
     if (existing) {
       if (existing.clienteAprobado) {
@@ -424,6 +458,16 @@ export class VideoPlanningService {
       }
     }
 
+    // Fechas de etapa (reporte semanal): solo en la transicion.
+    const ahora = new Date();
+    const hayGuion = Boolean((typeof item.guion === "string" && item.guion.trim()) || item.guionIA?.gancho);
+    const guionNuevo = hayGuion && !item.guionCreadoEn && (typeof fields.guion === "string" || fields.guionIA !== undefined);
+    if (guionNuevo) item.guionCreadoEn = ahora;
+    const seGraboAhora = prevEstadoProduccion !== "GRABADO" && item.estadoProduccion === "GRABADO";
+    if (seGraboAhora) item.grabadoEn = ahora;
+    const sePublicoAhora = !wasPublicado && item.estadoPublicacion === "PUBLICADO";
+    if (sePublicoAhora) item.publicadoEn = ahora;
+
     // Revision interna: marcar EDITADO abre una revision pendiente y avisa
     // por correo al PM/CM; aprobarla estampa quien y cuando.
     const seMarcoEditado = prevEdicion !== "EDITADO" && item.edicion === "EDITADO";
@@ -445,6 +489,17 @@ export class VideoPlanningService {
     }
 
     await planning.save();
+
+    // Bitacora (reporte semanal): quien hizo que.
+    const bitacora = (tipo: "guion_escrito" | "video_subido" | "video_revisado_interno" | "video_publicado") =>
+      actividadService.registrar({
+        workspaceId: planning.workspaceId, tipo, actorId: actor?.id, actorNombre: actor?.nombre,
+        planningId: planning._id, itemId: item._id, numero: item.numero, tema: item.tema,
+      });
+    if (guionNuevo) bitacora("guion_escrito");
+    if (seMarcoEditado) bitacora("video_subido");
+    if (seAproboInterno) bitacora("video_revisado_interno");
+    if (sePublicoAhora) bitacora("video_publicado");
 
     // Todo lo editado ya paso la revision interna: es hora de que el cliente
     // revise. Sale solo, sin que nadie tenga que acordarse de notificar.
@@ -622,6 +677,20 @@ export class VideoPlanningService {
         // Auto-approve idea when client approves the video
         if (approval.clienteAprobacion === "APROBADO") {
           item.estadoIdea = "APROBADO";
+          if (prevClienteAprobacion !== "APROBADO") item.guionAprobadoEn = new Date();
+        }
+        if (prevClienteAprobacion !== approval.clienteAprobacion && approval.clienteAprobacion !== "PENDIENTE") {
+          actividadService.registrar({
+            workspaceId: planning.workspaceId,
+            tipo: approval.clienteAprobacion === "APROBADO" ? "guion_aprobado" : "guion_corregido",
+            actorId: userId,
+            esCliente: true,
+            planningId: planning._id,
+            itemId: item._id,
+            numero: item.numero,
+            tema: item.tema,
+            detalle: approval.clienteAprobacion === "RECHAZADO" ? approval.motivoRechazo?.slice(0, 300) : undefined,
+          });
         }
         if (approval.motivoRechazo !== undefined) {
           item.motivoRechazo = approval.motivoRechazo;
