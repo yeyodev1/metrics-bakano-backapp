@@ -1,7 +1,7 @@
 import { NextFunction, Response } from "express";
 import { HttpStatusCode } from "axios";
 import { AuthRequest } from "../types/AuthRequest";
-import { videoReviewNotificationService } from "../services/videoReviewNotification.service";
+import { ErrorRevisionVideo, videoReviewNotificationService } from "../services/videoReviewNotification.service";
 
 /**
  * POST /api/video-planning/:planningId/notify-review
@@ -98,8 +98,12 @@ export async function registrarRevisionVideos(
     }
     if (error.message === "MOTIVO_REQUERIDO") {
       res.status(HttpStatusCode.BadRequest).send({
-        message: "Para rechazar un video hay que decir el motivo: es lo que el editor necesita para corregirlo.",
+        message: "Para pedir cambios en un video indica cada cambio con su segundo: es lo que el editor necesita para corregirlo.",
       });
+      return;
+    }
+    if (error instanceof ErrorRevisionVideo) {
+      res.status(HttpStatusCode.UnprocessableEntity).send({ message: error.detalle, codigo: error.codigo, numero: error.numero });
       return;
     }
     next(error);

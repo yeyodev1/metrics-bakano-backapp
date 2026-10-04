@@ -2,6 +2,19 @@ import axios from "axios";
 import models from "../models";
 import { resendService } from "./resend.service";
 import { planningNotificationService, type Contacto } from "./planningNotification.service";
+import { telegramService } from "./telegram.service";
+import { chatsDeClienteDelEntorno } from "./chatsTelegram.service";
+import { estadoPagoService } from "./estadoPago.service";
+import { reviewEventService } from "./reviewEvent.service";
+import { actividadService } from "./actividad.service";
+import { videoEntregaService } from "./videoEntrega.service";
+import {
+  formatoSegundo,
+  MAX_RONDAS_VIDEO,
+  rondasRestantes,
+  validarCambios,
+  type CambioVideo,
+} from "./correccionVideo.service";
 
 const APP_URL = "https://metrics.bakano.ec";
 
@@ -20,6 +33,35 @@ export type TipoAvisoRevision = "esperando_revision" | "recordatorio" | "revisad
 
 /** Cada cuanto insiste el cron mientras el cliente no revise. */
 const HORAS_ENTRE_RECORDATORIOS = 4;
+/** Por Telegram se insiste menos: es el chat donde el cliente conversa. */
+const HORAS_ENTRE_TELEGRAM = 24;
+
+/**
+ * Error de la revision con un mensaje listo para el cliente. `numero` dice
+ * de que video se trata cuando aplica.
+ */
+export class ErrorRevisionVideo extends Error {
+  constructor(
+    public readonly codigo: string,
+    public readonly detalle: string,
+    public readonly numero?: number
+  ) {
+    super(codigo);
+  }
+}
+
+export interface ReviewVideo {
+  itemId: string;
+  estado: "APROBADO" | "RECHAZADO";
+  /** Legado: el rechazo sin segundo. Ya no alcanza, hay que mandar `cambios`. */
+  motivo?: string;
+  cambios?: CambioVideo[];
+}
+
+/** Video que espera el veredicto del cliente (la version vigente). */
+export function esperaVeredicto(item: any): boolean {
+  return item.edicion === "EDITADO" && (!item.videoClienteAprobacion || item.videoClienteAprobacion === "PENDIENTE");
+}
 
 export interface ResultadoAvisoRevision {
   tipoAviso: TipoAvisoRevision;
@@ -62,7 +104,9 @@ export class VideoReviewNotificationService {
     if (!listos.length) throw new Error("SIN_VIDEOS_EDITADOS");
 
     // Ya reviso todo: insistirle es la forma mas rapida de que ignore el canal.
-    if (planning.videosRevisadosEn && !planning.revisionVideosAbierta) {
+    // Una version nueva (despues de sus correcciones) si reabre el ciclo.
+    const porRevisar = listos.filter(esperaVeredicto).length;
+    if (planning.videosRevisadosEn && !planning.revisionVideosAbierta && !porRevisar) {
       throw new Error("YA_REVISADO");
     }
 
@@ -88,20 +132,69 @@ export class VideoReviewNotificationService {
    */
   async registrarRevision(
     planningId: string,
-    reviews: { itemId: string; estado: "APROBADO" | "RECHAZADO"; motivo?: string }[],
-    porUserId?: string
-  ): Promise<{ pendientes: number; cicloCerrado: boolean }> {
+    reviews: ReviewVideo[],
+    porUserId?: string,
+    opciones: { validarVanidad?: boolean } = {}
+  ): Promise<{ pendientes: number; cicloCerrado: boolean; aprobados: number; corregidos: { numero: number; ronda: number; rondasRestantes: number }[] }> {
     const planning: any = await models.videoPlanning.findById(planningId);
     if (!planning) throw new Error("NOT_FOUND");
     if (!planning.revisionVideosAbierta) throw new Error("REVISION_CERRADA");
 
+    // Primero se valida TODO; si un cambio no entra, no se guarda nada.
+    const validados = new Map<string, { segundo: number; texto: string }[]>();
     for (const r of reviews) {
       const item = planning.items.id(r.itemId);
       if (!item || item.edicion !== "EDITADO") continue;
-      if (r.estado === "RECHAZADO" && !r.motivo?.trim()) throw new Error("MOTIVO_REQUERIDO");
-      item.videoClienteAprobacion = r.estado;
-      item.videoClienteMotivo = r.estado === "RECHAZADO" ? r.motivo?.trim() : undefined;
-      item.videoClienteRevisadoEn = new Date();
+      if (r.estado !== "RECHAZADO") continue;
+      if (!rondasRestantes(item)) {
+        throw new ErrorRevisionVideo(
+          "RONDAS_AGOTADAS",
+          `El video #${item.numero} ya usó sus ${MAX_RONDAS_VIDEO} rondas de corrección: esta versión solo se puede aprobar.`,
+          item.numero
+        );
+      }
+      const cambios = r.cambios?.length ? r.cambios : [];
+      if (!cambios.length) {
+        if (r.motivo?.trim()) {
+          throw new ErrorRevisionVideo("SEGUNDO_REQUERIDO", `Para el video #${item.numero} indica en qué segundo está cada cambio.`, item.numero);
+        }
+        throw new Error("MOTIVO_REQUERIDO");
+      }
+      const v = await validarCambios(cambios, opciones.validarVanidad === false ? async () => ({ tipo: "negocio", fuente: "ia" }) : undefined);
+      if (!v.ok) throw new ErrorRevisionVideo(v.motivo.toUpperCase(), `Video #${item.numero}: ${v.detalle}`, item.numero);
+      validados.set(String(item._id), v.cambios);
+    }
+
+    const ahora = new Date();
+    const usuario = porUserId ? await models.users.findById(porUserId).select("name email").lean() : null;
+    const porNombre = (usuario as any)?.name || (usuario as any)?.email || undefined;
+    const corregidos: { item: any; ronda: number; cambios: { segundo: number; texto: string }[] }[] = [];
+    const aprobados: any[] = [];
+
+    for (const r of reviews) {
+      const item = planning.items.id(r.itemId);
+      if (!item || item.edicion !== "EDITADO") continue;
+      item.videoClienteRevisadoEn = ahora;
+      if (r.estado === "APROBADO") {
+        item.videoClienteAprobacion = "APROBADO";
+        item.videoClienteMotivo = undefined;
+        item.videoAprobadoEn = ahora;
+        aprobados.push(item);
+        continue;
+      }
+      const cambios = validados.get(String(item._id))!;
+      const ronda = (item.rondasUsadas ?? 0) + 1;
+      const version = item.versiones?.length || 1;
+      item.rondasUsadas = ronda;
+      item.correccionesVideo = [
+        ...(item.correccionesVideo ?? []),
+        ...cambios.map((c) => ({ ronda, version, segundo: c.segundo, texto: c.texto, porId: porUserId, porNombre, en: ahora })),
+      ];
+      item.videoClienteAprobacion = "RECHAZADO";
+      item.videoClienteMotivo = cambios.map((c) => `${formatoSegundo(c.segundo)} ${c.texto}`).join(" · ").slice(0, 1500);
+      // Vuelve a la cola del editor como re-edicion.
+      item.edicion = "RECHAZADO";
+      corregidos.push({ item, ronda, cambios });
     }
 
     const pendientes = this.editados(planning).filter(
@@ -111,7 +204,7 @@ export class VideoReviewNotificationService {
     let cicloCerrado = false;
     if (pendientes === 0) {
       planning.revisionVideosAbierta = false;
-      planning.videosRevisadosEn = new Date();
+      planning.videosRevisadosEn = ahora;
       if (porUserId) planning.videosRevisadosPor = porUserId;
       cicloCerrado = true;
       // La confirmacion no debe tumbar la revision si GHL falla: se registra
@@ -120,7 +213,35 @@ export class VideoReviewNotificationService {
     }
 
     await planning.save();
-    return { pendientes, cicloCerrado };
+
+    // Banderas, bitacora y aviso al editor: despues de guardar, sin frenar.
+    (async () => {
+      for (const item of aprobados) {
+        await reviewEventService.recordClientVideoVerdict({ planning, item, resultado: "aprobado", actorId: porUserId });
+        await actividadService.registrar({
+          workspaceId: planning.workspaceId, tipo: "video_aprobado", actorId: porUserId, actorNombre: porNombre, esCliente: true,
+          planningId: planning._id, itemId: item._id, numero: item.numero, tema: item.tema,
+        });
+      }
+      for (const c of corregidos) {
+        await reviewEventService.recordClientVideoVerdict({
+          planning, item: c.item, resultado: "rechazado", actorId: porUserId, motivo: c.item.videoClienteMotivo,
+        });
+        await actividadService.registrar({
+          workspaceId: planning.workspaceId, tipo: "video_corregido", actorId: porUserId, actorNombre: porNombre, esCliente: true,
+          planningId: planning._id, itemId: c.item._id, numero: c.item.numero, tema: c.item.tema,
+          detalle: `Ronda ${c.ronda}: ${c.cambios.length} cambio${c.cambios.length === 1 ? "" : "s"}`,
+        });
+        await videoEntregaService.avisarEditor(planning, c.item, c.ronda, c.cambios, porNombre);
+      }
+    })().catch((e: any) => console.warn("[Revisión videos] después de guardar:", e?.message));
+
+    return {
+      pendientes,
+      cicloCerrado,
+      aprobados: aprobados.length,
+      corregidos: corregidos.map((c) => ({ numero: c.item.numero, ronda: c.ronda, rondasRestantes: rondasRestantes(c.item) })),
+    };
   }
 
   /**
@@ -215,11 +336,13 @@ export class VideoReviewNotificationService {
     const videosListos = this.editados(planning).length;
     const totalVideos = planning.items?.length ?? 0;
 
-    const [whatsapp, email] = await Promise.all([
+    const porRevisar = this.editados(planning).filter(esperaVeredicto).length;
+    const [whatsapp, email, telegram] = await Promise.all([
       this.enviarWhatsapp(
         workspace, contactos, sinTelefono, enlace, totalVideos, videosListos, tipo, numeroEnvio
       ),
       this.enviarEmail(correos, workspace.name, enlace, videosListos, tipo),
+      this.enviarTelegram(planning, workspace, porRevisar, tipo),
     ]);
 
     planning.avisosRevision.push({
@@ -241,6 +364,17 @@ export class VideoReviewNotificationService {
       tipoAviso: tipo,
       numeroEnvio,
     });
+    if (telegram) {
+      planning.avisosRevision.push({
+        canal: "telegram",
+        enviadoEn: new Date(),
+        porNombre,
+        exito: telegram.enviado,
+        error: telegram.error,
+        tipoAviso: tipo,
+        numeroEnvio,
+      });
+    }
 
     return {
       tipoAviso: tipo,
@@ -249,6 +383,56 @@ export class VideoReviewNotificationService {
       whatsapp: { ...whatsapp, contactos },
       email: { ...email, destinatarios: correos },
     };
+  }
+
+  /**
+   * Por el bot, con boton para revisar ahi mismo. El primer aviso sale
+   * siempre; los recordatorios, como mucho uno al dia. null = no tocaba.
+   * Si el cliente debe, el aviso lo dice y lleva al pago (igual que guiones).
+   */
+  private async enviarTelegram(
+    planning: any,
+    workspace: any,
+    porRevisar: number,
+    tipo: TipoAvisoRevision
+  ): Promise<{ enviado: boolean; error?: string } | null> {
+    if (tipo === "revisado" || !porRevisar) return null;
+    if (tipo === "recordatorio") {
+      const ultimo = [...(planning.avisosRevision ?? [])].reverse().find((n: any) => n.canal === "telegram" && n.exito);
+      if (ultimo && Date.now() - new Date(ultimo.enviadoEn).getTime() < HORAS_ENTRE_TELEGRAM * 3_600_000) return null;
+    }
+    const chats = await chatsDeClienteDelEntorno(workspace._id);
+    if (!chats.length) return { enviado: false, error: "El cliente no tiene el bot de Telegram conectado." };
+
+    const bloqueo = await estadoPagoService.bloqueo(String(workspace._id), true).catch(() => null);
+    const plural = porRevisar === 1 ? "video" : "videos";
+    const encabezado =
+      tipo === "recordatorio"
+        ? `⏰ <b>Te recuerdo: tienes ${porRevisar} ${plural} por revisar</b>`
+        : `🎬 <b>¡Es hora de revisar!</b> Tienes ${porRevisar} ${plural} ${porRevisar === 1 ? "listo" : "listos"}`;
+    const texto = bloqueo
+      ? `${encabezado}\n\nPara verlos y aprobarlos primero hay que ponerse al día con el pago: tienes <b>${bloqueo.deudaTexto}</b> vencido.`
+      : `${encabezado}\n\nMíralos y dime aquí mismo si los apruebas. Si algo hay que corregir, dime el segundo y qué cambiar ` +
+        `(ej. <i>en el 0:15 el precio es $25, no $20</i>). Tienes ${MAX_RONDAS_VIDEO} rondas de cambios por video, ` +
+        "y solo hacemos cambios que te ayuden a vender: nada de gustos de color o música 😉";
+    const botones = bloqueo
+      ? [[{ text: "💳 Ver y pagar", callback_data: "pago:ver" }]]
+      : [
+          [{ text: "🎬 Revisarlos aquí", callback_data: "vid:lista" }],
+          [{ text: "💻 Verlos en Metrics", url: `${APP_URL}${RUTA_REVISION_WHATSAPP}` }],
+        ];
+
+    let enviados = 0;
+    let error: string | undefined;
+    for (const c of chats) {
+      try {
+        await telegramService.sendMessage(c.chatId, texto, botones);
+        enviados++;
+      } catch (e: any) {
+        error = e?.response?.data?.description || e?.message || "No se pudo enviar por Telegram.";
+      }
+    }
+    return { enviado: enviados > 0, error: enviados ? undefined : error };
   }
 
   /** Mismo contrato que el circuito de planificacion: un disparo por persona. */

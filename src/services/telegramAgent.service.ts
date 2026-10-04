@@ -23,6 +23,8 @@ import { crmMetricasService, duracionLegible } from "./crmMetricas.service";
 import { fueraDeHorario, incidentesService } from "./incidentes.service";
 import { equipoParaLaIa, WHATSAPP_DIRECCION } from "./equipoBakano.service";
 import { CATEGORIAS_GUION, revisionGuionesService } from "./revisionGuiones.service";
+import { revisionVideosChatService } from "./revisionVideosChat.service";
+import { formatoSegundo, MAX_RONDAS_VIDEO, MENSAJE_SIN_VANIDAD } from "./correccionVideo.service";
 import { perfilClienteService, type PerfilCliente } from "./perfilCliente.service";
 import {
   ORDEN_SESIONES,
@@ -311,6 +313,9 @@ class TelegramAgentService {
     if (uso("verGuionesParaRevisar", "verGuiones", "verGuion", "anotarCorreccion", "verBorradorRevision", "enviarRevisionGuiones")) {
       botones.push([{ text: "📝 Revisar mis guiones", callback_data: "menu:guiones" }]);
     }
+    if (uso("verVideosParaRevisar", "aprobarVideo", "anotarCorreccionVideo", "quitarCorreccionVideo", "verBorradorCorreccionVideo", "enviarCorreccionesVideo")) {
+      botones.push([{ text: "🎬 Revisar mis videos", callback_data: "vid:lista" }]);
+    }
     if (uso("verOnboarding", "verPendientesOnboarding", "registrarDatoMarca", "registrarEntregable", "pedirAyudaConDato", "verHorariosOnboarding", "agendarSesionOnboarding")) {
       botones.push([{ text: "🚀 Cómo va mi onboarding", callback_data: "menu:onboarding" }]);
     }
@@ -421,6 +426,14 @@ Revisión y corrección de guiones:
 - Las correcciones se envían todas juntas y una sola vez. Antes de enviar usa verBorradorRevision, muéstrale el resumen y pregúntale qué hacemos con los guiones que no corrigió (normalmente se aprueban). Llama enviarRevisionGuiones solo cuando el cliente confirme de forma explícita, y con aprobarResto en true solo si aceptó aprobar los demás.
 - Si el plazo de correcciones ya cerró, explícale que ya no se pueden pedir cambios a los guiones y ofrece pasarle el mensaje a ${equipoAtencionService.nombres("guiones")}.
 - Al enviar, confírmale que le llegó a ${equipoAtencionService.nombres("guiones")} y al equipo, y hasta cuándo se corrigen.
+
+Revisión de videos terminados:
+- Cuando quiera revisar sus videos (o le avisamos que están listos), usa verVideosParaRevisar y muéstrale la lista con el link de cada uno para que los vea.
+- Si aprueba uno, usa aprobarVideo. Si quiere un cambio, necesitas DOS cosas: el segundo exacto del video y qué cambiar. Si falta el segundo, pregúntaselo ("en qué segundo está?"). Anota cada cambio con anotarCorreccionVideo, uno por llamada.
+- Tiene ${MAX_RONDAS_VIDEO} rondas de cambios por video: cada envío con cambios usa una ronda de ese video. Díselo cuando anote el primer cambio y cuántas le quedan. Si un video ya no tiene rondas, esa versión solo se puede aprobar: explícaselo con calma; si hay un error grave de información, ofrece pasarle el mensaje al equipo con pasarMensajeAlEquipo.
+- No hacemos cambios de vanidad. Si anotarCorreccionVideo responde "vanidad", explícale con amabilidad y firmeza: ${MENSAJE_SIN_VANIDAD} Pregúntale si hay algo de eso que quiera corregir. Nunca anotes un cambio de vanidad disfrazado.
+- Antes de enviar, usa verBorradorCorreccionVideo, muéstrale los cambios por video y segundo, y pregúntale qué hacemos con los videos sin cambios (normalmente se aprueban). Llama enviarCorreccionesVideo solo cuando confirme, con aprobarResto en true solo si aceptó aprobar los demás.
+- Al enviar, confírmale que el editor ya tiene sus cambios y que le avisaremos por aquí cuando esté la nueva versión.
 
 Onboarding (arranque del cliente):
 - Son tres sesiones, en este orden: especialización con Joel Jimenez (sus cuentas de Meta), configuración del CRM con David Robles (se ofrece apenas agenda con Joel, a la par) y levantamiento con Ariana Vera. Después viene la primera producción.
@@ -594,6 +607,21 @@ Reglas:
           nota:
             "El cliente tiene pagos vencidos: NO le muestres, leas ni resumas guiones, ni le recibas correcciones o aprobaciones. " +
             "Dile con amabilidad que sus guiones ya están listos y que para verlos y aprobarlos primero tiene que ponerse al día, " +
+            "y ofrécele el link con verMisPagos / generarLinkDePago.",
+        };
+      };
+    // Igual que conPago, con el texto de videos.
+    const conPagoVideos =
+      <A, R>(fn: (args: A) => Promise<R>) =>
+      async (args: A): Promise<R | Record<string, unknown>> => {
+        const bloqueo = await estadoPagoService.bloqueo(String(chat.workspaceId)).catch(() => null);
+        if (!bloqueo) return fn(args);
+        return {
+          bloqueadoPorPago: true,
+          deudaVencida: bloqueo.deudaTexto,
+          nota:
+            "El cliente tiene pagos vencidos: NO le muestres los videos ni le recibas cambios o aprobaciones. " +
+            "Dile con amabilidad que sus videos ya están listos y que para verlos primero tiene que ponerse al día, " +
             "y ofrécele el link con verMisPagos / generarLinkDePago.",
         };
       };
@@ -791,6 +819,73 @@ Reglas:
           "Envía la revisión completa al equipo (una sola vez). Solo tras confirmación explícita del cliente. aprobarResto=true aprueba los guiones que no corrigió; úsalo solo si el cliente lo aceptó.",
         inputSchema: z.object({ aprobarResto: z.boolean() }),
         execute: conPago(async ({ aprobarResto }: { aprobarResto: boolean }) => revisionGuionesService.enviar(chat, aprobarResto)),
+      },
+
+      verVideosParaRevisar: {
+        description:
+          "Videos terminados que el cliente tiene por revisar: número, tema, link para verlo, versión, rondas de cambios que le quedan y los cambios que ya anotó en su borrador.",
+        inputSchema: z.object({}),
+        execute: conPagoVideos(async () => {
+          const r = await revisionVideosChatService.resumen(chat);
+          if (!r) return { hayVideosPorRevisar: false, nota: "No hay videos esperando su revisión." };
+          return {
+            hayVideosPorRevisar: true,
+            rondasPorVideo: MAX_RONDAS_VIDEO,
+            videos: r.revision.videos.map((v) => ({
+              numero: v.numero,
+              tema: v.tema,
+              link: v.link,
+              version: v.version,
+              rondasRestantes: v.rondasRestantes,
+              soloPuedeAprobar: v.rondasRestantes === 0,
+              cambiosAnotados: r.cambios.filter((c) => c.itemId === v.itemId).map((c) => `${formatoSegundo(c.segundo)} ${c.texto}`),
+            })),
+          };
+        }),
+      },
+
+      aprobarVideo: {
+        description: "Aprueba un video terminado (va directo, no espera al resto). Solo si el cliente lo dijo claramente.",
+        inputSchema: z.object({ numero: z.number().int() }),
+        execute: conPagoVideos(async ({ numero }: { numero: number }) => revisionVideosChatService.aprobar(chat, numero)),
+      },
+
+      anotarCorreccionVideo: {
+        description:
+          "Anota en el borrador UN cambio para un video: el segundo exacto y qué cambiar. Rechaza cambios sin segundo, vagos o de vanidad (colores, letras, música por gusto, cómo se ve la persona, transiciones); si pasa, explícale al cliente con amabilidad.",
+        inputSchema: z.object({
+          numero: z.number().int().describe("Número del video"),
+          segundo: z.string().describe("Segundo del video donde está el cambio, como lo dijo el cliente: 0:15, 15, 1:02"),
+          cambio: z.string().describe("Qué cambiar, con las palabras del cliente"),
+        }),
+        execute: conPagoVideos(async ({ numero, segundo, cambio }: { numero: number; segundo: string; cambio: string }) =>
+          revisionVideosChatService.anotar(chat, numero, segundo, cambio)),
+      },
+
+      quitarCorreccionVideo: {
+        description: "Quita del borrador un cambio de un video (o todos los de ese video si no dice el segundo).",
+        inputSchema: z.object({ numero: z.number().int(), segundo: z.string().optional() }),
+        execute: async ({ numero, segundo }: { numero: number; segundo?: string }) => revisionVideosChatService.quitar(chat, numero, segundo),
+      },
+
+      verBorradorCorreccionVideo: {
+        description: "Resumen de lo que se enviaría: cambios anotados por video (con su segundo) y videos sin cambios.",
+        inputSchema: z.object({}),
+        execute: conPagoVideos(async () => {
+          const r = await revisionVideosChatService.resumen(chat);
+          if (!r) return { nota: "No hay videos esperando su revisión." };
+          return {
+            cambios: r.cambios.map((c) => ({ video: `#${c.numero} ${c.tema}`, segundo: formatoSegundo(c.segundo), cambio: c.texto })),
+            sinCambios: r.sinCambios.map((v) => `#${v.numero} ${v.tema}`),
+          };
+        }),
+      },
+
+      enviarCorreccionesVideo: {
+        description:
+          "Envía al editor los cambios anotados (cada video con cambios usa una de sus 2 rondas). Solo tras confirmación explícita. aprobarResto=true aprueba los videos sin cambios; úsalo solo si el cliente lo aceptó.",
+        inputSchema: z.object({ aprobarResto: z.boolean() }),
+        execute: conPagoVideos(async ({ aprobarResto }: { aprobarResto: boolean }) => revisionVideosChatService.enviar(chat, aprobarResto)),
       },
 
       verOnboarding: {

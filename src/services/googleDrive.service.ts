@@ -200,6 +200,19 @@ class GoogleDriveService {
     return location;
   }
 
+  /** Renombra un archivo (al conectarlo a su guion toma el numero y el tema). */
+  async renameFile(fileId: string, name: string): Promise<DriveFile> {
+    const res = await axios.patch(
+      `${DRIVE_API}/files/${fileId}`,
+      { name },
+      {
+        headers: await this.headers(),
+        params: { supportsAllDrives: true, fields: "id,name,mimeType,size,parents,webViewLink" },
+      }
+    );
+    return res.data;
+  }
+
   async getFile(fileId: string): Promise<DriveFile> {
     const res = await axios.get(`${DRIVE_API}/files/${fileId}`, {
       headers: await this.headers(),

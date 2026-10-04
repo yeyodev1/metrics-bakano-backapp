@@ -255,7 +255,7 @@ export const toolsContenido: ToolMcp[] = [
   {
     nombre: "mi_cola_edicion",
     titulo: "Mi cola de edición",
-    descripcion: "Lo que te toca editar este mes: re-ediciones pedidas por el cliente, por editar, por subir el máster y listos.",
+    descripcion: "Lo que te toca editar este mes: re-ediciones pedidas por el cliente (con cada cambio y su segundo, y cuántas rondas le quedan), por editar, por subir el máster y listos.",
     perfiles: ["direccion", "edicion"],
     entrada: {},
     async correr(_a, u) {

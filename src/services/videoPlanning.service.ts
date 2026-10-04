@@ -14,6 +14,9 @@ import { fechaEcuador } from "./crmProductionSync.service";
 import { slackService } from "./slack.service";
 import { equipoAtencionService } from "./equipoAtencion.service";
 import { extractLeadActions } from "../utils/metaActions";
+import { esperaVeredicto, videoReviewNotificationService } from "./videoReviewNotification.service";
+import { actividadService } from "./actividad.service";
+import { formatoSegundo, rondasRestantes } from "./correccionVideo.service";
 import cloudinary from "../config/cloudinary";
 
 /** Extract Cloudinary public_id from a secure_url */
@@ -424,7 +427,11 @@ export class VideoPlanningService {
     // Revision interna: marcar EDITADO abre una revision pendiente y avisa
     // por correo al PM/CM; aprobarla estampa quien y cuando.
     const seMarcoEditado = prevEdicion !== "EDITADO" && item.edicion === "EDITADO";
+    const seAproboInterno = fields.edicionRevisada === true && item.edicionRevisada === true && !item.edicionRevisadaEn;
     if (seMarcoEditado) {
+      item.editadoEn = new Date();
+      item.videoClienteAprobacion = "PENDIENTE";
+      item.videoAprobadoEn = undefined;
       item.edicionRevisada = false;
       item.edicionRevisadaPorId = undefined;
       item.edicionRevisadaNombre = undefined;
@@ -438,6 +445,14 @@ export class VideoPlanningService {
     }
 
     await planning.save();
+
+    // Todo lo editado ya paso la revision interna: es hora de que el cliente
+    // revise. Sale solo, sin que nadie tenga que acordarse de notificar.
+    if (seAproboInterno) {
+      this.avisarClienteSiTodoRevisado(planningId, actor?.nombre).catch((err: any) =>
+        console.warn("[VideoPlanningService] aviso al cliente falló:", err.message)
+      );
+    }
 
     if (seMarcoEditado) {
       (async () => {
@@ -558,6 +573,21 @@ export class VideoPlanningService {
     }
 
     return planning.toObject() as IVideoPlanning;
+  }
+
+  /**
+   * Avisa al cliente cuando ningun video editado espera la revision interna y
+   * hay al menos uno esperando su veredicto. Si falta revisar alguno por
+   * dentro, espera: un aviso por lote, no uno por video.
+   */
+  async avisarClienteSiTodoRevisado(planningId: string, porNombre?: string): Promise<boolean> {
+    const planning = await models.videoPlanning.findById(planningId).select("items.edicion items.edicionRevisada items.videoClienteAprobacion").lean();
+    if (!planning) return false;
+    const editados = planning.items.filter((i) => i.edicion === "EDITADO");
+    if (editados.some((i) => i.edicionRevisada === false)) return false;
+    if (!editados.some(esperaVeredicto)) return false;
+    await videoReviewNotificationService.notificar(planningId, porNombre || "revisión interna");
+    return true;
   }
 
   // ── CLIENT APPROVAL (POST) ─────────────────────────────────────────────────
@@ -1281,6 +1311,11 @@ export class VideoPlanningService {
       estadoProduccion: string;
       driveLink?: string;
       driveMonthFolderLink?: string;
+      /** Cambios del cliente de la ultima ronda, con su segundo. */
+      correcciones?: { segundo: string; texto: string }[];
+      ronda?: number;
+      rondasRestantes?: number;
+      versiones?: number;
     }
 
     const reEditar: ColaItem[] = [];
@@ -1308,6 +1343,16 @@ export class VideoPlanningService {
           estadoProduccion: item.estadoProduccion,
           driveLink: item.driveLink,
           driveMonthFolderLink: vp.driveMonthFolderLink,
+          ...(item.rondasUsadas
+            ? {
+                ronda: item.rondasUsadas,
+                rondasRestantes: rondasRestantes(item),
+                correcciones: (item.correccionesVideo ?? [])
+                  .filter((c) => c.ronda === item.rondasUsadas)
+                  .map((c) => ({ segundo: formatoSegundo(c.segundo), texto: c.texto })),
+              }
+            : {}),
+          versiones: item.versiones?.length || (item.driveFileId ? 1 : 0),
         };
 
         // Una idea rechazada por el cliente no se edita: no es trabajo.

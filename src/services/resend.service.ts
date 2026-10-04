@@ -2611,7 +2611,83 @@ export class ResendService {
 
     return data?.id;
   }
+
+  /**
+   * Al editor: el cliente pidio cambios sobre un video, con el segundo
+   * exacto de cada uno. Es lo unico que necesita para re-editar sin
+   * preguntar.
+   */
+  async sendCorreccionesVideoEditor(params: {
+    to: string[];
+    workspaceName: string;
+    numero: number;
+    tema: string;
+    ronda: number;
+    rondasMax: number;
+    clienteNombre?: string;
+    cambios: { segundo: string; texto: string }[];
+    driveLink?: string;
+    colaUrl: string;
+  }): Promise<void> {
+    if (!params.to.length) return;
+    const esc = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const num = String(params.numero).padStart(2, "0");
+    const filas = params.cambios
+      .map(
+        (c) => `<tr>
+                <td style="padding:10px 14px;border-bottom:1px solid #eceaf1;font-family:monospace;font-size:14px;font-weight:700;color:#e6285c;white-space:nowrap;vertical-align:top;">${esc(c.segundo)}</td>
+                <td style="padding:10px 14px;border-bottom:1px solid #eceaf1;font-size:14px;color:#191423;line-height:1.5;">${esc(c.texto)}</td>
+              </tr>`
+      )
+      .join("");
+    const html = `
+<!DOCTYPE html>
+<html lang="es">
+<head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><title>Correcciones del cliente</title></head>
+<body style="margin:0;padding:0;background-color:#f0f2f5;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f0f2f5;padding:40px 16px;">
+    <tr><td align="center">
+      <table width="580" cellpadding="0" cellspacing="0" style="max-width:580px;width:100%;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.10);">
+        ${barraMarca()}
+        <tr>
+          <td style="background:linear-gradient(135deg,#191423 0%,#2b2438 100%);padding:32px 40px;text-align:center;">
+            <h1 style="margin:0;color:#ffffff;font-size:22px;font-weight:700;line-height:1.3;">Correcciones del cliente</h1>
+            <p style="margin:8px 0 0;color:rgba(255,255,255,0.65);font-size:14px;">Ronda ${params.ronda} de ${params.rondasMax}${params.clienteNombre ? ` · pedida por ${esc(params.clienteNombre)}` : ""}</p>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:28px 40px 8px;">
+            <p style="margin:0 0 4px;font-size:11px;font-weight:800;letter-spacing:0.08em;color:#6b7280;text-transform:uppercase;">${esc(params.workspaceName)}</p>
+            <p style="margin:0 0 16px;font-size:16px;font-weight:700;color:#191423;">#${num} · ${esc(params.tema)}</p>
+            <table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #eceaf1;border-radius:12px;border-collapse:separate;overflow:hidden;">
+              ${filas}
+            </table>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:20px 40px 8px;text-align:center;">
+            <a href="${params.colaUrl}" style="display:inline-block;background:#e6285c;color:#ffffff;font-size:14px;font-weight:700;text-decoration:none;padding:13px 28px;border-radius:12px;">Ir a mi cola</a>
+          </td>
+        </tr>
+        ${params.driveLink ? `<tr><td style="padding:4px 40px 8px;text-align:center;"><a href="${params.driveLink}" style="font-size:12.5px;color:#1ea362;font-weight:700;text-decoration:none;">Ver la versión que revisó el cliente</a></td></tr>` : ""}
+        <tr>
+          <td style="padding:16px 40px 30px;text-align:center;">
+            <p style="margin:0;font-size:12px;color:#9ca3af;line-height:1.5;">Sube la nueva versión desde "Subir videos": reemplaza la anterior y el cliente recibe el aviso para revisarla.${params.ronda >= params.rondasMax ? " Era su última ronda: la próxima versión solo se puede aprobar." : ""}</p>
+          </td>
+        </tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+
+    await this.client.emails.send({
+      from: this.from,
+      to: params.to,
+      subject: `Correcciones (ronda ${params.ronda}) · ${params.workspaceName} #${num} ${params.tema}`,
+      html,
+    });
+  }
 }
 
 export const resendService = new ResendService();
-

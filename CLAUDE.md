@@ -176,6 +176,42 @@ facturación real, ritmo del mes, equipo asignado y recordatorios.
   asesores; `CrmVista.advertencias` lo avisa. `CrmCliente.get` reintenta 429.
 - Bakano People: herramienta `verMiEquipoEnCrm`.
 
+### Videos por guion: subida masiva, revisión por Telegram y 2 rondas (2026-10-04)
+- **Subida masiva** (`videoEntrega.service.ts`, rutas en `drive.router.ts`, solo equipo):
+  `GET /api/drive/planificaciones` (ventana -75/+45 días; el editor ve sus entornos) ·
+  `POST /api/drive/planificaciones/:planningId/sesion` `{ fileName, mimeType, size }` →
+  sesión resumable en `Unidad / <Cliente> / <AAAA-MM - Título>` (se crea sola; si la
+  planificación ya tenía `driveMonthFolderId`, se reusa) · `POST .../sugerencias`
+  `{ archivos: [{ fileId, nombre }] }` (por número o tema del nombre) · `POST .../conectar`
+  `{ asignaciones: [{ itemId, fileId }] }`. Conectar renombra a `NN - tema (vN).ext`,
+  guarda `item.versiones[]` (la vieja queda en Drive), pone `EDITADO`, `editadoEn`,
+  `videoClienteAprobacion: PENDIENTE` y abre la revisión interna (correo PM/CM, banderas).
+- **Aviso al cliente**: cuando ningún video EDITADO espera revisión interna y alguno
+  espera al cliente, `updateItem` (al aprobar `edicionRevisada`) llama
+  `avisarClienteSiTodoRevisado` → `videoReviewNotificationService.notificar`. Ahora
+  también sale por **Telegram** (chats de clientes, sin internos ni bloqueados; con
+  deuda, el aviso lleva a pagar). Primer aviso siempre; recordatorios por Telegram
+  máximo 1 cada 24 h (`avisosRevision.canal: telegram`). Una versión nueva reabre el
+  ciclo aunque `videosRevisadosEn` exista.
+- **Rondas y cambios** (`correccionVideo.service.ts`): `MAX_RONDAS_VIDEO = 2` por video.
+  `POST /api/video-planning/:planningId/video-review` acepta
+  `reviews[{ itemId, estado, cambios: [{ segundo: "0:15", texto }] }]`. Rechazar exige
+  cambios con segundo (`SEGUNDO_REQUERIDO`), sin rondas → `RONDAS_AGOTADAS` (solo
+  aprobar), y filtra **vanidad** (palabras de negocio pasan directo; si no, IA
+  `AI_MODEL`; si la IA cae, lista de palabras de vanidad). Errores → 422 con
+  `{ message, codigo, numero }`. Rechazo: `edicion = RECHAZADO` (vuelve a la cola del
+  editor), `rondasUsadas++`, `correccionesVideo[]`, ReviewEvent cliente/edición, aviso
+  al editor (in-app `video_corregido`, Telegram, correo `sendCorreccionesVideoEditor`).
+  Aprobar → `videoAprobadoEn`.
+- **Bot**: callback `vid:lista`, atajo "Revisar videos", herramientas
+  `verVideosParaRevisar`, `aprobarVideo`, `anotarCorreccionVideo` (segundo + cambio,
+  filtra vanidad al anotar), `quitarCorreccionVideo`, `verBorradorCorreccionVideo`,
+  `enviarCorreccionesVideo`. Borrador en `TelegramChat.revisionVideos`.
+- Cola del editor y MCP `mi_cola_edicion`: `correcciones[{segundo, texto}]`, `ronda`,
+  `rondasRestantes`, `versiones`.
+- Bitácora `actividades` (`actividad.model.ts`, `actividadService.registrar`): base del
+  reporte semanal.
+
 ## Notas importantes
 - No hay cron jobs instalados aún — usar `node-cron`
 - Los emails tienen plantillas HTML inline (ver patrón en `resend.service.ts`)

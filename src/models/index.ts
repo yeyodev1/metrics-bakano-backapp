@@ -28,6 +28,7 @@ import { CrmIntegrationModel } from "./crmIntegration.model";
 import { CrmHallazgoModel } from "./crmHallazgo.model";
 import { CrmRevisionModel } from "./crmRevision.model";
 import { CrmMetricaDiariaModel } from "./crmMetricaDiaria.model";
+import { ActividadModel } from "./actividad.model";
 
 const models = {
   users: UserModel,
@@ -60,6 +61,7 @@ const models = {
   crmHallazgos: CrmHallazgoModel,
   crmRevisiones: CrmRevisionModel,
   crmMetricasDiarias: CrmMetricaDiariaModel,
+  actividades: ActividadModel,
 };
 
 export default models;
