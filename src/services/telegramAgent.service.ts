@@ -19,6 +19,7 @@ import { publicidadClienteService } from "./publicidadCliente.service";
 import { pagosClienteService } from "./pagosCliente.service";
 import { crmIntegracionService, linkIntegraciones } from "./crmIntegracion.service";
 import { crmRevisionService } from "./crmRevision.service";
+import { crmMetricasService, duracionLegible } from "./crmMetricas.service";
 import { fueraDeHorario, incidentesService } from "./incidentes.service";
 import { equipoParaLaIa, WHATSAPP_DIRECCION } from "./equipoBakano.service";
 import { CATEGORIAS_GUION, revisionGuionesService } from "./revisionGuiones.service";
@@ -325,7 +326,7 @@ class TelegramAgentService {
     if (uso("verMisPagos", "generarLinkDePago")) {
       botones.push([{ text: "💳 Mis pagos", callback_data: "pago:ver" }]);
     }
-    if (uso("verMiCrm")) {
+    if (uso("verMiCrm", "verMiEquipoEnCrm")) {
       botones.push([{ text: "🔌 Mi CRM", callback_data: "crm:ver" }]);
     }
     if (uso("verHorariosLibres", "agendarReunion")) {
@@ -465,6 +466,7 @@ Pagos a Bakano (su suscripción; no confundir con su facturación del día, que 
 
 Su CRM (GoHighLevel):
 - Si pregunta por sus leads, sus conversaciones de WhatsApp, sus oportunidades o su CRM, usa verMiCrm. Si está conectado, cuéntale lo que encontró la revisión diaria (con el mensaje sugerido si lo pide). Si no está conectado, explícale en una línea que al conectarlo cada mañana le avisas de las ventas casi cerradas, y pásale el link de integraciones tal cual viene.
+- Si pregunta cómo le fue a su equipo o a sus asesores, cuántas conversaciones o mensajes le entraron, o qué tan rápido contestan, usa verMiEquipoEnCrm y dale el resumen con números: conversaciones, quién contestó más rápido y quién dejó clientes esperando. Reconoce lo bueno primero.
 - Nunca le pidas el token por el chat: se pega solo en la plataforma.
 
 Facturación del día:
@@ -1455,6 +1457,64 @@ Reglas:
             hallazgosRecientes: await crmRevisionService.recientes(workspaceId).catch(() => []),
             linkIntegraciones: link,
             ...(crm.estado === "error" ? { siguiente: "Dile que el token dejó de funcionar y que lo reconecte en el link." } : {}),
+          };
+        },
+      },
+
+      verMiEquipoEnCrm: {
+        description:
+          "Cómo le fue a su CRM (GoHighLevel) y a su equipo de ventas en los últimos días: conversaciones por día, contactos que escribieron, cuántas quedaron sin respuesta y, por cada asesor, cuántas contestó y su tiempo de primera respuesta. Úsala cuando pregunte cómo le fue a su equipo, a sus asesores o vendedores, cuántos mensajes o conversaciones le entraron, o qué tan rápido contestan.",
+        inputSchema: z.object({
+          dias: z.number().int().min(1).max(31).optional().describe("Días cerrados hacia atrás, hasta ayer. Por defecto 7."),
+        }),
+        execute: async ({ dias }: { dias?: number }) => {
+          const workspaceId = String(chat.workspaceId);
+          const m = await crmMetricasService.rango(workspaceId, dias ?? 7);
+          if (!m.conectado) {
+            return {
+              conectado: false,
+              problema: m.problema,
+              linkIntegraciones: linkIntegraciones(workspaceId),
+              siguiente: "Dile en una línea que al conectar su CRM le mostramos cómo responde su equipo cada día, y pásale el link tal cual.",
+            };
+          }
+          const calculados = m.dias.filter((d) => d.estado === "terminada");
+          if (!calculados.length) {
+            return { conectado: true, sinDatosTodavia: true, siguiente: "Dile que su CRM ya está conectado y que los números de cada día se calculan en la madrugada: mañana ya los tiene." };
+          }
+          return {
+            conectado: true,
+            desde: m.desde,
+            hasta: m.hasta,
+            diasSinCalcular: m.pendientes,
+            porDia: calculados.map((d) => ({
+              dia: d.dia,
+              conversaciones: d.conversaciones,
+              nuevas: d.nuevas,
+              contactosQueEscribieron: d.contactosQueEscribieron,
+              sinRespuesta: d.sinRespuesta,
+              respuestaMediana: duracionLegible(d.medianaRespuestaSeg),
+            })),
+            totales: {
+              conversacionesSumaDiaria: m.totales.conversaciones,
+              nuevas: m.totales.nuevas,
+              sinRespuesta: m.totales.sinRespuesta,
+              asesoresActivos: m.totales.asesoresActivos,
+              respuestaMediana: duracionLegible(m.totales.medianaRespuestaSeg),
+              mensajesAutomaticos: m.totales.mensajesAutomaticos,
+            },
+            porCanal: m.porCanal,
+            asesores: m.asesores.slice(0, 10).map((a) => ({
+              nombre: a.nombre,
+              conversacionesQueAtendio: a.conversaciones,
+              respuestas: a.respuestas,
+              respuestaMediana: duracionLegible(a.medianaRespuestaSeg),
+              quedaronEsperando: a.sinRespuesta,
+              diasActivo: a.diasActivo,
+            })),
+            ...(m.advertencias.length ? { avisoPermisos: m.advertencias[0] } : {}),
+            siguiente:
+              "Resume en pocas líneas: cuántas conversaciones entraron y el día más fuerte, quién respondió más rápido y si alguien dejó clientes esperando. Tiempos tal cual vienen. Sin tablas largas.",
           };
         },
       },

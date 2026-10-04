@@ -151,6 +151,29 @@ facturación real, ritmo del mes, equipo asignado y recordatorios.
   `PUT .../integraciones/crm` con `token` → token_propio; sin `token` →
   agencia si está disponible, si no 400.
 
+### CRM: métricas diarias y dashboard (2026-10-04)
+- Modelo `crmMetricaDiaria.model.ts` (colección `crmmetricasdiarias`, única
+  por `workspaceId + dia`, hora de Ecuador): conversaciones con actividad,
+  nuevas, por canal, mensajes entrantes/salientes/automáticos, contactos que
+  escribieron, sin respuesta, mediana de primera respuesta y `asesores[]`
+  (userId de GHL, nombre, mensajes, conversaciones, respuestas, `tiemposSeg`
+  hasta 300 para medianas de rango, sinRespuesta). Es también el candado:
+  `pendiente → en_curso → terminada | fallida` (3 intentos).
+- Cálculo en `crmMetricas.service.ts`: lee TODAS las conversaciones con
+  actividad desde el inicio del día (tope 1.500, desde ahora hacia atrás) y
+  sus mensajes (`mensajesDesde`, páginas de 100). Saliente humano = trae
+  `userId` y no viene de workflow/campaña/acción masiva. La respuesta cuenta
+  el día en que se envía; sin respuesta = el cliente escribió ese día y al
+  cierre seguía esperando (se atribuye al asignado).
+- Cron `/api/cron/crm-metricas` (`5,35 * * * *`): pendiente ayer para cada
+  CRM conectado (los últimos 7 la primera vez) y calcula lo que falte.
+- `GET .../integraciones/crm/metricas?dias=7` (días cerrados hasta ayer) y
+  `POST .../integraciones/crm/metricas/recalcular` `{ desde, hasta }` (solo
+  equipo, máx. 31 días; lo que no alcanza lo sigue el cron).
+- `users.readonly` es opcional (`permisos.usuarios`): sin él no hay nombres de
+  asesores; `CrmVista.advertencias` lo avisa. `CrmCliente.get` reintenta 429.
+- Bakano People: herramienta `verMiEquipoEnCrm`.
+
 ## Notas importantes
 - No hay cron jobs instalados aún — usar `node-cron`
 - Los emails tienen plantillas HTML inline (ver patrón en `resend.service.ts`)

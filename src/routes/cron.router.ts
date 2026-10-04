@@ -420,6 +420,33 @@ cronRouter.get("/ghl-production-sync", async (req: Request, res: Response) => {
   }
 });
 
+// GET /api/cron/crm-metricas — cada 30 min (a los 5 y 35). Deja pendiente
+// el dia de ayer de cada CRM conectado (y los ultimos 7 la primera vez) y
+// calcula las metricas diarias que falten: conversaciones por dia, contactos
+// que escribieron y como respondio cada asesor. Vercel corta a los 60 s: cada
+// corrida sigue donde quedo la anterior (CrmMetricaDiaria es el candado).
+cronRouter.get("/crm-metricas", async (req: Request, res: Response) => {
+  const secret = process.env.CRON_SECRET;
+  if (!secret || req.headers["authorization"] !== `Bearer ${secret}`) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  try {
+    const { crmMetricasService } = await import("../services/crmMetricas.service");
+    const r = await crmMetricasService.correr();
+    if (r.calculados || r.errores.length) {
+      console.log(
+        `[Cron] CRM métricas — calculados: ${r.calculados}, pendientes: ${r.pendientes}` +
+          (r.errores.length ? ` — errores: ${r.errores.join(" | ")}` : "")
+      );
+    }
+    res.status(200).json({ ok: true, ...r });
+  } catch (error: any) {
+    console.error("[Cron] CRM métricas:", error?.message || error);
+    res.status(500).json({ ok: false, error: error?.message || "error" });
+  }
+});
+
 // GET /api/cron/crm-cierres — todos los dias desde las 14:00 UTC (09:00
 // Ecuador) y cada 15 min hasta las 09:45. Revisa las ultimas 24 h del CRM de
 // cada cliente conectado, guarda los "cierres casi solos" y se los cuenta al

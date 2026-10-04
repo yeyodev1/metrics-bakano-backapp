@@ -6,7 +6,9 @@ import {
   conectarCrm,
   desconectarCrm,
   getIntegraciones,
+  getMetricasCrm,
   probarCrmGuardado,
+  recalcularMetricasCrm,
   revisarCrmManual,
 } from "../controllers/crmIntegracion.controller";
 
@@ -24,6 +26,8 @@ crmIntegracionRouter.post("/:workspaceId/integraciones/crm/probar", authMiddlewa
 // Solo equipo de Bakano (se valida en el controlador: 403 para clientes).
 crmIntegracionRouter.patch("/:workspaceId/integraciones/crm/revision", authMiddleware, workspaceAccessMiddleware, cambiarRevisionCrm);
 crmIntegracionRouter.post("/:workspaceId/integraciones/crm/revisar", authMiddleware, workspaceAccessMiddleware, revisarCrmManual);
+crmIntegracionRouter.get("/:workspaceId/integraciones/crm/metricas", authMiddleware, workspaceAccessMiddleware, getMetricasCrm);
+crmIntegracionRouter.post("/:workspaceId/integraciones/crm/metricas/recalcular", authMiddleware, workspaceAccessMiddleware, recalcularMetricasCrm);
 crmIntegracionRouter.delete("/:workspaceId/integraciones/crm", authMiddleware, workspaceAccessMiddleware, desconectarCrm);
 
 export default crmIntegracionRouter;

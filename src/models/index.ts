@@ -27,6 +27,7 @@ import { OnboardingEventoModel } from "./onboardingEvento.model";
 import { CrmIntegrationModel } from "./crmIntegration.model";
 import { CrmHallazgoModel } from "./crmHallazgo.model";
 import { CrmRevisionModel } from "./crmRevision.model";
+import { CrmMetricaDiariaModel } from "./crmMetricaDiaria.model";
 
 const models = {
   users: UserModel,
@@ -58,6 +59,7 @@ const models = {
   crmIntegrations: CrmIntegrationModel,
   crmHallazgos: CrmHallazgoModel,
   crmRevisiones: CrmRevisionModel,
+  crmMetricasDiarias: CrmMetricaDiariaModel,
 };
 
 export default models;

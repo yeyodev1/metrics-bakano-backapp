@@ -21,6 +21,8 @@ import type { CanalHallazgoCrm } from "../models/crmHallazgo.model";
  *     location_id (con guion bajo), status open|won|lost|abandoned|all, page, limit (max 100)
  * - GET /opportunities/pipelines              Version 2021-07-28 · opportunities.readonly (locationId)
  * - GET /contacts/{id} y GET /contacts/       Version 2021-07-28 · contacts.readonly
+ * - GET /users/                               Version 2021-07-28 · users.readonly (locationId)
+ *     Opcional: sin el, los asesores se muestran por su id.
  *
  * La doc no detalla todo: `lastMessageDate`/`lastMessageDirection` de la
  * conversacion y el anidado de mensajes ({ messages: { messages: [] } }) se
@@ -57,6 +59,11 @@ const CONCURRENCIA = 5;
 /** Por defecto: oportunidad abierta sin moverse de etapa en tantos dias = estancada. */
 const DIAS_ESTANCADA = 7;
 const VERSION_OAUTH = "2021-07-28";
+/** 429 (GoHighLevel limita ~100 llamadas cada 10 s por location): reintentos con espera. */
+const REINTENTOS_429 = 2;
+const ESPERA_429_MS = 2_000;
+
+const esperar = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 type Fallo = "sin_permiso" | "no_autorizado" | "fallo";
 type Resultado<T> = { ok: true; data: T } | { ok: false; tipo: Fallo; status?: number; mensaje: string };
@@ -164,6 +171,11 @@ export interface MensajeCrm {
   tipo: string;
   texto: string;
   fecha: Date | null;
+  id?: string;
+  /** Usuario del CRM que lo envio (solo salientes escritos por una persona). */
+  userId?: string | null;
+  /** De donde salio: app, workflow, bulk_actions, campaign, api... */
+  fuente?: string | null;
 }
 
 export interface ConversacionCrm {
@@ -237,6 +249,19 @@ function texto(valor: unknown): string | null {
   return s || null;
 }
 
+/** Por fecha y sin repetidos (las paginas pueden solaparse). */
+function ordenarMensajes(mensajes: MensajeCrm[]): MensajeCrm[] {
+  const vistos = new Set<string>();
+  return mensajes
+    .filter((m) => !m.id || (vistos.has(m.id) ? false : (vistos.add(m.id), true)))
+    .sort((a, b) => (a.fecha?.getTime() ?? 0) - (b.fecha?.getTime() ?? 0));
+}
+
+/** Tipos de mensaje que son conversacion real (no actividad del sistema). */
+export function esMensajeDeConversacion(tipo?: string | null): boolean {
+  return TIPOS_CONVERSACION.test(String(tipo || "")) || esWhatsapp(tipo);
+}
+
 export class CrmCliente {
   constructor(
     private readonly locationId: string,
@@ -251,24 +276,31 @@ export class CrmCliente {
       if (error instanceof CrmAgenciaError) return { ok: false, tipo: error.tipo, status: error.status, mensaje: error.message };
       return { ok: false, tipo: "fallo", mensaje: String(error?.message || error).slice(0, 300) };
     }
-    try {
-      const r = await axios.get(`${GHL_API_BASE}${ruta}`, {
-        headers: { Authorization: `Bearer ${token}`, Version: version, Accept: "application/json" },
-        params,
-        timeout: TIMEOUT_MS,
-      });
-      return { ok: true, data: r.data as T };
-    } catch (error: any) {
-      const status: number | undefined = error?.response?.status;
-      const cuerpo = error?.response?.data;
-      const mensaje = String(cuerpo?.message || cuerpo?.error || error?.message || "error").slice(0, 300);
-      // "The token is not authorized for this scope" = falta ese permiso.
-      // Otro 401/403 (JWT invalido, sin acceso a la location) = token malo.
-      if ((status === 401 || status === 403) && /scope/i.test(mensaje)) return { ok: false, tipo: "sin_permiso", status, mensaje };
-      // Token de subcuenta de la agencia vencido o revocado antes de tiempo: se pide otro la proxima vez.
-      if (status === 401 && typeof this.token !== "string") this.token.invalidar();
-      if (status === 401 || status === 403) return { ok: false, tipo: "no_autorizado", status, mensaje };
-      return { ok: false, tipo: "fallo", status, mensaje };
+    for (let intento = 0; ; intento++) {
+      try {
+        const r = await axios.get(`${GHL_API_BASE}${ruta}`, {
+          headers: { Authorization: `Bearer ${token}`, Version: version, Accept: "application/json" },
+          params,
+          timeout: TIMEOUT_MS,
+        });
+        return { ok: true, data: r.data as T };
+      } catch (error: any) {
+        const status: number | undefined = error?.response?.status;
+        if (status === 429 && intento < REINTENTOS_429) {
+          const pide = Number(error?.response?.headers?.["retry-after"]);
+          await esperar(pide > 0 && pide <= 10 ? pide * 1000 : ESPERA_429_MS * (intento + 1));
+          continue;
+        }
+        const cuerpo = error?.response?.data;
+        const mensaje = String(cuerpo?.message || cuerpo?.error || error?.message || "error").slice(0, 300);
+        // "The token is not authorized for this scope" = falta ese permiso.
+        // Otro 401/403 (JWT invalido, sin acceso a la location) = token malo.
+        if ((status === 401 || status === 403) && /scope/i.test(mensaje)) return { ok: false, tipo: "sin_permiso", status, mensaje };
+        // Token de subcuenta de la agencia vencido o revocado antes de tiempo: se pide otro la proxima vez.
+        if (status === 401 && typeof this.token !== "string") this.token.invalidar();
+        if (status === 401 || status === 403) return { ok: false, tipo: "no_autorizado", status, mensaje };
+        return { ok: false, tipo: "fallo", status, mensaje };
+      }
     }
   }
 
@@ -286,7 +318,20 @@ export class CrmCliente {
   }
 
   async mensajes(conversationId: string, limit = MENSAJES_POR_CONVERSACION): Promise<Resultado<MensajeCrm[]>> {
-    const r = await this.get<any>(`/conversations/${encodeURIComponent(conversationId)}/messages`, VERSION_CONVERSACIONES, { limit });
+    const r = await this.paginaDeMensajes(conversationId, limit);
+    return r.ok ? { ok: true, data: r.data.mensajes } : r;
+  }
+
+  /** Una pagina de mensajes (los mas recientes primero en GHL; aqui ordenados por fecha). */
+  private async paginaDeMensajes(
+    conversationId: string,
+    limit: number,
+    lastMessageId?: string
+  ): Promise<Resultado<{ mensajes: MensajeCrm[]; siguiente: string | null }>> {
+    const r = await this.get<any>(`/conversations/${encodeURIComponent(conversationId)}/messages`, VERSION_CONVERSACIONES, {
+      limit,
+      ...(lastMessageId ? { lastMessageId } : {}),
+    });
     if (!r.ok) return r;
     // La respuesta real viene anidada ({ messages: { messages: [] } }); por si
     // acaso tambien se acepta el arreglo plano que muestra el esquema.
@@ -297,9 +342,67 @@ export class CrmCliente {
         tipo: String(m?.messageType || m?.type || ""),
         texto: String(m?.body || "").trim(),
         fecha: fecha(m?.dateAdded),
+        id: texto(m?.id) ?? undefined,
+        userId: texto(m?.userId),
+        fuente: texto(m?.source),
       }))
       .sort((a, b) => (a.fecha?.getTime() ?? 0) - (b.fecha?.getTime() ?? 0));
-    return { ok: true, data: mensajes };
+    const anidado = Array.isArray(r.data?.messages) ? r.data : r.data?.messages;
+    const siguiente = anidado?.nextPage && texto(anidado?.lastMessageId) ? String(anidado.lastMessageId) : null;
+    return { ok: true, data: { mensajes, siguiente } };
+  }
+
+  /**
+   * Mensajes de una conversacion desde `desde` hasta ahora (todos los tipos),
+   * por paginas de 100 hasta pasar `desde` o `maxPaginas`.
+   * `completo`: false si quedaron mensajes del rango sin leer.
+   */
+  async mensajesDesde(conversationId: string, desde: Date, maxPaginas = 3): Promise<Resultado<{ mensajes: MensajeCrm[]; completo: boolean }>> {
+    const todos: MensajeCrm[] = [];
+    let cursor: string | undefined;
+    for (let pagina = 0; pagina < maxPaginas; pagina++) {
+      const r = await this.paginaDeMensajes(conversationId, 100, cursor);
+      if (!r.ok) return r;
+      todos.push(...r.data.mensajes);
+      const masViejo = r.data.mensajes[0]?.fecha?.getTime();
+      if (!r.data.siguiente || (masViejo !== undefined && masViejo < desde.getTime())) {
+        return { ok: true, data: { mensajes: ordenarMensajes(todos), completo: true } };
+      }
+      cursor = r.data.siguiente;
+    }
+    return { ok: true, data: { mensajes: ordenarMensajes(todos), completo: false } };
+  }
+
+  /**
+   * Todas las conversaciones con ultimo mensaje desde `desde` hasta ahora
+   * (crudas de GHL), paginando hasta `max`. Va desde ahora y no desde el fin
+   * del dia: una conversacion que siguio despues tiene su ultimo mensaje
+   * despues y se perderia. Lanza CrmTokenInvalidoError si el token no sirve.
+   */
+  async conversacionesActivasDesde(desde: Date, opciones: { max: number; limiteMs?: number }): Promise<{ crudas: any[]; truncado: boolean }> {
+    const crudas: any[] = [];
+    let cursor: unknown;
+    const porPagina = 100;
+    while (crudas.length < opciones.max) {
+      if (opciones.limiteMs && Date.now() > opciones.limiteMs) return { crudas, truncado: true };
+      const r = await this.buscarConversaciones({ limit: porPagina, startAfterDate: cursor });
+      if (!r.ok) {
+        if (r.tipo === "no_autorizado") throw new CrmTokenInvalidoError(/agencia/i.test(r.mensaje) ? r.mensaje : undefined);
+        if (r.tipo === "sin_permiso") throw new CrmTokenInvalidoError("El token perdió el permiso de conversaciones (conversations.readonly)");
+        throw new Error(`conversaciones: ${r.status ?? ""} ${r.mensaje}`);
+      }
+      const lista = r.data?.conversations || [];
+      for (const c of lista) {
+        const ultima = fecha(c?.lastMessageDate ?? c?.dateUpdated);
+        if (ultima && ultima.getTime() < desde.getTime()) return { crudas, truncado: false };
+        crudas.push(c);
+      }
+      const ultima = lista[lista.length - 1];
+      const siguiente = Array.isArray(ultima?.sort) ? ultima.sort[0] : ultima?.lastMessageDate;
+      if (!lista.length || siguiente === undefined || siguiente === cursor) return { crudas, truncado: false };
+      cursor = siguiente;
+    }
+    return { crudas: crudas.slice(0, opciones.max), truncado: true };
   }
 
   buscarOportunidades(opciones: { page?: number; limit?: number; status?: string } = {}) {
@@ -457,13 +560,17 @@ export class CrmCliente {
    * tiene users.readonly devuelve [] y los asesores se muestran por su id.
    */
   async usuarios(): Promise<UsuarioCrm[]> {
-    const r = await this.get<{ users?: any[] }>("/users/", VERSION_CONTACTOS, { locationId: this.locationId });
+    const r = await this.usuariosCrudo();
     if (!r.ok) return [];
     return (r.data?.users || []).map((u) => ({
       id: String(u.id),
       nombre: texto(u.name) || texto([u.firstName, u.lastName].filter(Boolean).join(" ")) || "Sin nombre",
       email: texto(u.email),
     }));
+  }
+
+  usuariosCrudo() {
+    return this.get<{ users?: any[] }>("/users/", VERSION_CONTACTOS, { locationId: this.locationId });
   }
 
   /** La ultima conversacion de un contacto, con sus ultimos mensajes. */
@@ -595,11 +702,12 @@ export class CrmCliente {
  */
 export async function probarCrm(locationId: string, token: TokenCrm): Promise<ResultadoPruebaCrm> {
   const cliente = new CrmCliente(locationId, token);
-  const [convs, wa, opps, contactos] = await Promise.all([
+  const [convs, wa, opps, contactos, usuarios] = await Promise.all([
     cliente.buscarConversaciones({ limit: 10 }),
     cliente.buscarConversaciones({ limit: 1, lastMessageType: "TYPE_WHATSAPP" }),
     cliente.pipelines(),
     cliente.listarContactos(1),
+    cliente.usuariosCrudo(),
   ]);
 
   // Mensajes: se prueba con la primera conversacion. Si la location no tiene
@@ -636,6 +744,7 @@ export async function probarCrm(locationId: string, token: TokenCrm): Promise<Re
     mensajes: mensajes ? mensajes.ok : convs.ok,
     oportunidades: opps.ok,
     contactos: contactos.ok,
+    usuarios: usuarios.ok,
   };
 
   let whatsapp: EstadoWhatsappCrm = "desconocido";
@@ -645,6 +754,15 @@ export async function probarCrm(locationId: string, token: TokenCrm): Promise<Re
   else if (convs.ok) whatsapp = "no_detectado";
 
   return { permisos, whatsapp };
+}
+
+/** Lo opcional que le falta al token: no impide conectar, pero se avisa. */
+export function advertenciasPermisos(permisos: Partial<PermisosCrm>): string[] {
+  const avisos: string[] = [];
+  if (permisos.usuarios === false) {
+    avisos.push("Sin el permiso users.readonly no se ven los nombres de los asesores: agrégaselo al token para ver cómo responde cada uno.");
+  }
+  return avisos;
 }
 
 /** Lo que le falta al token para la revision diaria, dicho para el cliente. */
