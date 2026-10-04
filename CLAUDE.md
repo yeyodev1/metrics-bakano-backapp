@@ -161,8 +161,10 @@ facturación real, ritmo del mes, equipo asignado y recordatorios.
   `pendiente → en_curso → terminada | fallida` (3 intentos).
 - Cálculo en `crmMetricas.service.ts`: lee TODAS las conversaciones con
   actividad desde el inicio del día (tope 1.500, desde ahora hacia atrás) y
-  sus mensajes (`mensajesDesde`, páginas de 100). Saliente humano = trae
-  `userId` y no viene de workflow/campaña/acción masiva. La respuesta cuenta
+  sus mensajes (`mensajesDesde`, páginas de 100). Saliente humano = no
+  viene de workflow/campaña/acción masiva; sin `userId` (contestado desde la
+  app de IG/WhatsApp) corta la espera pero no se atribuye a un asesor
+  (verificado con datos reales de Bakano 2026-10-04). La respuesta cuenta
   el día en que se envía; sin respuesta = el cliente escribió ese día y al
   cierre seguía esperando (se atribuye al asignado).
 - Cron `/api/cron/crm-metricas` (`5,35 * * * *`): pendiente ayer para cada

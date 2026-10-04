@@ -22,8 +22,9 @@ import { crmIntegracionService, vistaCrm } from "./crmIntegracion.service";
  * Reglas del calculo (todo en hora de Ecuador):
  * - Cuenta solo mensajes de conversacion (WhatsApp, IG, FB, SMS, correo,
  *   llamadas...), no actividad del sistema.
- * - Saliente humano = trae userId y no viene de un flujo, campaña o accion
- *   masiva. Lo demas es automatico y no cuenta como respuesta.
+ * - Saliente humano = no viene de un flujo, campaña o accion masiva. Sin
+ *   userId (contestado desde la app de IG/WhatsApp) corta la espera pero no
+ *   se atribuye a ningun asesor. Lo demas es automatico y no cuenta.
  * - Turno: el primer mensaje del cliente despues de la ultima respuesta
  *   humana. La respuesta se cuenta el dia en que se envia (asi entra la de
  *   la mañana a un mensaje de la noche anterior) y se le atribuye a quien la
@@ -82,8 +83,13 @@ function promedio(valores: number[]): number | null {
   return valores.length ? Math.round(valores.reduce((a, b) => a + b, 0) / valores.length) : null;
 }
 
+/**
+ * Saliente escrito por una persona. Sin userId tambien cuenta: lo que se
+ * contesta desde la app de Instagram o WhatsApp llega sin usuario (no se
+ * atribuye a ningun asesor, pero corta la espera del cliente).
+ */
 function esHumano(m: MensajeCrm): boolean {
-  return m.direccion === "outbound" && Boolean(m.userId) && !FUENTES_AUTOMATICAS.test(String(m.fuente || ""));
+  return m.direccion === "outbound" && !FUENTES_AUTOMATICAS.test(String(m.fuente || ""));
 }
 
 type Calculo = Pick<
@@ -170,14 +176,18 @@ export function calcularDia(
         }
         if (enElDia) {
           salientes++;
-          const a = asesor(m.userId!);
-          a.mensajes++;
-          a.convs.add(c.id);
+          const a = m.userId ? asesor(m.userId) : null;
+          if (a) {
+            a.mensajes++;
+            a.convs.add(c.id);
+          }
           if (esperandoDesde !== null) {
             const seg = Math.max(0, Math.round((t - esperandoDesde) / 1000));
-            a.respuestas++;
-            if (a.tiemposSeg.length < MAX_TIEMPOS_POR_ASESOR) a.tiemposSeg.push(seg);
             tiempos.push(seg);
+            if (a) {
+              a.respuestas++;
+              if (a.tiemposSeg.length < MAX_TIEMPOS_POR_ASESOR) a.tiemposSeg.push(seg);
+            }
           }
         }
         esperandoDesde = null;
