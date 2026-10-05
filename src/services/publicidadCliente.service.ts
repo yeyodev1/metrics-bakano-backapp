@@ -41,6 +41,45 @@ export type Publicidad =
   | { conectado: true; anuncios: AnuncioActivo[]; gastoUltimos30: number; cuenta: string | null }
   | { conectado: false; motivo: "sin_cuenta" | "sin_token" | "error_meta"; detalle?: string };
 
+/** Lo que Meta cuenta como resultado, en palabras del cliente. */
+const RESULTADOS: { tipos: string[]; nombre: string }[] = [
+  { tipos: ["onsite_conversion.messaging_conversation_started_7d"], nombre: "conversaciones iniciadas" },
+  { tipos: ["lead", "onsite_conversion.lead_grouped", "offsite_conversion.fb_pixel_lead"], nombre: "leads" },
+  { tipos: ["purchase", "offsite_conversion.fb_pixel_purchase", "onsite_web_purchase"], nombre: "compras" },
+  { tipos: ["onsite_conversion.post_save", "post_engagement"], nombre: "interacciones" },
+];
+/** Meta guarda insights hasta 37 meses atras. */
+const MESES_HISTORIA = 37;
+const MAX_DIAS_RANGO = 366;
+
+export function resultadosDe(actions: any[] | undefined, gasto: number): { tipo: string; cantidad: number; costoPorResultado: string | null }[] {
+  const lista = Array.isArray(actions) ? actions : [];
+  const salida: { tipo: string; cantidad: number; costoPorResultado: string | null }[] = [];
+  for (const r of RESULTADOS) {
+    // Un mismo resultado puede venir con varios nombres: se toma el mayor, no la suma.
+    const cantidad = Math.max(0, ...lista.filter((a) => r.tipos.includes(a?.action_type)).map((a) => Number(a.value || 0)));
+    if (cantidad > 0) salida.push({ tipo: r.nombre, cantidad, costoPorResultado: gasto > 0 ? comoPlata(gasto / cantidad) : null });
+  }
+  return salida;
+}
+
+/** Valida fechas YYYY-MM-DD: en orden, no futuras (hora Ecuador) y dentro de lo que guarda Meta. */
+export function validarRango(desde: string, hasta: string, hoy = new Date()): { desde: string; hasta: string; dias: number } | { error: string } {
+  const formato = /^\d{4}-\d{2}-\d{2}$/;
+  if (!formato.test(desde || "") || !formato.test(hasta || "")) return { error: "Las fechas deben venir como AAAA-MM-DD." };
+  const hoyEc = new Date(hoy.getTime() - 5 * 3_600_000).toISOString().slice(0, 10);
+  let fin = hasta;
+  if (desde > hasta) return { error: "La fecha de inicio es posterior a la de fin." };
+  if (desde > hoyEc) return { error: "Ese periodo todavía no ha pasado: no hay datos de días futuros." };
+  if (fin > hoyEc) fin = hoyEc;
+  const limite = new Date(hoy);
+  limite.setUTCMonth(limite.getUTCMonth() - MESES_HISTORIA);
+  if (desde < limite.toISOString().slice(0, 10)) return { error: `Meta solo guarda los resultados de los últimos ${MESES_HISTORIA} meses.` };
+  const dias = Math.round((Date.parse(fin) - Date.parse(desde)) / 86_400_000) + 1;
+  if (dias > MAX_DIAS_RANGO) return { error: "Pide como mucho un año a la vez." };
+  return { desde, hasta: fin, dias };
+}
+
 class PublicidadClienteService {
   /**
    * Anuncios ACTIVOS de la cuenta, con gasto de los ultimos 30 dias.
@@ -142,6 +181,95 @@ class PublicidadClienteService {
         "Dile que no puedes ver la pauta en este momento, que ya avisaste a Denisse Quimi y que ella se comunica " +
         "para resolverlo. No inventes anuncios, gastos ni fechas.",
     };
+  }
+
+  /**
+   * Resultados de la pauta entre dos fechas (YYYY-MM-DD, dia de Ecuador =
+   * dia de la cuenta): gasto, alcance, clics, resultados (mensajes, leads,
+   * compras), por campaña y dia a dia si el rango es corto. Mismo trato que
+   * paraElCliente cuando no hay dato: se avisa y no se inventa.
+   */
+  async resultadosEnRango(workspaceId: Types.ObjectId, desde: string, hasta: string): Promise<Record<string, unknown>> {
+    const rango = validarRango(desde, hasta);
+    if ("error" in rango) return { hayDatos: false, rangoInvalido: true, motivo: rango.error };
+
+    const workspace: any = await models.workspaces.findById(workspaceId).select("metaAds").lean();
+    const adAccountId = workspace?.metaAds?.adAccountId;
+    const token = adAccountId ? workspace.metaAds?.accessToken || (await metaService.getGlobalAccessToken().catch(() => null)) : null;
+    if (!adAccountId || !token) {
+      const motivo = adAccountId ? "sin_token" : "sin_cuenta";
+      const avisado = await this.avisarSinDatos(workspaceId, motivo);
+      return {
+        hayDatos: false,
+        motivo,
+        encargadoNotificado: avisado,
+        encargado: "Denisse Quimi",
+        siguiente:
+          motivo === "sin_cuenta"
+            ? "Dile que su cuenta publicitaria todavía no está conectada a Metrics, por eso no puedes ver su pauta por fechas, y que ya avisaste a Denisse Quimi para conectarla. No inventes cifras."
+            : "Dile que ahora mismo no puedes leer su pauta, que ya avisaste a Denisse Quimi y que ella se comunica. No inventes cifras.",
+      };
+    }
+
+    const cuenta = `${GRAPH}/act_${String(adAccountId).replace(/^act_/, "")}/insights`;
+    const base = { access_token: token, time_range: JSON.stringify({ since: rango.desde, until: rango.hasta }) };
+    const campos = "spend,impressions,reach,clicks,inline_link_clicks,ctr,cpm,frequency,actions";
+    try {
+      const [total, campanas, diario] = await Promise.all([
+        axios.get(cuenta, { params: { ...base, level: "account", fields: campos }, timeout: 20_000 }),
+        axios.get(cuenta, { params: { ...base, level: "campaign", fields: `campaign_name,${campos}`, limit: 50 }, timeout: 20_000 }),
+        rango.dias <= 31
+          ? axios.get(cuenta, { params: { ...base, level: "account", fields: "spend,actions", time_increment: 1, limit: 40 }, timeout: 20_000 })
+          : Promise.resolve(null),
+      ]);
+      const t = total.data?.data?.[0];
+      if (!t) {
+        return { hayDatos: true, desde: rango.desde, hasta: rango.hasta, sinActividad: true, gasto: comoPlata(0) };
+      }
+      return {
+        hayDatos: true,
+        desde: rango.desde,
+        hasta: rango.hasta,
+        cuenta: workspace.metaAds?.adAccountName ?? null,
+        gasto: comoPlata(Number(t.spend || 0)),
+        alcance: Number(t.reach || 0),
+        impresiones: Number(t.impressions || 0),
+        frecuencia: t.frequency ? Math.round(Number(t.frequency) * 100) / 100 : null,
+        clicsEnElEnlace: Number(t.inline_link_clicks || 0),
+        ctr: t.ctr ? `${Math.round(Number(t.ctr) * 100) / 100}%` : null,
+        cpm: t.cpm ? comoPlata(Number(t.cpm)) : null,
+        resultados: resultadosDe(t.actions, Number(t.spend || 0)),
+        porCampana: (campanas.data?.data ?? [])
+          .map((c: any) => ({ campana: c.campaign_name, gastoNum: Number(c.spend || 0), c }))
+          .sort((a: any, b: any) => b.gastoNum - a.gastoNum)
+          .slice(0, 8)
+          .map(({ campana, gastoNum, c }: any) => ({
+            campana,
+            gasto: comoPlata(gastoNum),
+            alcance: Number(c.reach || 0),
+            clicsEnElEnlace: Number(c.inline_link_clicks || 0),
+            resultados: resultadosDe(c.actions, gastoNum),
+          })),
+        diaADia: diario
+          ? (diario.data?.data ?? []).map((d: any) => ({
+              dia: d.date_start,
+              gasto: comoPlata(Number(d.spend || 0)),
+              resultados: resultadosDe(d.actions, Number(d.spend || 0)).map((r) => `${r.cantidad} ${r.tipo}`).join(", ") || "sin resultados",
+            }))
+          : null,
+      };
+    } catch (error: any) {
+      const detalle = error.response?.data?.error?.message || error.message;
+      console.error("[Publicidad] Meta no respondió (rango):", detalle);
+      const avisado = await this.avisarSinDatos(workspaceId, "error_meta", detalle);
+      return {
+        hayDatos: false,
+        motivo: "error_meta",
+        encargadoNotificado: avisado,
+        encargado: "Denisse Quimi",
+        siguiente: "Dile que ahora mismo no puedes leer su pauta, que ya avisaste a Denisse Quimi y que ella se comunica. No inventes cifras.",
+      };
+    }
   }
 
   /** Aviso al equipo de que la pauta de un cliente no se puede leer. */
