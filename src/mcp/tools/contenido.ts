@@ -7,7 +7,7 @@ import { VideoPlanningService } from "../../services/videoPlanning.service";
 import { atencionClienteService } from "../../services/atencionCliente.service";
 import { destacarClienteService } from "../../services/destacarCliente.service";
 import type { PerfilMcp, UsuarioMcp } from "../perfiles";
-import { fecha, leerFecha, recortar, resolverCliente, type ToolMcp } from "./base";
+import { ANTICIPACION_PRODUCCION_H, fecha, leerFecha, recortar, resolverCliente, type ToolMcp } from "./base";
 
 const planningService = new PlanningService();
 const videoPlanningService = new VideoPlanningService();
@@ -17,7 +17,6 @@ const MUEVEN_VIDEO: PerfilMcp[] = ["direccion", "pm", "contenido"];
 /** Producción organiza su calendario completo; contenido se entera de cada cambio. */
 const MUEVEN_PRODUCCION: PerfilMcp[] = ["direccion", "pm", "produccion"];
 const MUEVEN_ALGO: PerfilMcp[] = [...new Set([...MUEVEN_VIDEO, ...MUEVEN_PRODUCCION])];
-const ANTICIPACION_PRODUCCION_H = 48;
 const TOKEN_MIN = 5;
 
 function secreto(): string {

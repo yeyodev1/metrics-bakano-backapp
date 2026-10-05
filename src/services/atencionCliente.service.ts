@@ -397,7 +397,8 @@ class AtencionClienteService {
   }
 
   /** Premium si el cliente ya grabo por el calendario premium; si no, standard. */
-  private async calendarioProduccion(workspaceId: Types.ObjectId): Promise<string> {
+  async calendarioProduccion(workspaceId: Types.ObjectId, preferido?: keyof typeof CALENDARIOS_PRODUCCION): Promise<string> {
+    if (preferido) return CALENDARIOS_PRODUCCION[preferido];
     const previa = await models.planning
       .findOne({ workspaceId, "crm.calendarId": { $in: Object.values(CALENDARIOS_PRODUCCION) } })
       .sort({ date: -1 })
@@ -438,42 +439,18 @@ class AtencionClienteService {
       if (!cliente.email) return { ok: false, motivo: "error" };
       const calendario = await this.calendarioProduccion(chat.workspaceId!);
 
-      try {
-        if (!(await this.sigueLibre(calendario, inicio))) return { ok: false, motivo: "ocupado" };
-        const contactId = await this.contactoCrm(cliente);
-        await ghlService.createAppointment({
-          calendarId: calendario,
-          contactId,
-          startTime: inicio,
-          title: `${cliente.entorno} · Producción (Telegram)`,
-          permitirProduccion: true,
-        });
-      } catch (error: any) {
-        console.error("[Atención] no se pudo agendar la producción:", error.response?.data || error.message);
-        return { ok: false, motivo: "error" };
-      }
+      const cita = await this.citaProduccionEnCrm({
+        workspaceId: chat.workspaceId!,
+        calendario,
+        inicio,
+        cliente,
+        titulo: `${cliente.entorno} · Producción (Telegram)`,
+      });
+      if (!cita.ok) return { ok: false, motivo: cita.motivo };
+      const { enPlanificador } = cita;
 
       const cuando = fechaEcuador(inicio);
       const correosProduccion = equipoAtencionService.correos("produccion");
-
-      // El sync del CRM crea la produccion en el Planificador y manda su
-      // correo + notificacion al equipo. Si no la crea, se avisa aqui.
-      const sync = await crmProductionSyncService
-        .sincronizarDesdeCrm({ desde: new Date(inicio.getTime() - 86_400_000), hasta: new Date(inicio.getTime() + 86_400_000) })
-        .catch((error: any) => {
-          console.error("[Atención] sync de producción:", error?.message || error);
-          return null;
-        });
-
-      // "creadas" es 0 si el webhook del CRM ya la habia creado: lo que importa
-      // es si ya esta en el Planificador (ahi el sync ya aviso al equipo).
-      const enPlanificador =
-        sync !== null &&
-        (await models.planning.exists({
-          workspaceId: chat.workspaceId,
-          date: { $gte: new Date(inicio.getTime() - 60_000), $lte: new Date(inicio.getTime() + 60_000) },
-          title: { $not: /^CANCELADA/ }, cancelada: { $ne: true },
-        }));
       if (enPlanificador) {
         await slackService
           .avisarEquipo({
@@ -514,6 +491,153 @@ class AtencionClienteService {
     } finally {
       await this.soltarCandado(chat);
     }
+  }
+
+  /**
+   * Nucleo comun de agendar una produccion: cita en el calendario de
+   * produccion del CRM y sync para que entre al Planificador (el sync ya
+   * avisa al equipo cuando la crea). Lo usan el bot y el equipo por el MCP.
+   */
+  async citaProduccionEnCrm(o: {
+    workspaceId: Types.ObjectId;
+    calendario: string;
+    inicio: Date;
+    cliente: DatosCliente;
+    titulo: string;
+  }): Promise<{ ok: true; enPlanificador: boolean; planningId: string | null } | { ok: false; motivo: "ocupado" | "error" }> {
+    try {
+      if (!(await this.sigueLibre(o.calendario, o.inicio))) return { ok: false, motivo: "ocupado" };
+      const contactId = await this.contactoCrm(o.cliente);
+      await ghlService.createAppointment({
+        calendarId: o.calendario,
+        contactId,
+        startTime: o.inicio,
+        title: o.titulo,
+        permitirProduccion: true,
+      });
+    } catch (error: any) {
+      console.error("[Atención] no se pudo agendar la producción:", error.response?.data || error.message);
+      return { ok: false, motivo: "error" };
+    }
+
+    // El sync del CRM crea la produccion en el Planificador y manda su
+    // correo + notificacion al equipo. Si no la crea, avisa quien llama.
+    const sync = await crmProductionSyncService
+      .sincronizarDesdeCrm({ desde: new Date(o.inicio.getTime() - 86_400_000), hasta: new Date(o.inicio.getTime() + 86_400_000) })
+      .catch((error: any) => {
+        console.error("[Atención] sync de producción:", error?.message || error);
+        return null;
+      });
+
+    // "creadas" es 0 si el webhook del CRM ya la habia creado: lo que importa
+    // es si ya esta en el Planificador (ahi el sync ya aviso al equipo).
+    const enPlan =
+      sync === null
+        ? null
+        : await models.planning
+            .findOne({
+              workspaceId: o.workspaceId,
+              date: { $gte: new Date(o.inicio.getTime() - 60_000), $lte: new Date(o.inicio.getTime() + 60_000) },
+              title: { $not: /^CANCELADA/ },
+              cancelada: { $ne: true },
+            })
+            .select("_id")
+            .lean();
+    return { ok: true, enPlanificador: Boolean(enPlan), planningId: enPlan ? String(enPlan._id) : null };
+  }
+
+  /**
+   * El contacto del cliente para la cita: el admin cliente mas antiguo del
+   * entorno o, si no hay, cualquier usuario cliente. null si no tiene ninguno.
+   */
+  async contactoDelEntorno(workspaceId: Types.ObjectId): Promise<DatosCliente | null> {
+    const [workspace, usuarios] = await Promise.all([
+      models.workspaces.findById(workspaceId).select("name").lean(),
+      models.users
+        .find({ "workspaces.workspaceId": workspaceId, isInternal: { $ne: true }, role: { $ne: "superadmin" }, isActive: { $ne: false } })
+        .select("name lastName email workspaces createdAt")
+        .sort({ createdAt: 1 })
+        .lean(),
+    ]);
+    const conCorreo = usuarios.filter((u: any) => u.email);
+    const esAdmin = (u: any) =>
+      (u.workspaces ?? []).some((w: any) => String(w.workspaceId) === String(workspaceId) && w.role === "admin");
+    const elegido: any = conCorreo.find(esAdmin) ?? conCorreo[0];
+    if (!elegido) return null;
+    return {
+      entorno: workspace?.name || "Cliente",
+      nombre: [elegido.name, elegido.lastName].filter(Boolean).join(" ") || elegido.email,
+      firstName: elegido.name,
+      lastName: elegido.lastName,
+      email: elegido.email,
+    };
+  }
+
+  /**
+   * Produccion creada por el equipo (MCP): misma cita del CRM que el bot,
+   * sin las reglas del cliente (meses, Ariana, pagos), que el equipo ve como
+   * advertencias y decide. Avisa a produccion y a contenido/atencion.
+   */
+  async crearProduccionPorEquipo(
+    workspaceId: Types.ObjectId,
+    inicio: Date,
+    actor: { id: string; nombre: string },
+    opciones: { calendario?: keyof typeof CALENDARIOS_PRODUCCION } = {}
+  ): Promise<
+    | { ok: true; cuando: string; calendario: string; enPlanificador: boolean; planningId: string | null; contacto: string; avisados: string[] }
+    | { ok: false; motivo: "sin_calendario" | "sin_contacto" | "ocupado" | "error" }
+  > {
+    if (!ghlService.isConfigured()) return { ok: false, motivo: "sin_calendario" };
+    const cliente = await this.contactoDelEntorno(workspaceId);
+    if (!cliente) return { ok: false, motivo: "sin_contacto" };
+    const calendario = await this.calendarioProduccion(workspaceId, opciones.calendario);
+    const cita = await this.citaProduccionEnCrm({
+      workspaceId,
+      calendario,
+      inicio,
+      cliente,
+      titulo: `${cliente.entorno} · Producción (creada por ${actor.nombre})`,
+    });
+    if (!cita.ok) return { ok: false, motivo: cita.motivo };
+
+    const cuando = fechaEcuador(inicio);
+    const correosProduccion = equipoAtencionService.correos("produccion");
+    const titulo = `🎬 Producción de ${cliente.entorno} · ${cuando}`;
+    const detalle = `${actor.nombre} la creó desde el MCP. Ya está en el calendario del CRM${cita.enPlanificador ? " y en el Planificador" : ""}.`;
+    if (!cita.enPlanificador) {
+      // Sin Planificador el sync no aviso: se avisa aqui a produccion.
+      const internos = await equipoAtencionService.usuarios("produccion");
+      await Promise.allSettled(
+        internos.map((u) => notificationService.create(u._id, "produccion_agendada", titulo, detalle, { workspaceId }))
+      );
+    }
+    await slackService
+      .avisarEquipo({ titulo, detalle, correos: correosProduccion })
+      .catch((error) => console.error("[Atención] Slack producción (equipo):", error?.message || error));
+
+    // Contenido y atencion se enteran ahora, no la semana de grabar.
+    const produccion = await produccionPlanificacionService.produccionDe(workspaceId, inicio).catch(() => null);
+    await produccionPlanificacionService
+      .avisarNuevaProduccion({
+        workspaceId,
+        entorno: cliente.entorno,
+        cliente: cliente.nombre,
+        cuando: inicio,
+        planningId: produccion?._id as any,
+      })
+      .catch((error: any) => console.error("[Atención] aviso de planificación (equipo):", error?.message || error));
+
+    await this.alertarReglaAriana(workspaceId, `${actor.nombre} creó la producción desde el MCP`).catch(() => {});
+
+    return {
+      ok: true,
+      cuando,
+      calendario: calendario === CALENDARIOS_PRODUCCION.premium ? "premium" : "standard",
+      enPlanificador: cita.enPlanificador,
+      planningId: cita.planningId,
+      contacto: `${cliente.nombre} <${cliente.email}>`,
+      avisados: [`Producción: ${equipoAtencionService.nombres("produccion")}`, "Contenido y atención: aviso de la planificación"],
+    };
   }
 
   // ── Mensajes y avisos ──────────────────────────────────────────────────────
