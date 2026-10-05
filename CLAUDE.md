@@ -212,6 +212,18 @@ facturación real, ritmo del mes, equipo asignado y recordatorios.
 - Bitácora `actividades` (`actividad.model.ts`, `actividadService.registrar`): base del
   reporte semanal.
 
+### Videos por MCP: editor sube y conecta, productor aprueba (2026-10-05)
+- `src/mcp/tools/edicion.ts`: `planificaciones_para_subir`, `subir_videos` (devuelve un curl por archivo
+  con la URL resumable de Drive), `conectar_videos` (propone por nombre y pregunta; `confirmar` conecta),
+  `cola_revision_videos` (ahora también perfil Producción), `aprobar_videos` (pregunta "¿lo envío al
+  cliente?"), `devolver_video_editor`.
+- La revisión interna antes del cliente la hace el **productor** (y PM/CM): `REVISORES_VIDEO` en
+  `videoEntrega.service.ts`; `avisarRevisores` (correo a todos, in-app `video_por_revisar` + Telegram al
+  productor) se usa al conectar y al marcar EDITADO en `updateItem`.
+- `updateItem(..., opciones?: { avisarCliente?: boolean })`: el MCP aprueba en lote sin aviso y avisa una vez.
+- `googleDriveService.listFiles`, `videoEntregaService.archivosSinConectar` / `filtrarSinConectar`,
+  `avisarEditorDevuelto` + `resendService.sendVideoDevueltoEditor`. Notificación nueva `video_devuelto`.
+
 ### Reporte semanal: viernes 6 pm Ecuador (2026-10-04)
 - **Fechas de etapa** en cada item (`guionCreadoEn`, `guionAprobadoEn`, `grabadoEn`,
   `editadoEn`, `videoAprobadoEn`, `publicadoEn`) + `versiones[].en` y

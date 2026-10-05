@@ -17,6 +17,7 @@ import { extractLeadActions } from "../utils/metaActions";
 import { esperaVeredicto, videoReviewNotificationService } from "./videoReviewNotification.service";
 import { actividadService } from "./actividad.service";
 import { formatoSegundo, rondasRestantes } from "./correccionVideo.service";
+import { videoEntregaService } from "./videoEntrega.service";
 import cloudinary from "../config/cloudinary";
 
 /** Extract Cloudinary public_id from a secure_url */
@@ -391,7 +392,9 @@ export class VideoPlanningService {
     fields: Record<string, unknown>,
     internalRole?: string,
     platformFlags?: { publishToInstagram?: boolean; publishToFacebook?: boolean },
-    actor?: { id?: string; nombre?: string }
+    actor?: { id?: string; nombre?: string },
+    /** avisarCliente: false = quien llama decide el aviso al cliente (MCP aprueba en lote). */
+    opciones?: { avisarCliente?: boolean }
   ): Promise<IVideoPlanning> {
     if (!Types.ObjectId.isValid(planningId) || !Types.ObjectId.isValid(itemId)) {
       throw new Error("INVALID_ID");
@@ -503,32 +506,16 @@ export class VideoPlanningService {
 
     // Todo lo editado ya paso la revision interna: es hora de que el cliente
     // revise. Sale solo, sin que nadie tenga que acordarse de notificar.
-    if (seAproboInterno) {
+    if (seAproboInterno && opciones?.avisarCliente !== false) {
       this.avisarClienteSiTodoRevisado(planningId, actor?.nombre).catch((err: any) =>
         console.warn("[VideoPlanningService] aviso al cliente falló:", err.message)
       );
     }
 
     if (seMarcoEditado) {
-      (async () => {
-        const [workspace, revisores] = await Promise.all([
-          models.workspaces.findById(planning.workspaceId).select("name").lean(),
-          models.users
-            .find({ isInternal: true, internalRole: { $in: ["project_manager", "content_manager"] } })
-            .select("email")
-            .lean(),
-        ]);
-        await resendService.sendVideoReadyForReview({
-          to: revisores.map((r) => r.email),
-          workspaceName: workspace?.name || "Cliente",
-          numero: item.numero,
-          tema: item.tema,
-          editorNombre: item.editorPorNombre,
-          driveLink: item.driveLink,
-        });
-      })().catch((err: any) =>
-        console.warn("[VideoPlanningService] review email failed:", err.message)
-      );
+      videoEntregaService
+        .avisarRevisores(planning, [{ numero: item.numero, tema: item.tema, driveLink: item.driveLink }], item.editorPorNombre)
+        .catch((err: any) => console.warn("[VideoPlanningService] aviso de revisión falló:", err.message));
     }
 
     // El productor marco el guion como GRABADO: la produccion de ese mes

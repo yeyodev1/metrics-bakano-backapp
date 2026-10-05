@@ -2689,6 +2689,62 @@ export class ResendService {
     });
   }
 
+  /** El productor devolvio un video en la revision interna (no cuenta como ronda del cliente). */
+  async sendVideoDevueltoEditor(params: {
+    to: string[];
+    workspaceName: string;
+    numero: number;
+    tema: string;
+    motivo: string;
+    porNombre?: string;
+    driveLink?: string;
+    colaUrl: string;
+  }): Promise<void> {
+    if (!params.to.length) return;
+    const esc = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const num = String(params.numero).padStart(2, "0");
+    const html = `
+<!DOCTYPE html>
+<html lang="es">
+<head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><title>Video devuelto</title></head>
+<body style="margin:0;padding:0;background-color:#f0f2f5;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f0f2f5;padding:40px 16px;">
+    <tr><td align="center">
+      <table width="580" cellpadding="0" cellspacing="0" style="max-width:580px;width:100%;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.10);">
+        ${barraMarca()}
+        <tr>
+          <td style="background:linear-gradient(135deg,#191423 0%,#2b2438 100%);padding:32px 40px;text-align:center;">
+            <h1 style="margin:0;color:#ffffff;font-size:22px;font-weight:700;line-height:1.3;">Video devuelto en revisión interna</h1>
+            <p style="margin:8px 0 0;color:rgba(255,255,255,0.65);font-size:14px;">${params.porNombre ? `Lo revisó ${esc(params.porNombre)}` : "Revisión del productor"} · no cuenta como ronda del cliente</p>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:28px 40px 8px;">
+            <p style="margin:0 0 4px;font-size:11px;font-weight:800;letter-spacing:0.08em;color:#6b7280;text-transform:uppercase;">${esc(params.workspaceName)}</p>
+            <p style="margin:0 0 16px;font-size:16px;font-weight:700;color:#191423;">#${num} · ${esc(params.tema)}</p>
+            <p style="margin:0;padding:14px 16px;border:1px solid #eceaf1;border-radius:12px;font-size:14px;color:#191423;line-height:1.5;">${esc(params.motivo)}</p>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:20px 40px 8px;text-align:center;">
+            <a href="${params.colaUrl}" style="display:inline-block;background:#e6285c;color:#ffffff;font-size:14px;font-weight:700;text-decoration:none;padding:13px 28px;border-radius:12px;">Ir a mi cola</a>
+          </td>
+        </tr>
+        ${params.driveLink ? `<tr><td style="padding:4px 40px 24px;text-align:center;"><a href="${params.driveLink}" style="font-size:12.5px;color:#1ea362;font-weight:700;text-decoration:none;">Ver la versión revisada</a></td></tr>` : ""}
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+
+    await this.client.emails.send({
+      from: this.from,
+      to: params.to,
+      subject: `Video devuelto · ${params.workspaceName} #${num} ${params.tema}`,
+      html,
+    });
+  }
+
   /**
    * Reporte semanal (cliente o consolidado). El HTML se arma aparte para
    * poder previsualizarlo sin enviar; los bloques vienen de

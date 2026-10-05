@@ -1,7 +1,7 @@
 import { Types } from "mongoose";
 import models from "../models";
 import type { IVideoItem, IVideoPlanning } from "../models/videoPlanning.model";
-import { googleDriveService, driveSharedDriveId, sanitizeDriveName } from "./googleDrive.service";
+import { googleDriveService, driveSharedDriveId, sanitizeDriveName, type DriveFile } from "./googleDrive.service";
 import { reviewEventService } from "./reviewEvent.service";
 import { resendService } from "./resend.service";
 import { notificationService } from "./notification.service";
@@ -26,6 +26,8 @@ import { actividadService } from "./actividad.service";
  */
 
 const APP_URL = process.env.APP_URL || "https://metrics.bakano.ec";
+/** Quien revisa por dentro un video editado antes del cliente: el productor (y PM/CM). */
+export const REVISORES_VIDEO = ["productor", "project_manager", "content_manager"];
 const MAX_SIZE = 5 * 1024 * 1024 * 1024;
 /** Ventana de planificaciones que el editor puede elegir. */
 const DIAS_ATRAS = 75;
@@ -85,6 +87,22 @@ export function sugerirGuion(
     if (puntos > 0 && (!mejor || puntos > mejor.puntos)) mejor = { itemId: i.itemId, puntos };
   }
   return mejor?.itemId ?? null;
+}
+
+/**
+ * Videos de la carpeta que todavia no son la version de ningun guion (ni
+ * vigente ni del historial): lo que falta conectar.
+ */
+export function filtrarSinConectar(
+  archivos: DriveFile[],
+  items: { driveFileId?: string | null; versiones?: { driveFileId?: string | null }[] | null }[]
+): DriveFile[] {
+  const usados = new Set<string>();
+  for (const i of items) {
+    if (i.driveFileId) usados.add(i.driveFileId);
+    for (const v of i.versiones ?? []) if (v.driveFileId) usados.add(v.driveFileId);
+  }
+  return archivos.filter((f) => String(f.mimeType || "").startsWith("video/") && !usados.has(f.id));
 }
 
 export interface ActorEntrega {
@@ -305,30 +323,13 @@ class VideoEntregaService {
     if (!cambios.length) throw new ErrorEntrega("NADA_CONECTADO", errores.join(" ") || "No se pudo conectar ningún video.");
     await planning.save();
 
-    // Lo de despues no frena la respuesta: banderas, revision interna y bitacora.
+    // Lo de despues no frena la respuesta: banderas, aviso al productor y bitacora.
     (async () => {
       const vp = planning as unknown as IVideoPlanning;
-      const [workspace, revisores] = await Promise.all([
-        models.workspaces.findById(planning.workspaceId).select("name").lean(),
-        models.users
-          .find({ isInternal: true, internalRole: { $in: ["project_manager", "content_manager"] } })
-          .select("email")
-          .lean(),
-      ]);
       for (const c of cambios) {
         await reviewEventService
           .recordItemTransitions({ planning: vp, item: c.item, prevEstadoIdea: c.item.estadoIdea, prevEdicion: c.prevEdicion, actorId: actor.id })
           .catch(() => {});
-        await resendService
-          .sendVideoReadyForReview({
-            to: revisores.map((r) => r.email),
-            workspaceName: workspace?.name || "Cliente",
-            numero: c.item.numero,
-            tema: c.version > 1 ? `${c.item.tema} (versión ${c.version})` : c.item.tema,
-            editorNombre: nombreActor,
-            driveLink: c.item.driveLink,
-          })
-          .catch((e: any) => console.warn("[Entrega videos] correo de revisión:", e?.message));
         await actividadService
           .registrar({
             workspaceId: planning.workspaceId,
@@ -343,6 +344,11 @@ class VideoEntregaService {
           })
           .catch(() => {});
       }
+      await this.avisarRevisores(
+        planning,
+        cambios.map((c) => ({ numero: c.item.numero, tema: c.item.tema, version: c.version, driveLink: c.item.driveLink })),
+        nombreActor
+      );
     })().catch((e: any) => console.warn("[Entrega videos] después de conectar:", e?.message));
 
     return {
@@ -350,6 +356,144 @@ class VideoEntregaService {
       errores,
       carpetaLink: planning.driveMonthFolderLink || null,
     };
+  }
+
+  /**
+   * Lo que esta en la carpeta de la planificacion y falta conectar, con el
+   * guion sugerido por el nombre de cada archivo.
+   */
+  async archivosSinConectar(planningId: string) {
+    if (!Types.ObjectId.isValid(planningId)) throw new ErrorEntrega("ID_INVALIDO", "Planificación inválida.");
+    const planning = await models.videoPlanning
+      .findById(planningId)
+      .select("driveMonthFolderId driveMonthFolderLink items._id items.numero items.tema items.estadoIdea items.driveFileId items.versiones")
+      .lean();
+    if (!planning) throw new ErrorEntrega("NO_ENCONTRADA", "Planificación no encontrada.", 404);
+    const guiones = [...planning.items]
+      .filter((i) => i.estadoIdea !== "RECHAZADO")
+      .sort((a, b) => a.numero - b.numero)
+      .map((i) => ({ itemId: String(i._id), numero: i.numero, tema: i.tema }));
+    if (!planning.driveMonthFolderId) return { carpetaLink: null, archivos: [], guiones };
+    const archivos = filtrarSinConectar(await googleDriveService.listFiles(planning.driveMonthFolderId), planning.items);
+    return {
+      carpetaLink: planning.driveMonthFolderLink || null,
+      archivos: archivos.map((f) => {
+        const sugerido = sugerirGuion(f.name, guiones);
+        const g = guiones.find((x) => x.itemId === sugerido);
+        return { archivoId: f.id, nombre: f.name, tamanoMb: f.size ? Math.round(Number(f.size) / 1_048_576) : null, sugerencia: g ? { numero: g.numero, tema: g.tema } : null };
+      }),
+      guiones,
+    };
+  }
+
+  /**
+   * Videos nuevos esperan la revision interna: correo al productor y PM/CM
+   * (uno por video, como siempre) y al productor ademas in-app y Telegram,
+   * uno por lote.
+   */
+  async avisarRevisores(
+    planning: { _id: unknown; workspaceId: unknown },
+    videos: { numero: number; tema: string; version?: number; driveLink?: string | null }[],
+    editorNombre?: string
+  ): Promise<void> {
+    if (!videos.length) return;
+    const workspaceId = String(planning.workspaceId);
+    const [workspace, revisores] = await Promise.all([
+      models.workspaces.findById(workspaceId).select("name").lean(),
+      models.users
+        .find({ isInternal: true, isActive: { $ne: false }, internalRole: { $in: REVISORES_VIDEO } })
+        .select("email internalRole")
+        .lean(),
+    ]);
+    const cliente = workspace?.name || "Cliente";
+    const tema = (v: (typeof videos)[number]) => ((v.version ?? 1) > 1 ? `${v.tema} (versión ${v.version})` : v.tema);
+    for (const v of videos) {
+      await resendService
+        .sendVideoReadyForReview({
+          to: revisores.map((r) => r.email).filter(Boolean) as string[],
+          workspaceName: cliente,
+          numero: v.numero,
+          tema: tema(v),
+          editorNombre,
+          driveLink: v.driveLink ?? undefined,
+        })
+        .catch((e: any) => console.warn("[Entrega videos] correo de revisión:", e?.message));
+    }
+    const lista = videos.map((v) => `#${String(v.numero).padStart(2, "0")} ${tema(v)}`);
+    const titulo = `${videos.length === 1 ? "Video" : `${videos.length} videos`} por revisar · ${cliente}`;
+    for (const p of revisores.filter((r) => r.internalRole === "productor")) {
+      await notificationService
+        .create(p._id, "video_por_revisar", titulo, `${editorNombre ? `${editorNombre} subió: ` : ""}${lista.join(" · ")}`.slice(0, 900), {
+          workspaceId,
+          referenceId: String(planning._id),
+        })
+        .catch(() => {});
+      for (const chatId of await chatsDeUsuario(p._id)) {
+        await telegramService
+          .sendMessage(
+            chatId,
+            `🎞️ <b>${escaparHtml(titulo)}</b>${editorNombre ? `\nLos subió ${escaparHtml(editorNombre)}` : ""}\n\n` +
+              videos
+                .map((v) => `#${String(v.numero).padStart(2, "0")} ${escaparHtml(tema(v))}${v.driveLink ? ` · <a href="${v.driveLink}">ver</a>` : ""}`)
+                .join("\n") +
+              `\n\nCuando los apruebes, le avisamos al cliente para que los revise.`,
+            [[{ text: "✅ Revisar videos", url: `${APP_URL}/app/workspaces/review-videos-from-planning` }]]
+          )
+          .catch(() => {});
+      }
+    }
+  }
+
+  /** Editor del video, o los editores del entorno si no quedo registrado. */
+  private async editoresDe(item: IVideoItem, workspaceId: string): Promise<{ _id: Types.ObjectId; email?: string }[]> {
+    if (item.editorPorId) {
+      const u = await models.users.findById(item.editorPorId).select("email").lean();
+      if (u) return [u as any];
+    }
+    return (await models.users
+      .find({ isInternal: true, internalRole: "editor", isActive: { $ne: false }, "workspaces.workspaceId": new Types.ObjectId(workspaceId) })
+      .select("email")
+      .lean()) as any;
+  }
+
+  /** El productor devolvio el video en la revision interna: no gasta rondas del cliente. */
+  async avisarEditorDevuelto(planning: { _id: unknown; workspaceId: unknown }, item: IVideoItem, motivo: string, porNombre?: string): Promise<void> {
+    const workspaceId = String(planning.workspaceId);
+    const editores = await this.editoresDe(item, workspaceId);
+    if (!editores.length) return;
+    const workspace = await models.workspaces.findById(workspaceId).select("name").lean();
+    const cliente = workspace?.name || "Cliente";
+    const num = String(item.numero).padStart(2, "0");
+    for (const ed of editores) {
+      await notificationService
+        .create(ed._id, "video_devuelto", `Video devuelto · ${cliente} #${num}`, `${porNombre ? `${porNombre}: ` : ""}${motivo}`.slice(0, 900), {
+          workspaceId,
+          referenceId: String(planning._id),
+        })
+        .catch(() => {});
+      for (const chatId of await chatsDeUsuario(ed._id)) {
+        await telegramService
+          .sendMessage(
+            chatId,
+            `↩️ <b>Video devuelto en revisión interna</b>\n${escaparHtml(cliente)} · #${num} ${escaparHtml(item.tema)}\n\n` +
+              `${porNombre ? `<b>${escaparHtml(porNombre)}:</b> ` : ""}${escaparHtml(motivo)}\n\nNo cuenta como ronda del cliente.`,
+            [[{ text: "🎞️ Ir a mi cola", url: `${APP_URL}/editor` }]]
+          )
+          .catch(() => {});
+      }
+    }
+    await resendService
+      .sendVideoDevueltoEditor({
+        to: editores.map((e) => e.email).filter(Boolean) as string[],
+        workspaceName: cliente,
+        numero: item.numero,
+        tema: item.tema,
+        motivo,
+        porNombre,
+        driveLink: item.driveLink,
+        colaUrl: `${APP_URL}/editor`,
+      })
+      .catch((e: any) => console.warn("[Entrega videos] correo de video devuelto:", e?.message));
   }
 
   /**
@@ -364,17 +508,7 @@ class VideoEntregaService {
     clienteNombre?: string
   ): Promise<void> {
     const workspaceId = String(planning.workspaceId);
-    let editores: { _id: Types.ObjectId; email?: string }[] = [];
-    if (item.editorPorId) {
-      const u = await models.users.findById(item.editorPorId).select("email").lean();
-      if (u) editores = [u as any];
-    }
-    if (!editores.length) {
-      editores = (await models.users
-        .find({ isInternal: true, internalRole: "editor", isActive: { $ne: false }, "workspaces.workspaceId": new Types.ObjectId(workspaceId) })
-        .select("email")
-        .lean()) as any;
-    }
+    const editores = await this.editoresDe(item, workspaceId);
     if (!editores.length) return;
 
     const workspace = await models.workspaces.findById(workspaceId).select("name").lean();

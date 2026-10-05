@@ -239,24 +239,9 @@ export const toolsContenido: ToolMcp[] = [
     },
   },
   {
-    nombre: "cola_revision_videos",
-    titulo: "Videos editados por revisar",
-    descripcion: "Videos que edición ya marcó como EDITADO y que nadie del equipo revisó todavía.",
-    perfiles: ["direccion", "pm", "contenido"],
-    entrada: { cliente: z.string().optional() },
-    async correr(a) {
-      let cola: any[] = (await videoPlanningService.getReviewQueue()).pendientes;
-      if (a.cliente) {
-        const ws = await resolverCliente(a.cliente);
-        cola = cola.filter((c) => c.workspaceId === String(ws._id));
-      }
-      return { total: cola.length, videos: cola.slice(0, 60) };
-    },
-  },
-  {
     nombre: "mi_cola_edicion",
     titulo: "Mi cola de edición",
-    descripcion: "Lo que te toca editar este mes: re-ediciones pedidas por el cliente (con cada cambio y su segundo, y cuántas rondas le quedan), por editar, por subir el máster y listos.",
+    descripcion: "Lo que te toca editar este mes: re-ediciones pedidas por el cliente (con cada cambio y su segundo, y cuántas rondas le quedan), por editar, por subir el máster y listos. Para entregar videos usa subir_videos y conectar_videos.",
     perfiles: ["direccion", "edicion"],
     entrada: {},
     async correr(_a, u) {
@@ -267,7 +252,7 @@ export const toolsContenido: ToolMcp[] = [
     nombre: "actualizar_edicion",
     titulo: "Actualizar un video (edición)",
     descripcion:
-      "Cambia el estado de edición (EDITADO / POR_EDITAR), de grabación o el link del video final. Marcar EDITADO lo manda a la cola de revisión del equipo.",
+      "Cambia el estado de edición (EDITADO / POR_EDITAR), de grabación o el link del video final. Marcar EDITADO lo manda a la revisión del productor. Para entregar el archivo del video NO uses esto: usa subir_videos y conectar_videos (sube a Drive y guarda la versión).",
     perfiles: ["direccion", "edicion"],
     escribe: true,
     entrada: {
