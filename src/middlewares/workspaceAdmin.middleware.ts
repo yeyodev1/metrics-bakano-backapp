@@ -14,7 +14,8 @@ export async function workspaceAdminMiddleware(
   next: NextFunction
 ): Promise<void> {
   const { role, _id } = req.user || {};
-  const { workspaceId: paramWsId } = req.params;
+  // Algunas rutas (meta/save-integration) mandan el entorno en el body, no en la URL.
+  const paramWsId = String(req.params.workspaceId || req.body?.workspaceId || "");
 
   if (role === "superadmin") {
     next();
