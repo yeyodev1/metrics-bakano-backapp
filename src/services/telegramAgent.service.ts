@@ -449,6 +449,12 @@ Publicidad (qué estamos anunciando):
 - Pásale los links sin cambiarlos. Si un anuncio no trae link, no inventes uno ni prometas mandarlo después.
 - Si la herramienta devuelve hayDatos en false, dile con naturalidad que ahora mismo no puedes ver la pauta, que ya avisaste a Denisse Quimi y que ella se comunica para resolverlo. Nunca inventes anuncios, montos ni fechas.
 - Si "activosSinInversion" viene en true, díselo con naturalidad: los anuncios están encendidos pero no registran gasto en los últimos 30 días, y el equipo ya está revisándolo.
+- Pauta de un periodo ("cuánto gasté ayer", "cómo le fue a la pauta esta semana", "la semana pasada", "en septiembre", "del 1 al 15", "cuántos mensajes me llegaron por los anuncios"): usa verPautaPorFechas. Calcula las fechas tú con la fecha de hoy (hora Ecuador): semana = lunes a domingo; "este mes" = del día 1 a hoy; si dice solo un mes, ese mes completo. Si la pregunta es ambigua, asume lo más razonable y dilo en una frase ("tomé del lunes 29 al domingo 5").
+- Responde con: periodo, gasto, resultados con su costo por resultado y la campaña que más rindió; el día a día solo si lo pide. Números redondeados, en plata, sin tablas largas.
+- Si viene "rangoInvalido", explícale con naturalidad lo que dice "motivo" (días futuros, más de 37 meses atrás, más de un año a la vez) y ofrécele el periodo que sí se puede.
+- Si viene "sinActividad", dile que en ese periodo la cuenta no tuvo pauta activa ni gasto.
+- Si viene hayDatos en false, sigue lo que dice "siguiente": no puedes verlo ahora y ya avisaste al encargado. Nunca inventes cifras ni las estimes.
+- La facturación y el ROAS salen de verMetricas; si pregunta el ROAS de un periodo, combina ambas solo si los dos datos existen.
 - No prometas resultados ni cambios de campaña: eso lo decide el equipo.
 
 Preguntas de facturación (esto lo respondes siempre, nunca lo derives):
@@ -1464,6 +1470,16 @@ Reglas:
           "Qué le estamos anunciando AHORA en Meta: anuncios activos, su link para verlos y cuánto se invirtió en los últimos 30 días. Úsala siempre que pregunte por la pauta, los anuncios o la inversión.",
         inputSchema: z.object({}),
         execute: async () => publicidadClienteService.paraElCliente(chat.workspaceId!),
+      },
+
+      verPautaPorFechas: {
+        description:
+          "Resultados de su pauta en Meta entre dos fechas: gasto, alcance, clics, resultados (conversaciones, leads, compras) con costo por resultado, por campaña y día a día si son 31 días o menos. Úsala cuando pregunte por la pauta de un periodo: ayer, esta semana, la semana pasada, un mes, del X al Y.",
+        inputSchema: z.object({
+          desde: z.string().describe("AAAA-MM-DD, primer día del periodo (hora Ecuador)"),
+          hasta: z.string().describe("AAAA-MM-DD, último día del periodo (hora Ecuador)"),
+        }),
+        execute: async ({ desde, hasta }: { desde: string; hasta: string }) => publicidadClienteService.resultadosEnRango(chat.workspaceId!, desde, hasta),
       },
 
       verMetricas: {
