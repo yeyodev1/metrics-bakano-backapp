@@ -46,12 +46,14 @@ async function destinatarios(a: { para?: string[]; cliente?: string }) {
   return { envio, bloqueados, entorno, estado };
 }
 
+const FIRMA_EQUIPO = "Bakano People";
+
 export const toolsCorreos: ToolMcp[] = [
   {
     nombre: "correo_prueba",
     titulo: "Correo: enviarme la prueba",
     descripcion:
-      "Paso 1 de 2 para mandar un correo. Te manda SOLO a ti una prueba, con una franja que dice a quién le llegaría, y devuelve un token de 30 minutos para enviar_correo. Destinatarios: correos sueltos en `para` y/o los clientes activos de un entorno en `cliente`. Sale de noreply@bakano.ec y el pie siempre avisa que es una dirección de solo envío: si responden, nadie lo verá (se les indica soporte@bakano.ec). El mensaje es texto plano; una línea en blanco separa párrafos. Se firma con tu nombre. Solo superadmin.",
+      "Paso 1 de 2 para mandar un correo. Te manda SOLO a ti una prueba, con una franja que dice a quién le llegaría, y devuelve un token de 30 minutos para enviar_correo. Destinatarios: correos sueltos en `para` y/o los clientes activos de un entorno en `cliente`. Sale de noreply@bakano.ec y el pie siempre avisa que es una dirección de solo envío: si responden, nadie lo verá (se les indica soporte@bakano.ec). El mensaje es texto plano; una línea en blanco separa párrafos. Se firma con tu nombre, o con `firma: bakano_people` sale firmado por Bakano People y el pie avisa que es un correo automático y que pueden escribirnos por Telegram. Solo superadmin.",
     perfiles: ["direccion"],
     soloSuperadmin: true,
     escribe: true,
@@ -60,17 +62,22 @@ export const toolsCorreos: ToolMcp[] = [
       mensaje: z.string().min(10).max(8000),
       para: z.array(z.string().email()).max(MAX_DESTINATARIOS).optional(),
       cliente: z.string().optional().describe("Nombre o id del entorno: le llega a sus clientes activos"),
+      firma: z
+        .enum(["mia", "bakano_people"])
+        .optional()
+        .describe("mia (por defecto): tu nombre. bakano_people: firma del equipo y pie de correo automático"),
     },
     async correr(a, u) {
       if (!a.para?.length && !a.cliente) throw new Error("Dime a quién: correos en `para` o un entorno en `cliente`.");
       const { envio, bloqueados, entorno, estado } = await destinatarios(a);
       if (!envio.length) throw new Error("No queda nadie a quien enviarle.");
       if (envio.length > MAX_DESTINATARIOS) throw new Error(`Son ${envio.length} destinatarios; el máximo por envío es ${MAX_DESTINATARIOS}. Pártelo.`);
-      const firma = `${u.nombre} · Bakano`;
-      const r = await resendService.sendCorreoDelEquipo({ to: u.email, asunto: a.asunto, mensaje: a.mensaje, firma, prueba: { destinatarios: envio } });
+      const automatico = a.firma === "bakano_people";
+      const firma = automatico ? FIRMA_EQUIPO : `${u.nombre} · Bakano`;
+      const r = await resendService.sendCorreoDelEquipo({ to: u.email, asunto: a.asunto, mensaje: a.mensaje, firma, automatico, prueba: { destinatarios: envio } });
       if (r.error) throw new Error(`No salió la prueba: ${r.error}`);
       // El token lleva el correo entero: enviar_correo manda exactamente lo que se probó.
-      const token = jwt.sign({ u: u._id, s: a.asunto, m: a.mensaje, f: firma, d: envio }, secreto(), { expiresIn: `${TOKEN_MIN}m` });
+      const token = jwt.sign({ u: u._id, s: a.asunto, m: a.mensaje, f: firma, a: automatico, d: envio }, secreto(), { expiresIn: `${TOKEN_MIN}m` });
       return {
         pruebaEnviadaA: u.email,
         ...(entorno ? { entorno } : {}),
@@ -105,7 +112,7 @@ export const toolsCorreos: ToolMcp[] = [
       for (const [i, correo] of (d.d as string[]).entries()) {
         if (i) await new Promise((r) => setTimeout(r, PAUSA_MS));
         const r = await resendService
-          .sendCorreoDelEquipo({ to: correo, asunto: d.s, mensaje: d.m, firma: d.f })
+          .sendCorreoDelEquipo({ to: correo, asunto: d.s, mensaje: d.m, firma: d.f, automatico: !!d.a })
           .catch((e: any) => ({ error: e?.message || String(e) }));
         if ("error" in r && r.error) fallidos.push({ correo, error: r.error });
         else enviados.push(correo);

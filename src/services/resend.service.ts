@@ -1507,13 +1507,15 @@ export class ResendService {
    * Correo escrito por alguien del equipo desde el MCP. Sale de la dirección
    * de solo envío y sin replyTo: el pie lo dice siempre, para que nadie
    * responda creyendo que alguien lo va a leer. `prueba` agrega una franja
-   * arriba con a quién le va a llegar el de verdad.
+   * arriba con a quién le va a llegar el de verdad. `automatico` cambia el
+   * pie: avisa que el correo se generó solo y manda a escribir por Telegram.
    */
   async sendCorreoDelEquipo(params: {
     to: string;
     asunto: string;
     mensaje: string;
     firma: string;
+    automatico?: boolean;
     prueba?: { destinatarios: string[] };
   }): Promise<{ id?: string; error?: string }> {
     const escapar = (t: string) =>
@@ -1527,6 +1529,18 @@ export class ResendService {
     const franjaPrueba = params.prueba
       ? `<tr><td style="background:#fef3c7;border-bottom:1px solid #fde68a;padding:14px 40px;"><p style="margin:0;font-size:13px;color:#92400e;line-height:1.6;"><strong>Correo de prueba.</strong> Solo te llegó a ti. El de verdad saldrá igual, sin esta franja, a ${lista.length} ${lista.length === 1 ? "persona" : "personas"}: ${escapar(lista.slice(0, 15).join(", "))}${lista.length > 15 ? "…" : ""}</p></td></tr>`
       : "";
+
+    const telegram = `<a href="https://t.me/BakanoAgencyBot" style="color:#64748b;">Telegram (@BakanoAgencyBot)</a>`;
+    const soporte = `<a href="mailto:soporte@bakano.ec" style="color:#64748b;">soporte@bakano.ec</a>`;
+    const pie = params.automatico
+      ? {
+          html: `Este correo se generó automáticamente y sale de una dirección de solo envío: <strong>si respondes aquí, nadie lo va a ver.</strong><br/>Si necesitas algo, escríbenos por ${telegram} o a ${soporte}.`,
+          texto: "Este correo se generó automáticamente y sale de una dirección de solo envío: si respondes aquí, nadie lo va a ver. Si necesitas algo, escríbenos por Telegram (@BakanoAgencyBot, https://t.me/BakanoAgencyBot) o a soporte@bakano.ec.",
+        }
+      : {
+          html: `Este correo sale de una dirección de solo envío: <strong>si respondes aquí, nadie lo va a ver.</strong><br/>Para escribirnos usa ${soporte} o el chat de Bakano en Telegram.`,
+          texto: "Este correo sale de una dirección de solo envío: si respondes aquí, nadie lo va a ver. Escríbenos a soporte@bakano.ec.",
+        };
 
     const html = `<!DOCTYPE html>
 <html lang="es">
@@ -1546,8 +1560,7 @@ export class ResendService {
         <tr>
           <td style="background:#f8fafc;padding:18px 40px;border-top:1px solid #e2e8f0;">
             <p style="margin:0;color:#64748b;font-size:12px;line-height:1.6;text-align:center;">
-              Este correo sale de una dirección de solo envío: <strong>si respondes aquí, nadie lo va a ver.</strong><br/>
-              Para escribirnos usa <a href="mailto:soporte@bakano.ec" style="color:#64748b;">soporte@bakano.ec</a> o el chat de Bakano en Telegram.
+              ${pie.html}
             </p>
           </td>
         </tr>
@@ -1557,7 +1570,7 @@ export class ResendService {
 </body>
 </html>`;
 
-    const texto = `${params.prueba ? `[PRUEBA: el de verdad va a ${lista.length} personas]\n\n` : ""}${params.mensaje.trim()}\n\n${params.firma}\n\n--\nEste correo sale de una dirección de solo envío: si respondes aquí, nadie lo va a ver. Escríbenos a soporte@bakano.ec.`;
+    const texto = `${params.prueba ? `[PRUEBA: el de verdad va a ${lista.length} personas]\n\n` : ""}${params.mensaje.trim()}\n\n${params.firma}\n\n--\n${pie.texto}`;
 
     const { data, error } = await this.client.emails.send({
       from: this.from,
