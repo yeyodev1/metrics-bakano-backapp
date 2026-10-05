@@ -74,7 +74,7 @@ function opcionesModelo(): Record<string, unknown> {
 const MAX_HISTORIAL = 20;
 const ALERTA_CADA_MS = 24 * 3_600_000;
 
-const TEMAS = ["produccion", "guiones", "atencion"] as const;
+const TEMAS = ["produccion", "guiones", "atencion", "publicidad"] as const;
 
 type Mensaje = { role: "user" | "assistant"; content: string };
 type AiSdk = typeof import("ai");
@@ -445,10 +445,12 @@ Arrancar el onboarding (tú tomas la iniciativa):
 - Si es alguien del equipo de Bakano, no le pidas datos: solo dile qué falta.
 
 Publicidad (qué estamos anunciando):
-- "qué están pautando", "qué anuncios tengo activos", "cuánto se ha gastado en Meta", "muéstrame los anuncios": usa verPublicidad y responde con los nombres, los links tal cual vienen y la inversión de los últimos 30 días.
+- "qué están pautando", "qué anuncios tengo activos", "qué está corriendo", "cuánto se ha gastado en Meta", "muéstrame los anuncios": usa verPublicidad y verPautaPorFechas de los últimos 7 días (hasta hoy) y responde con: lo que está corriendo (anuncios con gasto en los últimos 7 días, con su link tal cual), la inversión de 7 y de 30 días, y los resultados con su costo por resultado. "Activo" es SOLO lo que gastó en los últimos 7 días.
+- Si "encendidosSinGastoReciente" es mayor que 0, aclara que esos anuncios siguen encendidos en Meta pero no están gastando (suelen ser anteriores); no los presentes como pauta activa. Si el cliente dice que no ve su pauta y anunciosCorriendo es 0, dale la razón: no hay pauta gastando ahora, y pásalo a Denisse con pasarMensajeAlEquipo (tema publicidad).
+- Reclamos, cambios o dudas de pauta que no puedas resolver con los datos: pasarMensajeAlEquipo con tema publicidad (Denisse Quimi).
 - Pásale los links sin cambiarlos. Si un anuncio no trae link, no inventes uno ni prometas mandarlo después.
 - Si la herramienta devuelve hayDatos en false, dile con naturalidad que ahora mismo no puedes ver la pauta, que ya avisaste a Denisse Quimi y que ella se comunica para resolverlo. Nunca inventes anuncios, montos ni fechas.
-- Si "activosSinInversion" viene en true, díselo con naturalidad: los anuncios están encendidos pero no registran gasto en los últimos 30 días, y el equipo ya está revisándolo.
+- Si "activosSinInversion" viene en true, díselo con naturalidad: hay anuncios encendidos pero ninguno gastó en los últimos 7 días, y avisa a Denisse (tema publicidad).
 - Pauta de un periodo ("cuánto gasté ayer", "cómo le fue a la pauta esta semana", "la semana pasada", "en septiembre", "del 1 al 15", "cuántos mensajes me llegaron por los anuncios"): usa verPautaPorFechas. Calcula las fechas tú con la fecha de hoy (hora Ecuador): semana = lunes a domingo; "este mes" = del día 1 a hoy; si dice solo un mes, ese mes completo. Si la pregunta es ambigua, asume lo más razonable y dilo en una frase ("tomé del lunes 29 al domingo 5").
 - Responde con: periodo, gasto, resultados con su costo por resultado y la campaña que más rindió; el día a día solo si lo pide. Números redondeados, en plata, sin tablas largas.
 - Si viene "rangoInvalido", explícale con naturalidad lo que dice "motivo" (días futuros, más de 37 meses atrás, más de un año a la vez) y ofrécele el periodo que sí se puede.
@@ -1553,8 +1555,8 @@ Reglas:
     const { text } = await generateText({
       model: modelo(),
       system: `Clasificas el ánimo de un cliente de una agencia de marketing según su último mensaje y el contexto. Responde SOLO un JSON válido, sin texto extra:
-{"estado":"en_peligro|angustiado|molesto|feliz|neutral","tema":"produccion|guiones|atencion","motivo":"...","frase":"frase exacta del cliente que lo muestra","recomendacion":"acción concreta para el equipo"}
-tema: produccion si habla de grabaciones o fechas de producción; guiones si habla de guiones, contenido o videos; atencion para pagos, resultados, contrato o cualquier otra cosa.
+{"estado":"en_peligro|angustiado|molesto|feliz|neutral","tema":"produccion|guiones|atencion|publicidad","motivo":"...","frase":"frase exacta del cliente que lo muestra","recomendacion":"acción concreta para el equipo"}
+tema: produccion si habla de grabaciones o fechas de producción; guiones si habla de guiones, contenido o videos; publicidad si habla de pauta, anuncios, campañas o inversión en Meta; atencion para pagos, resultados, contrato o cualquier otra cosa.
 en_peligro: quiere cancelar o pausar el SERVICIO con la agencia (no una cita, sesión o grabación puntual), no ve resultados, siente que pierde dinero, compara con otra agencia, amenaza con irse.
 angustiado: se le nota angustia, ansiedad o miedo: algo urgente que no sale, presión fuerte (una fecha encima, plata comprometida, su jefe o su familia encima), insiste varias veces, pide ayuda con desesperación, escribe en mayúsculas o repite el mismo pedido. No amenaza con irse, pero está pasándola mal y necesita que alguien lo atienda YA.
 molesto: queja, frustración, reclamo por demoras o errores, tono duro.
