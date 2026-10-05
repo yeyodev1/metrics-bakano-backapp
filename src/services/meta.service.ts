@@ -33,7 +33,7 @@ export class MetaService {
     return "fff549713dadc13ff813bca9f549db55";
   }
   private get oauthRedirectUri() {
-    return process.env.META_OAUTH_REDIRECT_URI || "https://testing-storybrand-backapp.bakano.ec/api/meta/global/oauth/callback";
+    return process.env.META_OAUTH_REDIRECT_URI || "https://ads-bakano-clients-backapp.vercel.app/api/meta/global/oauth/callback";
   }
   private readonly graphUrl = "https://graph.facebook.com/v22.0";
 
