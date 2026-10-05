@@ -1683,9 +1683,13 @@ export class MetaService {
       }
     } catch (err: any) {
       const metaErr = err.response?.data?.error;
-      const msg = metaErr
-        ? `Meta ${metaErr.code}: ${metaErr.message}`
-        : err.message;
+      // pages_manage_posts ya no se pide al conectar (no esta aprobado por Meta).
+      const sinPermiso = metaErr && (metaErr.code === 200 || metaErr.code === 10 || /pages_manage_posts|permission/i.test(String(metaErr.message)));
+      const msg = sinPermiso
+        ? "Programar en Facebook está pendiente de aprobación de Meta (permiso pages_manage_posts)."
+        : metaErr
+          ? `Meta ${metaErr.code}: ${metaErr.message}`
+          : err.message;
       console.error("[MetaService] scheduleFacebookPost error:", metaErr || err.message);
       throw new Error(msg);
     }
