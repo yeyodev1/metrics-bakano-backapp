@@ -34,6 +34,9 @@ export function leToca(tool: ToolMcp, u: UsuarioMcp): boolean {
 
 export const ZONA = "America/Guayaquil";
 
+/** Una produccion se crea o se mueve con al menos estas horas de anticipacion. */
+export const ANTICIPACION_PRODUCCION_H = 48;
+
 export function fecha(d?: Date | string | null, conHora = true): string | null {
   if (!d) return null;
   const f = new Date(d);
