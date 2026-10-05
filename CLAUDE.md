@@ -256,6 +256,9 @@ facturación real, ritmo del mes, equipo asignado y recordatorios.
   `GET /api/reporte-semanal/consolidado/preview`, `POST /api/reporte-semanal/:workspaceId/prueba`
   `{ correo }` (solo a ese correo). MCP `reporte_semanal` (dirección, PM).
 
+### MCP: Producción crea producciones (2026-10-05)
+- `horarios_produccion` y `crear_produccion` (`src/mcp/tools/crearProduccion.ts`; perfiles produccion, pm, direccion). Mismo camino que el bot (`atencionClienteService.citaProduccionEnCrm`): cita en el calendario de producción del CRM (standard/premium), sync al Planificador y avisos. `crearProduccionPorEquipo` usa como contacto al admin cliente más antiguo del entorno. Las reglas del cliente (meses, Ariana, pagos, ya agendada) son advertencias; duras: contrato finalizado, horario ocupado y menos de `ANTICIPACION_PRODUCCION_H` (48 h). Sin `confirmar` solo revisa.
+
 ## Notas importantes
 - No hay cron jobs instalados aún — usar `node-cron`
 - Los emails tienen plantillas HTML inline (ver patrón en `resend.service.ts`)
