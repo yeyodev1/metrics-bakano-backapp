@@ -126,7 +126,7 @@ const TelegramChatSchema = new Schema<ITelegramChat>(
 
     userId: { type: Schema.Types.ObjectId, ref: "User", default: null },
     workspaceId: { type: Schema.Types.ObjectId, ref: "Workspace", default: null },
-    tema: { type: String, enum: ["produccion", "guiones", "atencion"] },
+    tema: { type: String, enum: ["produccion", "guiones", "atencion", "publicidad"] },
     agendandoDesde: { type: Date },
     historial: {
       type: [{ _id: false, rol: { type: String, enum: ["cliente", "bot"] }, texto: String, en: Date }],

@@ -33,12 +33,14 @@ export interface AnuncioActivo {
   campana: string | null;
   link: string | null;
   gasto: number;
+  /** Gasto de los ultimos 7 dias: lo que de verdad esta corriendo ahora. */
+  gasto7: number;
   impresiones: number;
   desde: string | null;
 }
 
 export type Publicidad =
-  | { conectado: true; anuncios: AnuncioActivo[]; gastoUltimos30: number; cuenta: string | null }
+  | { conectado: true; anuncios: AnuncioActivo[]; gastoUltimos30: number; gastoUltimos7: number; gasto7Disponible: boolean; cuenta: string | null; cuentaId: string }
   | { conectado: false; motivo: "sin_cuenta" | "sin_token" | "error_meta"; detalle?: string };
 
 /** Lo que Meta cuenta como resultado, en palabras del cliente. */
@@ -98,7 +100,7 @@ class PublicidadClienteService {
       const { data } = await axios.get(`${GRAPH}/act_${String(adAccountId).replace(/^act_/, "")}/ads`, {
         params: {
           access_token: token,
-          limit: 25,
+          limit: 100,
           effective_status: JSON.stringify(["ACTIVE"]),
           fields:
             "id,name,created_time,campaign{name}," +
@@ -108,6 +110,23 @@ class PublicidadClienteService {
         timeout: 20_000,
       });
 
+      // Gasto de 7 dias por anuncio en una consulta aparte (nivel anuncio).
+      // Si falla, no tumba la lectura: queda en 0 y se ve como "sin gasto reciente".
+      const gasto7 = new Map<string, number>();
+      let gasto7Ok = true;
+      await axios
+        .get(`${GRAPH}/act_${String(adAccountId).replace(/^act_/, "")}/insights`, {
+          params: { access_token: token, level: "ad", date_preset: "last_7d", fields: "ad_id,spend", limit: 500 },
+          timeout: 20_000,
+        })
+        .then((r) => {
+          for (const fila of r.data?.data ?? []) gasto7.set(String(fila.ad_id), Number(fila.spend || 0));
+        })
+        .catch((e: any) => {
+          gasto7Ok = false;
+          console.warn("[Publicidad] gasto de 7 días:", e.response?.data?.error?.message || e.message);
+        });
+
       const anuncios: AnuncioActivo[] = (data?.data ?? []).map((ad: any) => {
         const insights = ad.insights?.data?.[0] ?? {};
         return {
@@ -116,6 +135,8 @@ class PublicidadClienteService {
           campana: ad.campaign?.name ?? null,
           link: this.linkDelAnuncio(ad),
           gasto: Number(insights.spend || 0),
+          // Sin el dato de 7 dias, se usa el de 30 para no declarar "sin gasto" lo que si gasta.
+          gasto7: gasto7Ok ? gasto7.get(String(ad.id)) ?? 0 : Number(insights.spend || 0),
           impresiones: Number(insights.impressions || 0),
           desde: ad.created_time ?? null,
         };
@@ -125,7 +146,10 @@ class PublicidadClienteService {
         conectado: true,
         anuncios,
         gastoUltimos30: Math.round(anuncios.reduce((a, b) => a + b.gasto, 0) * 100) / 100,
+        gastoUltimos7: Math.round(anuncios.reduce((a, b) => a + b.gasto7, 0) * 100) / 100,
         cuenta: workspace.metaAds?.adAccountName ?? null,
+        cuentaId: String(adAccountId).replace(/^act_/, ""),
+        gasto7Disponible: gasto7Ok,
       };
     } catch (error: any) {
       console.error("[Publicidad] Meta no respondió:", error.response?.data?.error?.message || error.message);
@@ -153,21 +177,31 @@ class PublicidadClienteService {
   async paraElCliente(workspaceId: Types.ObjectId): Promise<Record<string, unknown>> {
     const p = await this.activos(workspaceId);
     if (p.conectado) {
+      // "Corriendo" = gasto en los ultimos 7 dias. Encendido en Meta sin gasto
+      // reciente (anuncios viejos, conjunto sin presupuesto) no es pauta viva:
+      // contarlo como activo confunde al cliente.
+      const corriendo = [...p.anuncios].filter((a) => a.gasto7 > 0).sort((a, b) => b.gasto7 - a.gasto7);
+      const sinGastoReciente = p.anuncios.filter((a) => a.gasto7 === 0);
       return {
         hayDatos: true,
-        anunciosActivos: p.anuncios.length,
+        cuenta: p.cuenta,
+        anunciosCorriendo: corriendo.length,
+        gastoUltimos7Dias: comoPlata(p.gastoUltimos7),
         gastoUltimos30Dias: comoPlata(p.gastoUltimos30),
-        anuncios: p.anuncios.slice(0, 8).map((a) => ({
+        anuncios: corriendo.slice(0, 8).map((a) => ({
           nombre: a.nombre,
           campana: a.campana,
           link: a.link,
+          gastoUltimos7Dias: comoPlata(a.gasto7),
           gastoUltimos30Dias: comoPlata(a.gasto),
-          impresiones: a.impresiones,
         })),
-        sinLink: p.anuncios.some((a) => !a.link),
-        // Anuncios encendidos pero sin gasto: pasa de verdad (presupuesto en
-        // cero, conjunto pausado). Decirlo es mejor que cantar "$0,00" seco.
-        activosSinInversion: p.anuncios.length > 0 && p.gastoUltimos30 === 0,
+        encendidosSinGastoReciente: sinGastoReciente.length,
+        ejemplosSinGastoReciente: sinGastoReciente.slice(0, 5).map((a) => a.nombre),
+        sinLink: corriendo.some((a) => !a.link),
+        activosSinInversion: p.anuncios.length > 0 && p.gastoUltimos7 === 0,
+        ...(p.gasto7Disponible ? {} : { aviso: "No se pudo leer el gasto de los últimos 7 días: lo de 'corriendo' usa el gasto de 30 días." }),
+        siguiente:
+          "Para resultados (mensajes, leads, costo por resultado) o un periodo concreto, usa verPautaPorFechas.",
       };
     }
 

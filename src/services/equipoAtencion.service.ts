@@ -1,7 +1,7 @@
 import { Types } from "mongoose";
 import models from "../models";
 
-export type TemaAtencion = "produccion" | "guiones" | "atencion";
+export type TemaAtencion = "produccion" | "guiones" | "atencion" | "publicidad";
 
 export interface PersonaAtencion {
   nombre: string;
@@ -40,6 +40,10 @@ export const EQUIPO_ATENCION: Record<TemaAtencion, EquipoTema> = {
     etiqueta: "revisión de guiones",
     personas: [{ nombre: "Ariana Vera", email: "avera@bakano.ec" }],
     calendarioId: "JDzGl2qjoWwAk5TvBNUp", // "Ariana Vera · Estrategia de contenido y guiones"
+  },
+  publicidad: {
+    etiqueta: "publicidad y anuncios en Meta",
+    personas: [{ nombre: "Denisse Quimi", email: "dquimi@bakano.ec" }],
   },
   atencion: {
     etiqueta: "atención al cliente",

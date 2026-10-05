@@ -57,7 +57,7 @@ const REENVIO_SEGUNDOS = 60;
 const MAX_BOTONES_ENTORNO = 30;
 const MAX_HORARIOS = 8;
 
-const EMOJI_TEMA: Record<TemaAtencion, string> = { produccion: "🎬", guiones: "📝", atencion: "🤝" };
+const EMOJI_TEMA: Record<TemaAtencion, string> = { produccion: "🎬", guiones: "📝", atencion: "🤝", publicidad: "📣" };
 
 const PEDIR_CORREO =
   "Holaaa 👋 qué gusto tenerte por aquí. Soy tu asistente de <b>Bakano</b>\n\n" +
