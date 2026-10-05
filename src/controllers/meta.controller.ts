@@ -176,7 +176,7 @@ export async function completeGlobalOAuth(req: Request, res: Response, next: Nex
     const state = req.query.state as string | undefined;
     if (!code || !state) throw new Error("Facebook no devolvió los datos de autorización requeridos.");
     await metaService.completeOAuth(code, state);
-    const appUrl = process.env.APP_URL || "https://testing-storybrand-frontend.bakano.ec";
+    const appUrl = process.env.APP_URL || "https://metrics.bakano.ec";
     res.redirect(`${appUrl}/app/superadmin/meta-integrations?meta=connected`);
   } catch (error) {
     next(error);
