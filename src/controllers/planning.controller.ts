@@ -4,6 +4,7 @@ import { AuthRequest } from "../types/AuthRequest";
 import { PlanningService } from "../services/planning.service";
 import models from "../models";
 import { atencionClienteService } from "../services/atencionCliente.service";
+import { ANTICIPACION_PRODUCCION_H } from "../mcp/tools/base";
 
 const planningService = new PlanningService();
 
@@ -110,7 +111,8 @@ export async function updateEntry(req: AuthRequest, res: Response, next: NextFun
  * del body, así que aquí se confirma que la producción sea de un entorno donde
  * la persona es admin. Si la cita vive en el CRM, el Planificador la mueve
  * forzada: el cliente solo puede llevarla a un horario que el calendario
- * ofrece; el equipo, a cualquier hora que no choque con otra cita.
+ * ofrece y con 48 h de anticipación; el equipo, a cualquier hora que no
+ * choque con otra cita y sin el mínimo de 48 h.
  */
 async function revisarCambioDeFecha(
   req: AuthRequest,
@@ -127,9 +129,14 @@ async function revisarCambioDeFecha(
     if (!esAdmin) return { status: HttpStatusCode.Forbidden, message: "No tienes acceso a esta producción." };
   }
 
-  if (date === undefined || !entry.crm?.appointmentId || !entry.crm?.calendarId) return null;
+  if (date === undefined) return null;
   const nueva = new Date(date as string);
   if (Number.isNaN(nueva.getTime()) || Math.abs(nueva.getTime() - new Date(entry.date).getTime()) <= 60_000) return null;
+  // Solo el equipo interno mueve con menos de 48 h; el cliente no.
+  if (!equipo && nueva.getTime() - Date.now() < ANTICIPACION_PRODUCCION_H * 3_600_000) {
+    return { status: HttpStatusCode.UnprocessableEntity, message: `La producción se mueve con al menos ${ANTICIPACION_PRODUCCION_H} h de anticipación. Si es urgente, escríbele a tu equipo de Bakano.` };
+  }
+  if (!entry.crm?.appointmentId || !entry.crm?.calendarId) return null;
 
   try {
     if (equipo) {

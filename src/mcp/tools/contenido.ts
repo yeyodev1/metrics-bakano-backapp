@@ -52,8 +52,10 @@ async function evaluarCambio(a: any, u: UsuarioMcp) {
     descripcion = `Producción "${p.title}" de ${p.workspaceId?.name}`;
     if (p.cumplida) bloqueos.push("Esa producción ya se grabó.");
     if (p.cancelada || /^CANCELADA/.test(p.title)) bloqueos.push("Esa producción está cancelada.");
-    if (nueva.getTime() - ahora.getTime() < ANTICIPACION_PRODUCCION_H * 3_600_000) {
-      bloqueos.push(`La producción se agenda con al menos ${ANTICIPACION_PRODUCCION_H} h de anticipación.`);
+    // El MCP es solo del equipo interno: las 48 h son un aviso, no un bloqueo.
+    if (nueva.getTime() <= ahora.getTime()) bloqueos.push("Esa fecha ya pasó.");
+    else if (nueva.getTime() - ahora.getTime() < ANTICIPACION_PRODUCCION_H * 3_600_000) {
+      advertencias.push(`Queda a menos de ${ANTICIPACION_PRODUCCION_H} h: confírmalo con el cliente directamente, puede no ver el aviso a tiempo.`);
     }
     if (p.crm?.appointmentId && p.crm.calendarId && Math.abs(nueva.getTime() - new Date(p.date).getTime()) > 60_000) {
       // Se mueve en el CRM a cualquier hora (forzado): aquí se cuida que no pise nada.

@@ -63,7 +63,7 @@ bloqueados se apartan.
 
 `consultar_cambio_fecha` no escribe: devuelve permitido/motivos/advertencias y un token JWT de 5 min
 atado a ese cambio y a esa persona. `mover_fecha(token)` vuelve a evaluar y recién ahí mueve.
-Producción: solo PM/dirección, 48 h de anticipación, se mueve también en el CRM.
+Producción: producción, PM y dirección; las 48 h de anticipación son un aviso para el equipo (no bloquean), se mueve también en el CRM y se revisa que no choque.
 
 ## Producciones → contenido
 
