@@ -34,7 +34,11 @@ export function leToca(tool: ToolMcp, u: UsuarioMcp): boolean {
 
 export const ZONA = "America/Guayaquil";
 
-/** Una produccion se crea o se mueve con al menos estas horas de anticipacion. */
+/**
+ * Anticipacion normal de una produccion. Para el equipo interno (el MCP es
+ * solo del equipo) es un aviso, no un bloqueo: el equipo decide. A los
+ * clientes si se les exige (Planificador web; el bot pide aun mas).
+ */
 export const ANTICIPACION_PRODUCCION_H = 48;
 
 export function fecha(d?: Date | string | null, conHora = true): string | null {

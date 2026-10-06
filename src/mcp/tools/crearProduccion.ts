@@ -59,7 +59,8 @@ export const toolsCrearProduccion: ToolMcp[] = [
     async correr(a) {
       const { ws, estado } = await entornoVigente(a.cliente);
       if (!ghlService.isConfigured()) throw new Error("El calendario del CRM no está configurado en el servidor.");
-      const minimo = new Date(Date.now() + ANTICIPACION_PRODUCCION_H * 3_600_000);
+      // El equipo puede agendar para ya mismo: desde la próxima hora.
+      const minimo = new Date(Date.now() + 3_600_000);
       const desdePedido = a.desde ? leerFecha(a.desde) : minimo;
       const desde = desdePedido.getTime() < minimo.getTime() ? minimo : desdePedido;
       const hasta = new Date(desde.getTime() + (a.dias ?? 14) * 86_400_000);
@@ -71,7 +72,7 @@ export const toolsCrearProduccion: ToolMcp[] = [
         calendario: calendario === CALENDARIOS_PRODUCCION.premium ? "premium" : "standard",
         advertencias: avisos,
         horarios: libres.slice(0, 40).map((h) => ({ cuando: fechaEcuador(h), inicio: h.toISOString() })),
-        nota: `Se crea con al menos ${ANTICIPACION_PRODUCCION_H} h de anticipación.`,
+        nota: `El equipo puede agendar con menos de ${ANTICIPACION_PRODUCCION_H} h; si queda tan cerca, avísale al cliente directamente.`,
       };
     },
   },
@@ -94,9 +95,7 @@ export const toolsCrearProduccion: ToolMcp[] = [
       const { ws, estado } = await entornoVigente(a.cliente);
       if (!ghlService.isConfigured()) throw new Error("El calendario del CRM no está configurado en el servidor.");
       const inicio = leerFecha(a.inicio);
-      if (inicio.getTime() - Date.now() < ANTICIPACION_PRODUCCION_H * 3_600_000) {
-        throw new Error(`Una producción se crea con al menos ${ANTICIPACION_PRODUCCION_H} h de anticipación.`);
-      }
+      if (inicio.getTime() <= Date.now()) throw new Error("Esa hora ya pasó.");
       const calendario = await atencionClienteService.calendarioProduccion(ws._id, a.calendario);
       const nombreCal = calendario === CALENDARIOS_PRODUCCION.premium ? "premium" : "standard";
 
@@ -113,7 +112,7 @@ export const toolsCrearProduccion: ToolMcp[] = [
         const cercanos = await ghlService
           .getFreeSlots(calendario, new Date(inicio.getTime() - 2 * 86_400_000), new Date(inicio.getTime() + 3 * 86_400_000))
           .catch(() => [] as Date[]);
-        const futuros = cercanos.filter((h) => h.getTime() - Date.now() >= ANTICIPACION_PRODUCCION_H * 3_600_000).slice(0, 6);
+        const futuros = cercanos.filter((h) => h.getTime() > Date.now()).slice(0, 6);
         return {
           creada: false,
           motivo: `Ese horario no está libre en el calendario ${nombreCal} (ocupado o fuera de los horarios que ofrece). Si la persona quiere esa hora igual, revisa con fuera_de_horario=true: se crea si no choca con nada.`,
@@ -123,6 +122,9 @@ export const toolsCrearProduccion: ToolMcp[] = [
 
       const avisos = await advertencias(ws._id);
       if (estado.estado !== "activo") avisos.unshift(`El cliente está pausado: ${estado.motivo}.`);
+      if (inicio.getTime() - Date.now() < ANTICIPACION_PRODUCCION_H * 3_600_000) {
+        avisos.unshift(`Queda a menos de ${ANTICIPACION_PRODUCCION_H} h: confírmalo con el cliente directamente, puede no ver el aviso a tiempo.`);
+      }
       if (!a.confirmar) {
         return {
           creada: false,
