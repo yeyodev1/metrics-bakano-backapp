@@ -48,7 +48,7 @@ export const toolsCrearProduccion: ToolMcp[] = [
     nombre: "horarios_produccion",
     titulo: "Horarios libres para producción",
     descripcion:
-      "Horarios libres del calendario de producción del cliente (standard o premium, el que ya usa) en una ventana de días, más lo que conviene saber antes (ya tiene producción, pagos, reunión con Ariana). Cada horario trae `inicio`, el valor exacto para crear_produccion. Solo lectura.",
+      "Horarios libres del calendario de producción del cliente (standard o premium, el que ya usa) en una ventana de días, más lo que conviene saber antes (ya tiene producción, pagos, reunión con Ariana). Cada horario trae `inicio`, el valor exacto para crear_produccion. Son los horarios que ven los clientes; si la persona quiere otra hora, crear_produccion con fuera_de_horario=true revisa que no choque. Solo lectura.",
     perfiles: [...PERFILES],
     entrada: {
       cliente: z.string(),
@@ -79,13 +79,15 @@ export const toolsCrearProduccion: ToolMcp[] = [
     nombre: "crear_produccion",
     titulo: "Crear una producción",
     descripcion:
-      "Crea la producción de un cliente: cita en el calendario de producción del CRM, entra al Planificador y avisa a producción, contenido y atención. Sin `confirmar` solo revisa que el horario siga libre y devuelve el resumen con advertencias: PREGUNTA a la persona antes de llamarla con confirmar=true. Usa el `inicio` de horarios_produccion (o una fecha y hora de Ecuador).",
+      "Crea la producción de un cliente: cita en el calendario de producción del CRM, entra al Planificador y avisa a producción, contenido y atención. Sin `confirmar` solo revisa que el horario siga libre y devuelve el resumen con advertencias: PREGUNTA a la persona antes de llamarla con confirmar=true. Usa el `inicio` de horarios_produccion (o una fecha y hora de Ecuador). " +
+      "Con `fuera_de_horario=true` el equipo agenda a cualquier hora aunque el calendario no ofrezca ese horario (los clientes nunca tienen esa opción): solo se crea si no choca con otra cita ni bloqueo del equipo de producción. Úsalo cuando la persona lo pida.",
     perfiles: [...PERFILES],
     escribe: true,
     entrada: {
       cliente: z.string(),
       inicio: z.string().describe("Fecha y hora de inicio (ISO de horarios_produccion, o fecha y hora de Ecuador)"),
       calendario: calendarioEnum.optional(),
+      fuera_de_horario: z.boolean().optional().describe("Agendar a una hora que el calendario no ofrece; solo si no choca con nada"),
       confirmar: z.boolean().optional(),
     },
     async correr(a, u) {
@@ -98,14 +100,23 @@ export const toolsCrearProduccion: ToolMcp[] = [
       const calendario = await atencionClienteService.calendarioProduccion(ws._id, a.calendario);
       const nombreCal = calendario === CALENDARIOS_PRODUCCION.premium ? "premium" : "standard";
 
-      if (!(await atencionClienteService.sigueLibre(calendario, inicio))) {
+      if (a.fuera_de_horario) {
+        const choques = await atencionClienteService.choquesProduccion(calendario, inicio);
+        if (choques.length) {
+          return {
+            creada: false,
+            motivo: "Choca con lo que ya tiene el equipo de producción a esa hora. Elige otra hora.",
+            choques,
+          };
+        }
+      } else if (!(await atencionClienteService.sigueLibre(calendario, inicio))) {
         const cercanos = await ghlService
           .getFreeSlots(calendario, new Date(inicio.getTime() - 2 * 86_400_000), new Date(inicio.getTime() + 3 * 86_400_000))
           .catch(() => [] as Date[]);
         const futuros = cercanos.filter((h) => h.getTime() - Date.now() >= ANTICIPACION_PRODUCCION_H * 3_600_000).slice(0, 6);
         return {
           creada: false,
-          motivo: `Ese horario ya está ocupado en el calendario ${nombreCal}.`,
+          motivo: `Ese horario no está libre en el calendario ${nombreCal} (ocupado o fuera de los horarios que ofrece). Si la persona quiere esa hora igual, revisa con fuera_de_horario=true: se crea si no choca con nada.`,
           libresCerca: futuros.map((h) => ({ cuando: fechaEcuador(h), inicio: h.toISOString() })),
         };
       }
@@ -119,18 +130,21 @@ export const toolsCrearProduccion: ToolMcp[] = [
             cliente: ws.name,
             cuando: fechaEcuador(inicio),
             calendario: nombreCal,
+            ...(a.fuera_de_horario ? { fueraDeHorario: "Sí: no choca con nada del equipo; los clientes no ven ese horario." } : {}),
             advertencias: avisos,
           },
-          siguiente: "Pregúntale a la persona si la crea. Si dice que sí, llama a crear_produccion con confirmar=true y el mismo inicio.",
+          siguiente: "Pregúntale a la persona si la crea. Si dice que sí, llama a crear_produccion con confirmar=true y los mismos inicio y fuera_de_horario.",
         };
       }
 
-      const r = await atencionClienteService.crearProduccionPorEquipo(ws._id, inicio, { id: u._id, nombre: u.nombre }, { calendario: a.calendario });
+      const r = await atencionClienteService.crearProduccionPorEquipo(ws._id, inicio, { id: u._id, nombre: u.nombre }, { calendario: a.calendario, fueraDeHorario: a.fuera_de_horario === true });
       if (!r.ok) {
         const motivos: Record<string, string> = {
           sin_calendario: "El calendario del CRM no está configurado en el servidor.",
           sin_contacto: `${ws.name} no tiene ningún usuario cliente con correo para la cita. Agrégalo primero (agregar_persona_entorno).`,
-          ocupado: "Ese horario se ocupó justo ahora. Pide los horarios otra vez.",
+          ocupado: a.fuera_de_horario
+            ? "Ahora choca con otra cita del equipo de producción. Revisa otra hora."
+            : "Ese horario se ocupó justo ahora. Pide los horarios otra vez.",
           error: "El CRM no aceptó la cita. Intenta de nuevo en un momento.",
         };
         return { creada: false, motivo: motivos[r.motivo] };
