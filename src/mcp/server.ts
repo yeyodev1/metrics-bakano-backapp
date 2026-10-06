@@ -1,4 +1,5 @@
 import type { Request, Response } from "express";
+import { createHash } from "node:crypto";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { McpAuditoriaModel } from "../models/mcp.model";
@@ -16,6 +17,8 @@ function instrucciones(u: UsuarioMcp): string {
     "Solo ves las herramientas de su perfil: si algo no aparece, no le toca; dilo así y sugiere a quién pedírselo.",
     "Los datos son en vivo (Mongo de producción y CRM). Las herramientas que escriben avisan al cliente o al equipo igual que la plataforma: confirma con la persona antes de usarlas.",
     "Antes de hacer algo que pide o que toca a un cliente, mira su estado (buscar_clientes o ver_cliente): si está pausado o con el contrato finalizado, díselo a la persona con el motivo antes de seguir.",
+    "La agenda oficial es el CRM de Bakano: para ver citas usa `calendario_crm` y las producciones se crean solo con `crear_produccion`. Nunca agendes, copies ni crees producciones o reuniones de clientes en Google Calendar, Outlook u otro calendario.",
+    "Si `quien_soy` lista una herramienta que no tienes disponible, la conexión guardó la lista vieja: dile a la persona que desconecte y vuelva a conectar el conector de Bakano (no basta con apagarlo y prenderlo) y abra un chat nuevo. No busques otro camino.",
     "Para saber qué hay que atender, empieza por `que_hay_pendiente`. Las fechas van en hora de Ecuador (America/Guayaquil).",
     "Responde en español, directo y corto.",
   ].join("\n");
@@ -30,9 +33,18 @@ function resumirArgs(args: unknown): string {
   }
 }
 
+/**
+ * La versión cambia cuando cambia la lista de tools del perfil: le dice al
+ * cliente (claude.ai) que lo que tiene guardado ya no es lo vigente.
+ */
+function version(u: UsuarioMcp): string {
+  const nombres = TOOLS.filter((t) => leToca(t, u)).map((t) => t.nombre).join(",");
+  return `1.0.0+${createHash("sha1").update(nombres).digest("hex").slice(0, 8)}`;
+}
+
 export function crearServidor(u: UsuarioMcp): McpServer {
   const server = new McpServer(
-    { name: "bakano", title: "Bakano · Equipo", version: "1.0.0" },
+    { name: "bakano", title: "Bakano · Equipo", version: version(u) },
     { instructions: instrucciones(u) }
   );
 
