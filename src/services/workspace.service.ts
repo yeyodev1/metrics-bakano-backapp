@@ -90,6 +90,16 @@ export interface UpdateUserPayload {
   bots?: BotAcceso[];
 }
 
+
+/** Si quien pide puede ver las ventas del entorno (facturación privada). */
+function puedoVerFacturacion(ws: any, user: any): boolean {
+  const fp = ws?.facturacionPrivada;
+  if (!fp?.activa) return true;
+  if (!user) return false;
+  if (user.role === "superadmin" || user.isInternal === true) return true;
+  return (fp.visiblePara ?? []).some((id: any) => String(id) === String(user._id));
+}
+
 export class WorkspaceService {
   // ── Workspaces ────────────────────────────────────────────
 
@@ -328,7 +338,7 @@ export class WorkspaceService {
         }
       }
 
-      return { ...ws, userRole };
+      return { ...ws, userRole, puedoVerFacturacion: puedoVerFacturacion(ws, user) };
     });
 
     return { workspaces: result, total, page, limit, hasMore: total > skip + result.length };
@@ -346,8 +356,9 @@ export class WorkspaceService {
 
     // Inject user role if userId is provided
     let userRole: "admin" | "colaborador" | undefined;
+    let user: any = null;
     if (userId && Types.ObjectId.isValid(userId)) {
-      const user = await models.users.findById(userId).lean();
+      user = await models.users.findById(userId).lean();
       if (user) {
         const wsAccess = user.workspaces?.find((w: any) => w.workspaceId.toString() === workspaceId);
         if (wsAccess) {
@@ -360,7 +371,8 @@ export class WorkspaceService {
 
     return {
       ...workspace,
-      userRole
+      userRole,
+      puedoVerFacturacion: puedoVerFacturacion(workspace, user),
     };
   }
 

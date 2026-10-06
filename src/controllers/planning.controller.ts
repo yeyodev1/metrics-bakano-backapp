@@ -3,6 +3,7 @@ import { HttpStatusCode } from "axios";
 import { AuthRequest } from "../types/AuthRequest";
 import { PlanningService } from "../services/planning.service";
 import models from "../models";
+import { atencionClienteService } from "../services/atencionCliente.service";
 
 const planningService = new PlanningService();
 
@@ -79,6 +80,12 @@ export async function updateEntry(req: AuthRequest, res: Response, next: NextFun
     const entryId = req.params["entryId"] as string;
     const { title, date, notes, assignedTo } = req.body;
 
+    const bloqueo = await revisarCambioDeFecha(req, entryId, date);
+    if (bloqueo) {
+      res.status(bloqueo.status).send({ message: bloqueo.message });
+      return;
+    }
+
     const entry = await planningService.updateEntry(entryId, {
       title,
       date,
@@ -96,6 +103,48 @@ export async function updateEntry(req: AuthRequest, res: Response, next: NextFun
     console.error("updateEntry error:", error);
     next(error);
   }
+}
+
+/**
+ * Antes de mover una producción. El middleware de admin mira el workspaceId
+ * del body, así que aquí se confirma que la producción sea de un entorno donde
+ * la persona es admin. Si la cita vive en el CRM, el Planificador la mueve
+ * forzada: el cliente solo puede llevarla a un horario que el calendario
+ * ofrece; el equipo, a cualquier hora que no choque con otra cita.
+ */
+async function revisarCambioDeFecha(
+  req: AuthRequest,
+  entryId: string,
+  date: unknown
+): Promise<{ status: number; message: string } | null> {
+  const user: any = req.user?.role === "superadmin" ? { role: "superadmin" } : await models.users.findById(req.user?._id).select("role isInternal workspaces").lean();
+  const equipo = user?.role === "superadmin" || user?.isInternal === true;
+  const entry: any = await models.planning.findById(entryId).select("workspaceId date crm").lean().catch(() => null);
+  if (!entry) return null; // el servicio responde 404
+
+  if (!equipo) {
+    const esAdmin = (user?.workspaces || []).some((w: any) => String(w.workspaceId) === String(entry.workspaceId) && w.role === "admin");
+    if (!esAdmin) return { status: HttpStatusCode.Forbidden, message: "No tienes acceso a esta producción." };
+  }
+
+  if (date === undefined || !entry.crm?.appointmentId || !entry.crm?.calendarId) return null;
+  const nueva = new Date(date as string);
+  if (Number.isNaN(nueva.getTime()) || Math.abs(nueva.getTime() - new Date(entry.date).getTime()) <= 60_000) return null;
+
+  try {
+    if (equipo) {
+      const choques = await atencionClienteService.choquesProduccion(entry.crm.calendarId, nueva, entry.crm.appointmentId);
+      if (choques.length) {
+        return { status: HttpStatusCode.Conflict, message: `Esa hora choca con ${choques.map((c) => `"${c.titulo}" (${c.cuando})`).join(", ")} en el calendario de producción.` };
+      }
+    } else if (!(await atencionClienteService.sigueLibre(entry.crm.calendarId, nueva))) {
+      return { status: HttpStatusCode.Conflict, message: "Ese horario no está disponible en el calendario de producción. Elige uno de los horarios libres." };
+    }
+  } catch (error: any) {
+    console.error("[Planificador] no se pudo revisar el calendario del CRM:", error.response?.data || error.message);
+    return { status: HttpStatusCode.BadGateway, message: "No pude revisar el calendario del CRM. Intenta de nuevo en un momento." };
+  }
+  return null;
 }
 
 export async function deleteEntry(req: AuthRequest, res: Response, next: NextFunction) {

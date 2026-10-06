@@ -154,6 +154,10 @@ facturación real, ritmo del mes, equipo asignado y recordatorios.
 ### MCP: Producción crea producciones (2026-10-05)
 - `horarios_produccion` y `crear_produccion` (`src/mcp/tools/crearProduccion.ts`; perfiles produccion, pm, direccion). Mismo camino que el bot (`atencionClienteService.citaProduccionEnCrm`): cita en el calendario de producción del CRM (standard/premium), sync al Planificador y avisos. `crearProduccionPorEquipo` usa como contacto al admin cliente más antiguo del entorno. Las reglas del cliente (meses, Ariana, pagos, ya agendada) son advertencias; duras: contrato finalizado, horario ocupado y menos de `ANTICIPACION_PRODUCCION_H` (48 h). Sin `confirmar` solo revisa.
 
+### Producción fuera de horario + facturación privada (2026-10-06)
+- **Fuera de horario (solo equipo)**: `crear_produccion` con `fuera_de_horario=true` crea la cita con `ignoreFreeSlotValidation` si `atencionClienteService.choquesProduccion` no encuentra citas vivas ni bloqueos que se crucen (standard y premium de Dinamita se cruzan entre sí). Mover (MCP `mover_fecha` y `PUT /api/planning/:entryId`) también revisa choques. El cliente nunca tiene esa opción: en el PUT un no-interno solo mueve producciones de un entorno donde es admin y solo a un horario que `sigueLibre` ofrece.
+- **Facturación privada**: `Workspace.facturacionPrivada { activa, visiblePara[], porNombre, en }`. Servicio `facturacionPrivada.service.ts` (`puedeVer`, `filtro`, `chatPuede`, `privadas`). `GET/PUT /api/workspaces/:id/facturacion-privada` (edita el equipo o un admin del entorno que la ve; el que la activa desde el cliente queda incluido). Aplica a `/api/billing/*` (`facturacionVisibleMiddleware`), agent-feed, gate de asesoría de ventas (no se exige a quien no la ve), correos de venta y del cron, recordatorios y resumen mensual por Telegram, botones y herramientas de facturación del bot. El equipo de Bakano siempre la ve. El front recibe `puedoVerFacturacion` en el entorno.
+
 ## Notas importantes
 - No hay cron jobs instalados aún — usar `node-cron`
 - Los emails tienen plantillas HTML inline (ver patrón en `resend.service.ts`)

@@ -225,6 +225,11 @@ export interface IWorkspace extends Document {
    */
   guionesSinPago?: { hasta?: Date; motivo?: string; porNombre?: string; en?: Date };
   /**
+   * Ventas privadas: solo `visiblePara` (usuarios del cliente) ve y recibe la
+   * facturación, el ROAS y la meta. El equipo de Bakano siempre la ve.
+   */
+  facturacionPrivada?: { activa: boolean; visiblePara: Types.ObjectId[]; porNombre?: string; en?: Date };
+  /**
    * Lo que el cliente quiere destacar (producto, servicio, promo). Contenido
    * planifica sobre esto; el bot lo pregunta cada tres semanas.
    */
@@ -454,6 +459,15 @@ const WorkspaceSchema = new Schema<IWorkspace>(
     },
     guionesSinPago: {
       type: { hasta: Date, motivo: String, porNombre: String, en: Date },
+      default: undefined,
+    },
+    facturacionPrivada: {
+      type: {
+        activa: { type: Boolean, default: false },
+        visiblePara: [{ type: Schema.Types.ObjectId, ref: "User" }],
+        porNombre: String,
+        en: Date,
+      },
       default: undefined,
     },
     destacar: {

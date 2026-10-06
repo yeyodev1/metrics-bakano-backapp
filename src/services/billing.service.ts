@@ -1,6 +1,7 @@
 import axios from "axios";
 import { Types } from "mongoose";
 import models from "../models";
+import { facturacionPrivadaService } from "./facturacionPrivada.service";
 import { resendService } from "./resend.service";
 import { metaService } from "./meta.service";
 
@@ -388,7 +389,9 @@ export class BillingService {
       isActive: true,
       workspaces: { $elemMatch: { workspaceId: new Types.ObjectId(workspaceId), role: "admin" } },
     }).lean();
-    return externals.map(u => ({ email: u.email, name: u.name || u.email }));
+    // Facturación privada: solo a quienes el cliente eligió.
+    const puedeVer = await facturacionPrivadaService.filtro(workspaceId);
+    return externals.filter((u) => puedeVer(u as any)).map(u => ({ email: u.email, name: u.name || u.email }));
   }
 
   /**

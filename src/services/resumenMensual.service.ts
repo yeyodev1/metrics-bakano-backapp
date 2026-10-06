@@ -1,4 +1,5 @@
 import models from "../models";
+import { facturacionPrivadaService } from "./facturacionPrivada.service";
 import { telegramService, type InlineButton } from "./telegram.service";
 import { telegramAgentService } from "./telegramAgent.service";
 import { metricasClienteService } from "./metricasCliente.service";
@@ -47,8 +48,11 @@ class ResumenMensualService {
     );
 
     const porEntorno = new Map<string, number[]>();
+    // Facturación privada: solo los chats de quienes el cliente eligió.
+    const privadas = await facturacionPrivadaService.privadas();
     for (const c of chats) {
       if (c.userId && internos.has(String(c.userId))) continue;
+      if (!facturacionPrivadaService.chatPuedeVer(privadas, c.workspaceId, c.userId)) continue;
       porEntorno.set(String(c.workspaceId), [...(porEntorno.get(String(c.workspaceId)) ?? []), c.chatId]);
     }
     return porEntorno;
