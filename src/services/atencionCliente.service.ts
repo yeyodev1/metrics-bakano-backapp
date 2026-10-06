@@ -504,9 +504,14 @@ class AtencionClienteService {
     inicio: Date;
     cliente: DatosCliente;
     titulo: string;
+    /** Solo el equipo (MCP): a cualquier hora, si no choca con nada del equipo. */
+    fueraDeHorario?: boolean;
   }): Promise<{ ok: true; enPlanificador: boolean; planningId: string | null } | { ok: false; motivo: "ocupado" | "error" }> {
     try {
-      if (!(await this.sigueLibre(o.calendario, o.inicio))) return { ok: false, motivo: "ocupado" };
+      const libre = o.fueraDeHorario
+        ? (await this.choquesProduccion(o.calendario, o.inicio)).length === 0
+        : await this.sigueLibre(o.calendario, o.inicio);
+      if (!libre) return { ok: false, motivo: "ocupado" };
       const contactId = await this.contactoCrm(o.cliente);
       await ghlService.createAppointment({
         calendarId: o.calendario,
@@ -514,6 +519,7 @@ class AtencionClienteService {
         startTime: o.inicio,
         title: o.titulo,
         permitirProduccion: true,
+        forzar: o.fueraDeHorario === true,
       });
     } catch (error: any) {
       console.error("[Atención] no se pudo agendar la producción:", error.response?.data || error.message);
@@ -582,7 +588,7 @@ class AtencionClienteService {
     workspaceId: Types.ObjectId,
     inicio: Date,
     actor: { id: string; nombre: string },
-    opciones: { calendario?: keyof typeof CALENDARIOS_PRODUCCION } = {}
+    opciones: { calendario?: keyof typeof CALENDARIOS_PRODUCCION; fueraDeHorario?: boolean } = {}
   ): Promise<
     | { ok: true; cuando: string; calendario: string; enPlanificador: boolean; planningId: string | null; contacto: string; avisados: string[] }
     | { ok: false; motivo: "sin_calendario" | "sin_contacto" | "ocupado" | "error" }
@@ -597,6 +603,7 @@ class AtencionClienteService {
       inicio,
       cliente,
       titulo: `${cliente.entorno} · Producción (creada por ${actor.nombre})`,
+      fueraDeHorario: opciones.fueraDeHorario,
     });
     if (!cita.ok) return { ok: false, motivo: cita.motivo };
 
@@ -717,6 +724,36 @@ class AtencionClienteService {
   }
 
   /** El horario pudo ocuparse mientras el cliente elegia. */
+  /**
+   * Lo que choca con una producción de `inicio` (lo que dura una cita del
+   * calendario) en cualquiera de los calendarios del equipo de producción:
+   * citas vivas y bloqueos. Es el control cuando el equipo agenda o mueve
+   * fuera de los horarios que el CRM ofrece. `excluir` = la cita que se mueve.
+   */
+  async choquesProduccion(calendarioId: string, inicio: Date, excluir?: string): Promise<{ titulo: string; cuando: string }[]> {
+    const fin = new Date(inicio.getTime() + (await ghlService.duracionCita(calendarioId)) * 60_000);
+    // Standard y premium son el mismo equipo (las mismas personas): se cruzan.
+    const delEquipo: string[] = Object.values(CALENDARIOS_PRODUCCION);
+    const calendarios = delEquipo.includes(calendarioId) ? delEquipo : [calendarioId];
+    const desde = new Date(inicio.getTime() - 86_400_000);
+    const hasta = new Date(fin.getTime() + 86_400_000);
+    const [citas, bloqueos] = await Promise.all([
+      ghlService.getCalendarEvents(calendarios, desde, hasta),
+      // Las citas son lo que no se puede pisar; si los bloqueos no se leen
+      // (permiso del token), se sigue con las citas y queda en el log.
+      ghlService.getBlockedSlots(calendarios, desde, hasta).catch((error: any) => {
+        console.warn("[Atención] no se pudieron leer los bloqueos del CRM:", error.response?.data || error.message);
+        return [] as any[];
+      }),
+    ]);
+    const vistos = new Set<string>();
+    return [...citas, ...bloqueos]
+      .filter((e: any) => e.id !== excluir && !/cancel|invalid|noshow/i.test(String(e.appointmentStatus ?? "")))
+      .filter((e: any) => new Date(e.startTime) < fin && new Date(e.endTime ?? e.startTime) > inicio)
+      .filter((e: any) => !vistos.has(e.id) && Boolean(vistos.add(e.id)))
+      .map((e: any) => ({ titulo: e.title || "Bloqueo", cuando: fechaEcuador(new Date(e.startTime)) }));
+  }
+
   async sigueLibre(calendarioId: string, inicio: Date): Promise<boolean> {
     const libres = await ghlService.getFreeSlots(calendarioId, new Date(inicio.getTime() - 60_000), new Date(inicio.getTime() + 86_400_000));
     return libres.some((h) => Math.abs(h.getTime() - inicio.getTime()) < 60_000);

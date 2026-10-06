@@ -56,6 +56,12 @@ async function evaluarCambio(a: any, u: UsuarioMcp) {
     if (nueva.getTime() - ahora.getTime() < ANTICIPACION_PRODUCCION_H * 3_600_000) {
       bloqueos.push(`La producción se agenda con al menos ${ANTICIPACION_PRODUCCION_H} h de anticipación.`);
     }
+    if (p.crm?.appointmentId && p.crm.calendarId && Math.abs(nueva.getTime() - new Date(p.date).getTime()) > 60_000) {
+      // Se mueve en el CRM a cualquier hora (forzado): aquí se cuida que no pise nada.
+      const choques = await atencionClienteService.choquesProduccion(p.crm.calendarId, nueva, p.crm.appointmentId);
+      for (const c of choques) bloqueos.push(`Choca con "${c.titulo}" (${c.cuando}) en el calendario de producción.`);
+      if (!choques.length) advertencias.push("Esa hora no choca con nada del equipo de producción (puede estar fuera de los horarios que ven los clientes).");
+    }
     if (p.source === "crm") advertencias.push("Viene del CRM: se mueve también la cita en GoHighLevel.");
     const ariana = await atencionClienteService.reglaAriana(p.workspaceId?._id).catch(() => null);
     if (ariana?.aplica) {

@@ -176,6 +176,27 @@ export class GhlService {
       .filter((d) => !Number.isNaN(d.getTime()) && d.getTime() >= desde.getTime());
   }
 
+  /** Minutos que dura una cita en ese calendario (lo que el CRM le pone de fin). */
+  async duracionCita(calendarId: string): Promise<number> {
+    const calendario = await this.getCalendar(calendarId);
+    return calendario?.slotDurationUnit === "hours" ? (calendario.slotDuration || 1) * 60 : calendario?.slotDuration || 30;
+  }
+
+  /** Bloqueos de horario (no son citas) de esos calendarios en un rango. */
+  async getBlockedSlots(calendarIds: string[], startTime: Date, endTime: Date): Promise<any[]> {
+    const listas = await Promise.all(
+      calendarIds.map((calendarId) =>
+        axios
+          .get(`${GHL_API_BASE}/calendars/blocked-slots`, {
+            headers: this.getHeaders(),
+            params: { locationId: this.getLocationId(), calendarId, startTime: startTime.getTime(), endTime: endTime.getTime() },
+          })
+          .then((r) => (r.data?.events || []).map((e: any) => ({ ...e, calendarId: e.calendarId || calendarId })))
+      )
+    );
+    return listas.flat();
+  }
+
   async getCalendar(calendarId: string): Promise<{ id: string; name: string; slotDuration?: number; slotDurationUnit?: string } | null> {
     const response = await axios.get(`${GHL_API_BASE}/calendars/${calendarId}`, { headers: this.getHeaders() });
     return response.data?.calendar || null;
@@ -219,6 +240,12 @@ export class GhlService {
     title: string;
     /** Solo el flujo de agendar produccion lo activa, a proposito. */
     permitirProduccion?: boolean;
+    /**
+     * Fuera de los horarios que el calendario ofrece. Solo el equipo de
+     * produccion lo usa (MCP) y antes revisa que no choque con nada; al
+     * cliente nunca se le ofrece.
+     */
+    forzar?: boolean;
   }): Promise<string> {
     const calendario = await this.getCalendar(cita.calendarId);
     if (!calendario) throw new Error(`Calendario ${cita.calendarId} no encontrado`);
@@ -242,6 +269,7 @@ export class GhlService {
           title: cita.title,
           appointmentStatus: "confirmed",
           toNotify: true,
+          ...(cita.forzar ? { ignoreFreeSlotValidation: true } : {}),
         },
         { headers: this.getHeaders(), timeout: 20_000 }
       );
