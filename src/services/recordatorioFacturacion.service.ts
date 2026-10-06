@@ -1,5 +1,6 @@
 import { Types } from "mongoose";
 import models from "../models";
+import { facturacionPrivadaService } from "./facturacionPrivada.service";
 import { telegramService, type InlineButton } from "./telegram.service";
 import { slackService } from "./slack.service";
 import { resendService } from "./resend.service";
@@ -89,8 +90,11 @@ class RecordatorioFacturacionService {
     );
 
     const porEntorno = new Map<string, number[]>();
+    // Facturación privada: solo los chats de quienes el cliente eligió.
+    const privadas = await facturacionPrivadaService.privadas();
     for (const c of chats) {
       if (c.userId && internos.has(String(c.userId))) continue;
+      if (!facturacionPrivadaService.chatPuedeVer(privadas, c.workspaceId, c.userId)) continue;
       const clave = String(c.workspaceId);
       porEntorno.set(clave, [...(porEntorno.get(clave) ?? []), c.chatId]);
     }

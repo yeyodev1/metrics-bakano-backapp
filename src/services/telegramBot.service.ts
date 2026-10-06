@@ -3,6 +3,7 @@ import { estadoPagoService } from "./estadoPago.service";
 import { produccionAnticipadaService } from "./produccionAnticipada.service";
 import { Types } from "mongoose";
 import models from "../models";
+import { facturacionPrivadaService } from "./facturacionPrivada.service";
 import type { ITelegramChat } from "../models/telegramChat.model";
 import { botsDeAcceso } from "../models/user.model";
 import { resendService } from "./resend.service";
@@ -1659,6 +1660,11 @@ export class TelegramBotService {
    * es donde se perdía.
    */
   private async mostrarFacturacion(chat: ITelegramChat): Promise<void> {
+    if (!(await facturacionPrivadaService.chatPuede(chat))) {
+      await facturacionChatService.olvidarPedido(chat).catch(() => {});
+      await telegramService.sendMessage(chat.chatId, facturacionPrivadaService.MENSAJE_PRIVADA, [[{ text: "📋 Volver al menú", callback_data: "menu:ver" }]]);
+      return;
+    }
     const dias = await facturacionChatService.diasPendientes(chat);
     const faltan = dias.filter((d) => !d.registrado);
     const botones: InlineButton[][] = faltan.map((d) => [
@@ -1681,6 +1687,11 @@ export class TelegramBotService {
   }
 
   private async pedirMontoDelDia(chat: ITelegramChat, clave: string): Promise<void> {
+    if (!(await facturacionPrivadaService.chatPuede(chat))) {
+      await facturacionChatService.olvidarPedido(chat).catch(() => {});
+      await telegramService.sendMessage(chat.chatId, facturacionPrivadaService.MENSAJE_PRIVADA, [[{ text: "📋 Volver al menú", callback_data: "menu:ver" }]]);
+      return;
+    }
     const fecha = new Date(`${clave}T05:00:00.000Z`);
     if (Number.isNaN(fecha.getTime())) return this.mostrarFacturacion(chat);
     await facturacionChatService.pedirMonto(chat, fecha);
@@ -1695,6 +1706,11 @@ export class TelegramBotService {
 
   /** Guarda el monto que el cliente escribió y ofrece seguir con otro día. */
   private async registrarFacturacion(chat: ITelegramChat, monto: number, fecha: Date): Promise<void> {
+    if (!(await facturacionPrivadaService.chatPuede(chat))) {
+      await facturacionChatService.olvidarPedido(chat).catch(() => {});
+      await telegramService.sendMessage(chat.chatId, facturacionPrivadaService.MENSAJE_PRIVADA, [[{ text: "📋 Volver al menú", callback_data: "menu:ver" }]]);
+      return;
+    }
     const r = await facturacionChatService.registrar(chat, monto, fecha);
     await facturacionChatService.olvidarPedido(chat);
     if (!r.ok) {
