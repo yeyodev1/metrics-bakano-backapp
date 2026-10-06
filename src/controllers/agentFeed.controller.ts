@@ -2,6 +2,7 @@ import type { Response, NextFunction } from "express";
 import { HttpStatusCode } from "axios";
 import { AuthRequest } from "../types/AuthRequest";
 import { billingService } from "../services/billing.service";
+import { facturacionPrivadaService } from "../services/facturacionPrivada.service";
 import { agentFeedService } from "../services/agentFeed.service";
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -45,6 +46,7 @@ export async function getWorkspaceAgentFeed(
     // Billing is a separate concern and must never block the feed.
     let facturacion: any = null;
     try {
+      if (!(await facturacionPrivadaService.puedeVer(req.user as any, workspaceId))) throw new Error("FACTURACION_PRIVADA");
       const now = new Date();
       const summary: any = await billingService.getMonthEntries(
         workspaceId,

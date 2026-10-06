@@ -3,6 +3,7 @@ import { estadoPagoService } from "./estadoPago.service";
 import { destacarClienteService } from "./destacarCliente.service";
 import { produccionAnticipadaService } from "./produccionAnticipada.service";
 import models from "../models";
+import { facturacionPrivadaService } from "./facturacionPrivada.service";
 import type { ITelegramChat } from "../models/telegramChat.model";
 import { EQUIPO_ATENCION, equipoAtencionService, type TemaAtencion } from "./equipoAtencion.service";
 import { contenidoClienteService } from "./contenidoCliente.service";
@@ -1380,6 +1381,7 @@ Reglas:
           "Días que al cliente le faltan por registrar su facturación (y si ya registró hoy). Úsala antes de pedirle el monto.",
         inputSchema: z.object({}),
         execute: async () => {
+          if (!(await facturacionPrivadaService.chatPuede(chat))) return { privada: true, mensaje: facturacionPrivadaService.MENSAJE_PRIVADA };
           const dias = await facturacionChatService.diasPendientes(chat);
           return {
             dias: dias.map((d) => ({ dia: claveDia(d.fecha), texto: d.texto, registrado: d.registrado })),
@@ -1396,6 +1398,7 @@ Reglas:
           dia: z.string().describe("Día en formato YYYY-MM-DD, tomado de verFacturacionPendiente"),
         }),
         execute: async ({ monto, dia }: { monto: number; dia: string }) => {
+          if (!(await facturacionPrivadaService.chatPuede(chat))) return { privada: true, mensaje: facturacionPrivadaService.MENSAJE_PRIVADA };
           const fecha = new Date(`${dia}T05:00:00.000Z`);
           if (Number.isNaN(fecha.getTime())) return { ok: false, motivo: "día inválido, usa YYYY-MM-DD" };
           const r = await facturacionChatService.registrar(chat, monto, fecha);
@@ -1489,6 +1492,7 @@ Reglas:
           "Métricas del entorno: facturación, gasto en Meta y ROAS del mes actual y del anterior, días sin registrar, meta del mes si existe, y los videos con más vistas.",
         inputSchema: z.object({}),
         execute: async () => {
+          if (!(await facturacionPrivadaService.chatPuede(chat))) return { privada: true, mensaje: facturacionPrivadaService.MENSAJE_PRIVADA };
           const [resumen, cerrado] = await Promise.all([
             metricasClienteService.resumen(chat.workspaceId!),
             metricasClienteService.mesCerrado(chat.workspaceId!).catch(() => null),

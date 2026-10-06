@@ -1,6 +1,16 @@
 import type { Response } from "express";
 import cloudinary from "../config/cloudinary";
 import { billingService } from "../services/billing.service";
+import { facturacionPrivadaService } from "../services/facturacionPrivada.service";
+
+/**
+ * La asesoría de ventas pide la facturación al día. Quien no puede ver la
+ * facturación (el cliente la hizo privada) no la registra: no se le exige.
+ */
+async function facturacionAlDia(req: AuthRequest, userId: string, workspaceId: string) {
+  if (!(await facturacionPrivadaService.puedeVer(req.user as any, workspaceId))) return { isComplete: true, missingDates: [] as string[] };
+  return billingService.getCurrentMonthCompletion(userId, workspaceId);
+}
 import { SalesBookingRequestModel } from "../models/salesBookingRequest.model";
 import { SalesAppointmentModel } from "../models/salesAppointment.model";
 import type { AuthRequest } from "../types/AuthRequest";
@@ -13,7 +23,7 @@ export async function getSalesEligibility(req: AuthRequest, res: Response): Prom
   const userId = String(req.user!._id);
   const [request, billingCompletion, salesAppointment] = await Promise.all([
     SalesBookingRequestModel.findOne({ workspaceId, userId }).sort({ createdAt: -1 }).lean(),
-    billingService.getCurrentMonthCompletion(userId, workspaceId),
+    facturacionAlDia(req, userId, workspaceId),
     SalesAppointmentModel.findOne({ workspaceId, userId, status: { $nin: ["cancelled", "canceled"] } }).sort({ updatedAt: -1 }).lean(),
   ]);
 
@@ -50,7 +60,7 @@ export async function submitSalesBookingRequest(req: AuthRequest, res: Response)
     const objection = typeof commonObjection === "string" ? commonObjection : "";
     const other = typeof otherObjection === "string" ? otherObjection : "";
 
-    const billingCompletion = await billingService.getCurrentMonthCompletion(userId, workspaceId);
+    const billingCompletion = await facturacionAlDia(req, userId, workspaceId);
     if (!billingCompletion.isComplete) {
       res.status(403).json({ message: "Completa la facturación pendiente antes de solicitar una asesoría de ventas.", missingBillingDates: billingCompletion.missingDates });
       return;

@@ -1,5 +1,6 @@
 import cron from "node-cron";
 import models from "../models";
+import { facturacionPrivadaService } from "../services/facturacionPrivada.service";
 import { resendService } from "../services/resend.service";
 import { billingService } from "../services/billing.service";
 
@@ -31,7 +32,7 @@ async function runDailyBillingReminder(slot: "10AM" | "7PM") {
       try {
         // Solo los administradores del entorno: a los colaboradores no les
         // llega ningun correo de la venta del dia.
-        const users = await models.users
+        let users = await models.users
           .find({
             isActive: true,
             isInternal: { $ne: true },
@@ -43,6 +44,9 @@ async function runDailyBillingReminder(slot: "10AM" | "7PM") {
           })
           .lean();
 
+        // Facturación privada: solo a quienes el cliente eligió.
+        const puedeVer = await facturacionPrivadaService.filtro(workspace._id);
+        users = users.filter((u: any) => puedeVer(u));
         if (users.length === 0) continue;
 
         // Get day summary for this workspace
