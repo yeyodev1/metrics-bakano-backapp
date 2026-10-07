@@ -5,7 +5,6 @@ import { dbConnect } from "./src/config/mongo";
 dotenv.config();
 
 const updates = [
-  { email: "framirez@bakano.ec", url: "https://res.cloudinary.com/dpuody0df/image/upload/v1781222187/bakano/team/qawtwffajhpwfzbrv1hc.jpg" },
   { email: "jleon@bakano.ec", url: "https://res.cloudinary.com/dpuody0df/image/upload/v1781222189/bakano/team/r6211ec1qzdqwrr0cby0.jpg" },
   { email: "dreyes@bakano.ec", url: "https://res.cloudinary.com/dpuody0df/image/upload/v1781222186/bakano/team/hwnqfjdvuhanwcbbuapz.jpg" },
   { email: "kmunoz@bakano.ec", url: "https://res.cloudinary.com/dpuody0df/image/upload/v1781222193/bakano/team/iidq8k7xu1ix1aqfyq2a.jpg" },

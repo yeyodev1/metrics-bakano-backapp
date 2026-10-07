@@ -36,7 +36,7 @@ async function run() {
     console.log("Updating users...");
 
     const updatedAlfa = await UserModel.updateMany(
-      { name: { $regex: 'fernando|javier', $options: 'i' }, isInternal: true },
+      { name: { $regex: 'javier', $options: 'i' }, isInternal: true },
       { $set: { presentationVideoUrl: alfaLoboRes.secure_url } }
     );
     console.log("Alfa Lobo members updated:", updatedAlfa.modifiedCount);
