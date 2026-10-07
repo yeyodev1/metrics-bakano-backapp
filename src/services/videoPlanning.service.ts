@@ -14,6 +14,10 @@ import { fechaEcuador } from "./crmProductionSync.service";
 import { slackService } from "./slack.service";
 import { equipoAtencionService } from "./equipoAtencion.service";
 import { extractLeadActions } from "../utils/metaActions";
+import { esperaVeredicto, videoReviewNotificationService } from "./videoReviewNotification.service";
+import { actividadService } from "./actividad.service";
+import { formatoSegundo, rondasRestantes } from "./correccionVideo.service";
+import { videoEntregaService } from "./videoEntrega.service";
 import cloudinary from "../config/cloudinary";
 
 /** Extract Cloudinary public_id from a secure_url */
@@ -204,6 +208,26 @@ const EDITOR_ALLOWED_FIELDS = new Set(["estadoProduccion", "edicion", "linkVideo
 
 const planningService = new PlanningService();
 
+/** Campos que solo escribe el servidor: un PUT de items no los borra. */
+const CAMPOS_DEL_SERVIDOR = [
+  "versiones",
+  "correccionesVideo",
+  "rondasUsadas",
+  "guionCreadoEn",
+  "guionAprobadoEn",
+  "grabadoEn",
+  "editadoEn",
+  "videoAprobadoEn",
+  "publicadoEn",
+  "videoClienteAprobacion",
+  "videoClienteMotivo",
+  "videoClienteRevisadoEn",
+  "edicionRevisada",
+  "edicionRevisadaPorId",
+  "edicionRevisadaNombre",
+  "edicionRevisadaEn",
+] as const;
+
 /**
  * Personas de contenido que SIEMPRE reciben el aviso de guiones rechazados,
  * por nombre (sin acentos ni mayusculas). Ariana Vera es quien corrige los
@@ -290,6 +314,20 @@ export class VideoPlanningService {
       planningEntryId: new Types.ObjectId(entryId),
     });
 
+    // El PUT reemplaza los items con lo que manda el front: lo que solo
+    // escribe el servidor (versiones, cambios del cliente, fechas de etapa)
+    // no se puede perder si el front no lo devuelve.
+    const ahora = new Date();
+    const previos = new Map((existing?.items ?? []).map((i) => [i._id.toString(), i]));
+    for (const item of normalised as any[]) {
+      const previo: any = item._id ? previos.get(String(item._id)) : null;
+      if (previo) {
+        for (const campo of CAMPOS_DEL_SERVIDOR) if (item[campo] === undefined && previo[campo] !== undefined) item[campo] = previo[campo];
+      }
+      const tieneGuion = Boolean((typeof item.guion === "string" && item.guion.trim()) || item.guionIA?.gancho || item.guionIA?.cuerpo);
+      if (tieneGuion && !item.guionCreadoEn) item.guionCreadoEn = ahora;
+    }
+
     if (existing) {
       if (existing.clienteAprobado) {
         // Planning is locked: only allow appending brand-new items (no _id)
@@ -354,7 +392,9 @@ export class VideoPlanningService {
     fields: Record<string, unknown>,
     internalRole?: string,
     platformFlags?: { publishToInstagram?: boolean; publishToFacebook?: boolean },
-    actor?: { id?: string; nombre?: string }
+    actor?: { id?: string; nombre?: string },
+    /** avisarCliente: false = quien llama decide el aviso al cliente (MCP aprueba en lote). */
+    opciones?: { avisarCliente?: boolean }
   ): Promise<IVideoPlanning> {
     if (!Types.ObjectId.isValid(planningId) || !Types.ObjectId.isValid(itemId)) {
       throw new Error("INVALID_ID");
@@ -421,10 +461,24 @@ export class VideoPlanningService {
       }
     }
 
+    // Fechas de etapa (reporte semanal): solo en la transicion.
+    const ahora = new Date();
+    const hayGuion = Boolean((typeof item.guion === "string" && item.guion.trim()) || item.guionIA?.gancho);
+    const guionNuevo = hayGuion && !item.guionCreadoEn && (typeof fields.guion === "string" || fields.guionIA !== undefined);
+    if (guionNuevo) item.guionCreadoEn = ahora;
+    const seGraboAhora = prevEstadoProduccion !== "GRABADO" && item.estadoProduccion === "GRABADO";
+    if (seGraboAhora) item.grabadoEn = ahora;
+    const sePublicoAhora = !wasPublicado && item.estadoPublicacion === "PUBLICADO";
+    if (sePublicoAhora) item.publicadoEn = ahora;
+
     // Revision interna: marcar EDITADO abre una revision pendiente y avisa
     // por correo al PM/CM; aprobarla estampa quien y cuando.
     const seMarcoEditado = prevEdicion !== "EDITADO" && item.edicion === "EDITADO";
+    const seAproboInterno = fields.edicionRevisada === true && item.edicionRevisada === true && !item.edicionRevisadaEn;
     if (seMarcoEditado) {
+      item.editadoEn = new Date();
+      item.videoClienteAprobacion = "PENDIENTE";
+      item.videoAprobadoEn = undefined;
       item.edicionRevisada = false;
       item.edicionRevisadaPorId = undefined;
       item.edicionRevisadaNombre = undefined;
@@ -439,26 +493,29 @@ export class VideoPlanningService {
 
     await planning.save();
 
-    if (seMarcoEditado) {
-      (async () => {
-        const [workspace, revisores] = await Promise.all([
-          models.workspaces.findById(planning.workspaceId).select("name").lean(),
-          models.users
-            .find({ isInternal: true, internalRole: { $in: ["project_manager", "content_manager"] } })
-            .select("email")
-            .lean(),
-        ]);
-        await resendService.sendVideoReadyForReview({
-          to: revisores.map((r) => r.email),
-          workspaceName: workspace?.name || "Cliente",
-          numero: item.numero,
-          tema: item.tema,
-          editorNombre: item.editorPorNombre,
-          driveLink: item.driveLink,
-        });
-      })().catch((err: any) =>
-        console.warn("[VideoPlanningService] review email failed:", err.message)
+    // Bitacora (reporte semanal): quien hizo que.
+    const bitacora = (tipo: "guion_escrito" | "video_subido" | "video_revisado_interno" | "video_publicado") =>
+      actividadService.registrar({
+        workspaceId: planning.workspaceId, tipo, actorId: actor?.id, actorNombre: actor?.nombre,
+        planningId: planning._id, itemId: item._id, numero: item.numero, tema: item.tema,
+      });
+    if (guionNuevo) bitacora("guion_escrito");
+    if (seMarcoEditado) bitacora("video_subido");
+    if (seAproboInterno) bitacora("video_revisado_interno");
+    if (sePublicoAhora) bitacora("video_publicado");
+
+    // Todo lo editado ya paso la revision interna: es hora de que el cliente
+    // revise. Sale solo, sin que nadie tenga que acordarse de notificar.
+    if (seAproboInterno && opciones?.avisarCliente !== false) {
+      this.avisarClienteSiTodoRevisado(planningId, actor?.nombre).catch((err: any) =>
+        console.warn("[VideoPlanningService] aviso al cliente falló:", err.message)
       );
+    }
+
+    if (seMarcoEditado) {
+      videoEntregaService
+        .avisarRevisores(planning, [{ numero: item.numero, tema: item.tema, driveLink: item.driveLink }], item.editorPorNombre)
+        .catch((err: any) => console.warn("[VideoPlanningService] aviso de revisión falló:", err.message));
     }
 
     // El productor marco el guion como GRABADO: la produccion de ese mes
@@ -560,6 +617,21 @@ export class VideoPlanningService {
     return planning.toObject() as IVideoPlanning;
   }
 
+  /**
+   * Avisa al cliente cuando ningun video editado espera la revision interna y
+   * hay al menos uno esperando su veredicto. Si falta revisar alguno por
+   * dentro, espera: un aviso por lote, no uno por video.
+   */
+  async avisarClienteSiTodoRevisado(planningId: string, porNombre?: string): Promise<boolean> {
+    const planning = await models.videoPlanning.findById(planningId).select("items.edicion items.edicionRevisada items.videoClienteAprobacion").lean();
+    if (!planning) return false;
+    const editados = planning.items.filter((i) => i.edicion === "EDITADO");
+    if (editados.some((i) => i.edicionRevisada === false)) return false;
+    if (!editados.some(esperaVeredicto)) return false;
+    await videoReviewNotificationService.notificar(planningId, porNombre || "revisión interna");
+    return true;
+  }
+
   // ── CLIENT APPROVAL (POST) ─────────────────────────────────────────────────
   async submitClientApproval(
     planningId: string,
@@ -592,6 +664,20 @@ export class VideoPlanningService {
         // Auto-approve idea when client approves the video
         if (approval.clienteAprobacion === "APROBADO") {
           item.estadoIdea = "APROBADO";
+          if (prevClienteAprobacion !== "APROBADO") item.guionAprobadoEn = new Date();
+        }
+        if (prevClienteAprobacion !== approval.clienteAprobacion && approval.clienteAprobacion !== "PENDIENTE") {
+          actividadService.registrar({
+            workspaceId: planning.workspaceId,
+            tipo: approval.clienteAprobacion === "APROBADO" ? "guion_aprobado" : "guion_corregido",
+            actorId: userId,
+            esCliente: true,
+            planningId: planning._id,
+            itemId: item._id,
+            numero: item.numero,
+            tema: item.tema,
+            detalle: approval.clienteAprobacion === "RECHAZADO" ? approval.motivoRechazo?.slice(0, 300) : undefined,
+          });
         }
         if (approval.motivoRechazo !== undefined) {
           item.motivoRechazo = approval.motivoRechazo;
@@ -1281,6 +1367,11 @@ export class VideoPlanningService {
       estadoProduccion: string;
       driveLink?: string;
       driveMonthFolderLink?: string;
+      /** Cambios del cliente de la ultima ronda, con su segundo. */
+      correcciones?: { segundo: string; texto: string }[];
+      ronda?: number;
+      rondasRestantes?: number;
+      versiones?: number;
     }
 
     const reEditar: ColaItem[] = [];
@@ -1308,6 +1399,16 @@ export class VideoPlanningService {
           estadoProduccion: item.estadoProduccion,
           driveLink: item.driveLink,
           driveMonthFolderLink: vp.driveMonthFolderLink,
+          ...(item.rondasUsadas
+            ? {
+                ronda: item.rondasUsadas,
+                rondasRestantes: rondasRestantes(item),
+                correcciones: (item.correccionesVideo ?? [])
+                  .filter((c) => c.ronda === item.rondasUsadas)
+                  .map((c) => ({ segundo: formatoSegundo(c.segundo), texto: c.texto })),
+              }
+            : {}),
+          versiones: item.versiones?.length || (item.driveFileId ? 1 : 0),
         };
 
         // Una idea rechazada por el cliente no se edita: no es trabajo.

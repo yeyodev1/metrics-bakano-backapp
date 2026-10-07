@@ -92,6 +92,12 @@ export interface ITelegramChat extends Document {
     correcciones: { itemId: string; numero: number; tema: string; texto: string; categoria?: string }[];
     actualizadoEn?: Date;
   };
+  /** Borrador de correcciones de VIDEOS: se envian todas juntas por ronda. */
+  revisionVideos?: {
+    planningId: Types.ObjectId;
+    correcciones: { itemId: string; numero: number; tema: string; segundo: number; texto: string }[];
+    actualizadoEn?: Date;
+  };
   vinculadoEn?: Date;
 
   createdAt: Date;
@@ -171,6 +177,16 @@ const TelegramChatSchema = new Schema<ITelegramChat>(
         planningId: { type: Schema.Types.ObjectId, ref: "VideoPlanning" },
         correcciones: [
           { _id: false, itemId: String, numero: Number, tema: String, texto: String, categoria: String },
+        ],
+        actualizadoEn: Date,
+      },
+      default: undefined,
+    },
+    revisionVideos: {
+      type: {
+        planningId: { type: Schema.Types.ObjectId, ref: "VideoPlanning" },
+        correcciones: [
+          { _id: false, itemId: String, numero: Number, tema: String, segundo: Number, texto: String },
         ],
         actualizadoEn: Date,
       },

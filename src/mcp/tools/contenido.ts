@@ -6,6 +6,7 @@ import { PlanningService } from "../../services/planning.service";
 import { VideoPlanningService } from "../../services/videoPlanning.service";
 import { atencionClienteService } from "../../services/atencionCliente.service";
 import { destacarClienteService } from "../../services/destacarCliente.service";
+import { reporteSemanalService, duracionHoras } from "../../services/reporteSemanal.service";
 import type { PerfilMcp, UsuarioMcp } from "../perfiles";
 import { ANTICIPACION_PRODUCCION_H, fecha, leerFecha, recortar, resolverCliente, type ToolMcp } from "./base";
 
@@ -245,24 +246,9 @@ export const toolsContenido: ToolMcp[] = [
     },
   },
   {
-    nombre: "cola_revision_videos",
-    titulo: "Videos editados por revisar",
-    descripcion: "Videos que edición ya marcó como EDITADO y que nadie del equipo revisó todavía.",
-    perfiles: ["direccion", "pm", "contenido"],
-    entrada: { cliente: z.string().optional() },
-    async correr(a) {
-      let cola: any[] = (await videoPlanningService.getReviewQueue()).pendientes;
-      if (a.cliente) {
-        const ws = await resolverCliente(a.cliente);
-        cola = cola.filter((c) => c.workspaceId === String(ws._id));
-      }
-      return { total: cola.length, videos: cola.slice(0, 60) };
-    },
-  },
-  {
     nombre: "mi_cola_edicion",
     titulo: "Mi cola de edición",
-    descripcion: "Lo que te toca editar este mes: re-ediciones pedidas por el cliente, por editar, por subir el máster y listos.",
+    descripcion: "Lo que te toca editar este mes: re-ediciones pedidas por el cliente (con cada cambio y su segundo, y cuántas rondas le quedan), por editar, por subir el máster y listos. Para entregar videos usa subir_videos y conectar_videos.",
     perfiles: ["direccion", "edicion"],
     entrada: {},
     async correr(_a, u) {
@@ -273,7 +259,7 @@ export const toolsContenido: ToolMcp[] = [
     nombre: "actualizar_edicion",
     titulo: "Actualizar un video (edición)",
     descripcion:
-      "Cambia el estado de edición (EDITADO / POR_EDITAR), de grabación o el link del video final. Marcar EDITADO lo manda a la cola de revisión del equipo.",
+      "Cambia el estado de edición (EDITADO / POR_EDITAR), de grabación o el link del video final. Marcar EDITADO lo manda a la revisión del productor. Para entregar el archivo del video NO uses esto: usa subir_videos y conectar_videos (sube a Drive y guarda la versión).",
     perfiles: ["direccion", "edicion"],
     escribe: true,
     entrada: {
@@ -294,6 +280,32 @@ export const toolsContenido: ToolMcp[] = [
       const vp: any = await videoPlanningService.updateItem(a.planning_id, a.item_id, campos, rol, undefined, { id: u._id, nombre: u.nombre });
       const item = vp.items.find((i: any) => String(i._id) === a.item_id);
       return { listo: true, video: item ? { numero: item.numero, tema: item.tema, edicion: item.edicion, grabacion: item.estadoProduccion, link: item.linkVideo } : null };
+    },
+  },
+  {
+    nombre: "reporte_semanal",
+    titulo: "Reporte semanal (previsualizar)",
+    descripcion:
+      "Lo que recibirá un cliente el viernes a las 6 pm: qué hizo Bakano en la semana, cuánto tardó cada etapa y quién, lo pendiente y su CRM. Sin cliente, el consolidado de dirección. Solo lectura: no envía nada.",
+    perfiles: ["direccion", "pm"],
+    entrada: { cliente: z.string().optional() },
+    async correr(a) {
+      if (!a.cliente) {
+        const c = await reporteSemanalService.consolidado();
+        return {
+          clientesConMovimiento: c.filas.length,
+          tiempos: c.equipo.map((t) => ({
+            etapa: t.etiqueta,
+            promedio: duracionHoras(t.promedioHoras),
+            sinDato: t.sinDato,
+            porPersona: t.quienes.map((q) => ({ nombre: q.nombre, promedio: duracionHoras(q.promedioHoras), videos: q.muestras })),
+          })),
+          telegram: c.telegram,
+        };
+      }
+      const ws = await resolverCliente(a.cliente);
+      const p = await reporteSemanalService.previsualizar(String(ws._id));
+      return { reporte: p.reporte, telegram: p.telegram };
     },
   },
 ];

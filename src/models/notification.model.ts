@@ -16,7 +16,10 @@ export type NotificationType =
   | "produccion_sin_entorno"
   | "solicitud_cliente"
   | "reunion_agendada"
-  | "cliente_en_riesgo";
+  | "cliente_en_riesgo"
+  | "video_corregido"
+  | "video_por_revisar"
+  | "video_devuelto";
 
 export interface INotification extends Document {
   userId: Types.ObjectId;
@@ -56,6 +59,9 @@ const NotificationSchema = new Schema<INotification>(
         "solicitud_cliente",
         "reunion_agendada",
         "cliente_en_riesgo",
+        "video_corregido",
+        "video_por_revisar",
+        "video_devuelto",
       ],
       required: true,
     },

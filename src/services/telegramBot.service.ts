@@ -32,6 +32,8 @@ import { equipoEnTexto, DIRECCION } from "./equipoBakano.service";
 import { comoPlata, contextoParaLaIa, facturacionChatService, claveDia, nombreDia, parsearMonto } from "./facturacionChat.service";
 import { archivosClienteService, ETIQUETA_CATEGORIA, type CategoriaRecurso } from "./archivosCliente.service";
 import { revisionGuionesService, type RevisionPendiente } from "./revisionGuiones.service";
+import { revisionVideosChatService } from "./revisionVideosChat.service";
+import { formatoSegundo, MAX_RONDAS_VIDEO } from "./correccionVideo.service";
 import { SESIONES_ONBOARDING, type SesionOnboarding } from "./onboardingSesiones.service";
 import { telegramAgentService } from "./telegramAgent.service";
 import { comoDolares, pagosClienteService } from "./pagosCliente.service";
@@ -817,6 +819,7 @@ export class TelegramBotService {
       return this.mostrarMenu(chat);
     }
     if (data === "rev:lista") return this.mostrarGuionesParaRevisar(chat);
+    if (data === "vid:lista") return this.mostrarVideosParaRevisar(chat);
     if (data.startsWith("onbl:")) return this.enviarLinkOnboarding(chat, data.slice(5) as SesionOnboarding);
     if (data.startsWith("onb:")) return this.mostrarHorariosOnboarding(chat, data.slice(4) as SesionOnboarding);
     if (data.startsWith("onbs:")) {
@@ -1046,6 +1049,35 @@ export class TelegramBotService {
         "✏️ ya tiene corrección anotada · ⏳ por revisar\n\n" +
         "Dime el número y qué cambiarías. Si quieres leer uno primero, escríbeme <i>muéstrame el 3</i>." +
         (r.plazo.cerrado ? "\n\n⚠️ El plazo para pedir cambios ya cerró." : ""),
+      [[{ text: "📋 Volver al menú", callback_data: "menu:ver" }]]
+    );
+  }
+
+  /** Videos terminados que esperan su veredicto, con el link y las rondas que le quedan. */
+  private async mostrarVideosParaRevisar(chat: ITelegramChat): Promise<void> {
+    if (await this.bloqueadoPorPago(chat)) return;
+    const r = await revisionVideosChatService.resumen(chat);
+    if (!r) {
+      await telegramService.sendMessage(chat.chatId, "No tienes videos esperando revisión ahora mismo 🙂");
+      return this.mostrarMenu(chat);
+    }
+    const anotados = new Map<string, number>();
+    for (const c of r.cambios) anotados.set(c.itemId, (anotados.get(c.itemId) ?? 0) + 1);
+    const lineas = r.revision.videos.map((v) => {
+      const marca = anotados.has(v.itemId) ? "✏️" : "⏳";
+      const link = v.link ? ` · <a href="${escaparHtml(v.link)}">ver video</a>` : "";
+      const rondas = v.rondasRestantes ? `${v.rondasRestantes} de ${MAX_RONDAS_VIDEO} rondas` : "solo aprobar";
+      return `${marca} #${String(v.numero).padStart(2, "0")} ${escaparHtml(v.tema)}${v.version > 1 ? ` (versión ${v.version})` : ""}${link}\n      <i>${rondas}</i>`;
+    });
+    const borrador = r.cambios.length
+      ? "\n\n<b>Cambios anotados</b>\n" +
+        r.cambios.map((c) => `#${String(c.numero).padStart(2, "0")} · <b>${formatoSegundo(c.segundo)}</b> ${escaparHtml(c.texto)}`).join("\n")
+      : "";
+    await telegramService.sendMessage(
+      chat.chatId,
+      `🎬 <b>Tus videos por revisar</b>\n\n${lineas.join("\n")}${borrador}\n\n` +
+        "Mira cada uno y dime <i>apruebo el 2</i>, o qué cambiar con su segundo: <i>en el 3, segundo 0:12, el precio es $25</i>.\n" +
+        "Solo hacemos cambios que te ayuden a vender (mensaje, oferta, datos, llamado a la acción); colores, música o estilo por gusto no entran.",
       [[{ text: "📋 Volver al menú", callback_data: "menu:ver" }]]
     );
   }
@@ -2332,6 +2364,8 @@ export class TelegramBotService {
     if (e) {
       if (!e.contrato.firmado) atajos.push({ text: "✍️ Mi contrato", callback_data: "contrato:estado" });
       if (e.guiones.porRevisar) atajos.push({ text: `📝 Revisar guiones (${e.guiones.porRevisar})`, callback_data: "menu:guiones" });
+      const videos = await revisionVideosChatService.pendiente(chat.workspaceId!).catch(() => null);
+      if (videos) atajos.push({ text: `🎬 Revisar videos (${videos.videos.length})`, callback_data: "vid:lista" });
       if (e.onboarding.siguiente) atajos.push({ text: "🚀 Lo que sigue", callback_data: "menu:onboarding" });
       if (e.citas.length) atajos.push({ text: "🗓️ Mis citas", callback_data: "citas:ver" });
     }

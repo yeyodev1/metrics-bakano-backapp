@@ -151,6 +151,111 @@ facturación real, ritmo del mes, equipo asignado y recordatorios.
   `PUT .../integraciones/crm` con `token` → token_propio; sin `token` →
   agencia si está disponible, si no 400.
 
+### CRM: métricas diarias y dashboard (2026-10-04)
+- Modelo `crmMetricaDiaria.model.ts` (colección `crmmetricasdiarias`, única
+  por `workspaceId + dia`, hora de Ecuador): conversaciones con actividad,
+  nuevas, por canal, mensajes entrantes/salientes/automáticos, contactos que
+  escribieron, sin respuesta, mediana de primera respuesta y `asesores[]`
+  (userId de GHL, nombre, mensajes, conversaciones, respuestas, `tiemposSeg`
+  hasta 300 para medianas de rango, sinRespuesta). Es también el candado:
+  `pendiente → en_curso → terminada | fallida` (3 intentos).
+- Cálculo en `crmMetricas.service.ts`: lee TODAS las conversaciones con
+  actividad desde el inicio del día (tope 1.500, desde ahora hacia atrás) y
+  sus mensajes (`mensajesDesde`, páginas de 100). Saliente humano = no
+  viene de workflow/campaña/acción masiva; sin `userId` (contestado desde la
+  app de IG/WhatsApp) corta la espera pero no se atribuye a un asesor
+  (verificado con datos reales de Bakano 2026-10-04). La respuesta cuenta
+  el día en que se envía; sin respuesta = el cliente escribió ese día y al
+  cierre seguía esperando (se atribuye al asignado).
+- Cron `/api/cron/crm-metricas` (`5,35 * * * *`): pendiente ayer para cada
+  CRM conectado (los últimos 7 la primera vez) y calcula lo que falte.
+- `GET .../integraciones/crm/metricas?dias=7` (días cerrados hasta ayer) y
+  `POST .../integraciones/crm/metricas/recalcular` `{ desde, hasta }` (solo
+  equipo, máx. 31 días; lo que no alcanza lo sigue el cron).
+- `users.readonly` es opcional (`permisos.usuarios`): sin él no hay nombres de
+  asesores; `CrmVista.advertencias` lo avisa. `CrmCliente.get` reintenta 429.
+- Bakano People: herramienta `verMiEquipoEnCrm`.
+
+### Videos por guion: subida masiva, revisión por Telegram y 2 rondas (2026-10-04)
+- **Subida masiva** (`videoEntrega.service.ts`, rutas en `drive.router.ts`, solo equipo):
+  `GET /api/drive/planificaciones` (ventana -75/+45 días; el editor ve sus entornos) ·
+  `POST /api/drive/planificaciones/:planningId/sesion` `{ fileName, mimeType, size }` →
+  sesión resumable en `Unidad / <Cliente> / <AAAA-MM - Título>` (se crea sola; si la
+  planificación ya tenía `driveMonthFolderId`, se reusa) · `POST .../sugerencias`
+  `{ archivos: [{ fileId, nombre }] }` (por número o tema del nombre) · `POST .../conectar`
+  `{ asignaciones: [{ itemId, fileId }] }`. Conectar renombra a `NN - tema (vN).ext`,
+  guarda `item.versiones[]` (la vieja queda en Drive), pone `EDITADO`, `editadoEn`,
+  `videoClienteAprobacion: PENDIENTE` y abre la revisión interna (correo PM/CM, banderas).
+- **Aviso al cliente**: cuando ningún video EDITADO espera revisión interna y alguno
+  espera al cliente, `updateItem` (al aprobar `edicionRevisada`) llama
+  `avisarClienteSiTodoRevisado` → `videoReviewNotificationService.notificar`. Ahora
+  también sale por **Telegram** (chats de clientes, sin internos ni bloqueados; con
+  deuda, el aviso lleva a pagar). Primer aviso siempre; recordatorios por Telegram
+  máximo 1 cada 24 h (`avisosRevision.canal: telegram`). Una versión nueva reabre el
+  ciclo aunque `videosRevisadosEn` exista.
+- **Rondas y cambios** (`correccionVideo.service.ts`): `MAX_RONDAS_VIDEO = 2` por video.
+  `POST /api/video-planning/:planningId/video-review` acepta
+  `reviews[{ itemId, estado, cambios: [{ segundo: "0:15", texto }] }]`. Rechazar exige
+  cambios con segundo (`SEGUNDO_REQUERIDO`), sin rondas → `RONDAS_AGOTADAS` (solo
+  aprobar), y filtra **vanidad** (palabras de negocio pasan directo; si no, IA
+  `AI_MODEL`; si la IA cae, lista de palabras de vanidad). Errores → 422 con
+  `{ message, codigo, numero }`. Rechazo: `edicion = RECHAZADO` (vuelve a la cola del
+  editor), `rondasUsadas++`, `correccionesVideo[]`, ReviewEvent cliente/edición, aviso
+  al editor (in-app `video_corregido`, Telegram, correo `sendCorreccionesVideoEditor`).
+  Aprobar → `videoAprobadoEn`.
+- **Bot**: callback `vid:lista`, atajo "Revisar videos", herramientas
+  `verVideosParaRevisar`, `aprobarVideo`, `anotarCorreccionVideo` (segundo + cambio,
+  filtra vanidad al anotar), `quitarCorreccionVideo`, `verBorradorCorreccionVideo`,
+  `enviarCorreccionesVideo`. Borrador en `TelegramChat.revisionVideos`.
+- Cola del editor y MCP `mi_cola_edicion`: `correcciones[{segundo, texto}]`, `ronda`,
+  `rondasRestantes`, `versiones`.
+- Bitácora `actividades` (`actividad.model.ts`, `actividadService.registrar`): base del
+  reporte semanal.
+
+### Videos por MCP: editor sube y conecta, productor aprueba (2026-10-05)
+- `src/mcp/tools/edicion.ts`: `planificaciones_para_subir`, `subir_videos` (devuelve un curl por archivo
+  con la URL resumable de Drive), `conectar_videos` (propone por nombre y pregunta; `confirmar` conecta),
+  `cola_revision_videos` (ahora también perfil Producción), `aprobar_videos` (pregunta "¿lo envío al
+  cliente?"), `devolver_video_editor`.
+- La revisión interna antes del cliente la hace el **productor** (y PM/CM): `REVISORES_VIDEO` en
+  `videoEntrega.service.ts`; `avisarRevisores` (correo a todos, in-app `video_por_revisar` + Telegram al
+  productor) se usa al conectar y al marcar EDITADO en `updateItem`.
+- `updateItem(..., opciones?: { avisarCliente?: boolean })`: el MCP aprueba en lote sin aviso y avisa una vez.
+- `googleDriveService.listFiles`, `videoEntregaService.archivosSinConectar` / `filtrarSinConectar`,
+  `avisarEditorDevuelto` + `resendService.sendVideoDevueltoEditor`. Notificación nueva `video_devuelto`.
+
+### Reporte semanal: viernes 6 pm Ecuador (2026-10-04)
+- **Fechas de etapa** en cada item (`guionCreadoEn`, `guionAprobadoEn`, `grabadoEn`,
+  `editadoEn`, `videoAprobadoEn`, `publicadoEn`) + `versiones[].en` y
+  `correccionesVideo[].en`. Se estampan en la transición (`updateItem`,
+  `submitClientApproval`, generación de guion IA, `conectar`, revisión del cliente).
+  Lo histórico sin fecha es "sin dato". El PUT de items (`upsert`) conserva
+  `CAMPOS_DEL_SERVIDOR` si el front no los manda.
+- **Bitácora** `actividades`: guion escrito/aprobado/corregido, producción realizada
+  (`planningService.marcarCumplida`), video subido / revisado interno / corregido /
+  aprobado / publicado.
+- **Servicio** `reporteSemanal.service.ts`: semana = 7 días hasta el viernes 18:00 EC
+  (23:00 UTC), clave `semana` = fecha del viernes. Por cliente: guiones escritos /
+  aprobados / corregidos (ReviewEvent cliente-contenido), producciones (`cumplidaEn`),
+  videos entregados / nuevas versiones / aprobados / rondas / publicados, tiempos
+  promedio por etapa con quién (guion → aprobado, aprobado → grabado [o fecha de la
+  producción cumplida], grabado → 1ª versión, versión vigente → aprobado, ronda →
+  versión que la resolvió), pendientes y CRM (`crmMetricasService.rango(7)`).
+  Funciones puras: `rangoSemana`, `medirItems`, `resumirTiempos`, `textoTelegram`.
+- **Envío**: Telegram a chats del cliente (sin internos ni bloqueados) + correo
+  (`resendService.htmlReporteSemanal` / `sendReporteSemanal`) a
+  `planningNotificationService.destinatarios`. Solo `isActive: true`; sin movimiento
+  ni pendientes → `omitido`. Consolidado a superadmins (correo + Telegram) armado
+  con los `datos` guardados de cada cliente: totales, tiempos por etapa y persona,
+  pendientes por cliente.
+- **Cron** `/api/cron/reporte-semanal` (`0,10,20,30,40,50 23 * * 5`): `reportessemanales`
+  (único `semana + workspaceId`; `workspaceId: null` = consolidado) es el candado;
+  presupuesto 45 s por corrida, la siguiente sigue. El consolidado sale cuando ya no
+  falta ningún cliente.
+- **Previsualizar** (solo equipo): `GET /api/reporte-semanal/:workspaceId/preview`,
+  `GET /api/reporte-semanal/consolidado/preview`, `POST /api/reporte-semanal/:workspaceId/prueba`
+  `{ correo }` (solo a ese correo). MCP `reporte_semanal` (dirección, PM).
+
 ### MCP: Producción crea producciones (2026-10-05)
 - `horarios_produccion` y `crear_produccion` (`src/mcp/tools/crearProduccion.ts`; perfiles produccion, pm, direccion). Mismo camino que el bot (`atencionClienteService.citaProduccionEnCrm`): cita en el calendario de producción del CRM (standard/premium), sync al Planificador y avisos. `crearProduccionPorEquipo` usa como contacto al admin cliente más antiguo del entorno. Las reglas del cliente (meses, Ariana, pagos, ya agendada) son advertencias; duras: contrato finalizado y horario ocupado. Las 48 h (`ANTICIPACION_PRODUCCION_H`) son solo un aviso para el equipo interno desde 2026-10-06 (crear y mover por MCP); al cliente se le exigen en el `PUT /api/planning/:entryId` y el bot le pide 5 días. Sin `confirmar` solo revisa.
 

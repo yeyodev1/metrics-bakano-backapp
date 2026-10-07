@@ -22,8 +22,8 @@ El rol se relee de Mongo en cada llamada: cambiar o desactivar a alguien corta e
 | Dirección | superadmin, director | Todo + `auditoria_mcp`. Solo superadmin: gestión de entornos (ver abajo) |
 | Project Manager | project_manager, account_manager | Pendientes, Telegram completo, incidentes, fechas (videos y producciones), onboarding (escribe) |
 | Contenido | content_manager, community_manager, estratega, copywriter | Pendientes, Telegram solo de guiones/videos, planificación, mover publicaciones, feedback, revisión |
-| Producción | productor, asistente_produccion | Pendientes, calendario, planificación, mover producciones (con aviso a contenido), onboarding (lectura) |
-| Edición | editor, disenador | Pendientes, `mi_cola_edicion`, `actualizar_edicion` (solo estadoProduccion/edicion/linkVideo) |
+| Producción | productor, asistente_produccion | Pendientes, calendario, planificación, mover producciones (con aviso a contenido), onboarding (lectura), revisión interna de videos (`cola_revision_videos`, `aprobar_videos`, `devolver_video_editor`) |
+| Edición | editor, disenador | Pendientes, `mi_cola_edicion`, `planificaciones_para_subir`, `subir_videos`, `conectar_videos`, `actualizar_edicion` (solo estadoProduccion/edicion/linkVideo) |
 | Campañas | trafficker | Pendientes, métricas, clientes sin Meta |
 | Equipo | el resto | Pendientes, clientes, calendario, notificaciones |
 
@@ -72,6 +72,22 @@ fecha de una producción (MCP, plataforma con `PlanningService.updateEntry`, o e
 cancelar) avisa a Ariana (`EQUIPO_ATENCION.guiones`) y a las content_manager del entorno (si no hay, a todas):
 in-app + correo con cuántos guiones hay aprobados y hasta cuándo corrige el cliente
 (`avisoContenidoProduccion.service.ts`).
+
+## Videos: del editor al cliente (`tools/edicion.ts`)
+
+1. `planificaciones_para_subir` → `planning_id` y guiones (con cambios pedidos por segundo).
+2. `subir_videos` (edición): una sesión resumable de Drive por archivo (máx. 30) en
+   `<Cliente>/<AAAA-MM - Planificación>`; devuelve `curl -X PUT --upload-file "RUTA" "<url>"` para correr en la
+   compu del editor. Sin terminal → https://metrics.bakano.ec/editor/subir. Solo planificaciones que el editor ve.
+3. `conectar_videos`: sin confirmar lista lo que está en la carpeta y no es versión de ningún guion, con la
+   sugerencia por nombre (`sugerirGuion`), y el asistente pregunta; con `confirmar` → `videoEntregaService.conectar`
+   (versión nueva, EDITADO, revisión interna abierta). Aviso a revisores (`avisarRevisores`): correo a
+   productor + PM/CM; al productor además in-app `video_por_revisar` y Telegram.
+4. `aprobar_videos` (producción, PM, contenido, dirección): sin confirmar dice si con eso sale el aviso al cliente
+   y el asistente pregunta "¿los envío al cliente?"; con `confirmar` aprueba (`updateItem` con
+   `avisarCliente: false`) y llama una sola vez `avisarClienteSiTodoRevisado` (Telegram, WhatsApp, correo).
+5. `devolver_video_editor`: `edicion = RECHAZADO` con motivo (mismo camino que la vista de revisión), aviso al
+   editor `video_devuelto` (in-app, Telegram, correo). No gasta rondas del cliente.
 
 ## Telegram: hechos y lectura con IA
 

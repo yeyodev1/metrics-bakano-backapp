@@ -12,6 +12,7 @@ import {
   registrarRevisionVideos,
   revisionPendiente,
   historialAvisosRevision,
+  notificarProductorVideos,
 } from "../controllers/videoReviewNotification.controller";
 import { authMiddleware } from "../middlewares/auth.middleware";
 import { internalOrSuperadminMiddleware } from "../middlewares/internalOrSuperadmin.middleware";
@@ -212,6 +213,12 @@ videoPlanningRouter.post(
   authMiddleware,
   internalOrSuperadminMiddleware,
   notificarRevisionVideos
+);
+videoPlanningRouter.post(
+  "/:planningId/notify-producer",
+  authMiddleware,
+  internalOrSuperadminMiddleware,
+  notificarProductorVideos
 );
 videoPlanningRouter.post(
   "/:planningId/video-review",

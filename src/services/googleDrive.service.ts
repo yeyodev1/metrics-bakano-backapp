@@ -200,12 +200,51 @@ class GoogleDriveService {
     return location;
   }
 
+  /** Renombra un archivo (al conectarlo a su guion toma el numero y el tema). */
+  async renameFile(fileId: string, name: string): Promise<DriveFile> {
+    const res = await axios.patch(
+      `${DRIVE_API}/files/${fileId}`,
+      { name },
+      {
+        headers: await this.headers(),
+        params: { supportsAllDrives: true, fields: "id,name,mimeType,size,parents,webViewLink" },
+      }
+    );
+    return res.data;
+  }
+
   async getFile(fileId: string): Promise<DriveFile> {
     const res = await axios.get(`${DRIVE_API}/files/${fileId}`, {
       headers: await this.headers(),
       params: { supportsAllDrives: true, fields: "id,name,mimeType,size,parents,webViewLink" },
     });
     return res.data;
+  }
+
+  /** Archivos (no carpetas) dentro de una carpeta, de la mas nueva a la mas vieja. */
+  async listFiles(folderId: string, max = 300): Promise<DriveFile[]> {
+    const q = [`'${folderId}' in parents`, "mimeType!='application/vnd.google-apps.folder'", "trashed=false"].join(" and ");
+    const archivos: DriveFile[] = [];
+    let pageToken: string | undefined;
+    do {
+      const res = await axios.get(`${DRIVE_API}/files`, {
+        headers: await this.headers(),
+        params: {
+          q,
+          corpora: "drive",
+          driveId: driveSharedDriveId(),
+          supportsAllDrives: true,
+          includeItemsFromAllDrives: true,
+          orderBy: "createdTime desc",
+          fields: "nextPageToken,files(id,name,mimeType,size,parents,webViewLink)",
+          pageSize: 100,
+          ...(pageToken ? { pageToken } : {}),
+        },
+      });
+      archivos.push(...(res.data.files ?? []));
+      pageToken = res.data.nextPageToken;
+    } while (pageToken && archivos.length < max);
+    return archivos.slice(0, max);
   }
 }
 

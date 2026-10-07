@@ -155,6 +155,29 @@ class ReviewEventService {
       console.warn("[ReviewEventService] client record failed:", err.message);
     }
   }
+
+  /** Veredicto del cliente sobre el VIDEO terminado (cuenta para el editor). */
+  async recordClientVideoVerdict(input: {
+    planning: IVideoPlanning;
+    item: IVideoItem;
+    resultado: ResultadoRevision;
+    actorId?: string;
+    motivo?: string;
+  }): Promise<void> {
+    try {
+      await this.create({
+        planning: input.planning,
+        item: input.item,
+        etapa: "edicion",
+        resultado: input.resultado,
+        fuente: "cliente",
+        actorId: input.actorId,
+        motivo: input.motivo,
+      });
+    } catch (err: any) {
+      console.warn("[ReviewEventService] client video record failed:", err.message);
+    }
+  }
 }
 
 export const reviewEventService = new ReviewEventService();

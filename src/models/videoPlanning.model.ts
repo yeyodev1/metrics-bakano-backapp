@@ -105,6 +105,35 @@ export interface IScriptRef {
   subidoEn?: Date;
 }
 
+/**
+ * Una version del video entregada por el editor. La primera es la entrega;
+ * cada correccion del cliente trae una nueva. Las anteriores quedan en Drive
+ * (no se borra nada) para poder comparar.
+ */
+export interface IVersionVideo {
+  n: number;
+  driveFileId: string;
+  driveLink?: string;
+  nombreArchivo?: string;
+  subidoPorId?: Types.ObjectId;
+  subidoPorNombre?: string;
+  en: Date;
+}
+
+/** Un cambio que pidio el cliente sobre el video, con el segundo exacto. */
+export interface ICorreccionVideo {
+  /** 1 o 2: el cliente tiene dos rondas por video. */
+  ronda: number;
+  /** Version del video sobre la que se pidio. */
+  version?: number;
+  /** Segundo del video (desde el inicio). */
+  segundo: number;
+  texto: string;
+  porId?: Types.ObjectId;
+  porNombre?: string;
+  en: Date;
+}
+
 export interface IVideoItem {
   _id: Types.ObjectId;
   numero: number;
@@ -160,6 +189,26 @@ export interface IVideoItem {
   videoClienteAprobacion?: ClienteAprobacion;
   videoClienteMotivo?: string;
   videoClienteRevisadoEn?: Date;
+  /** Versiones entregadas por el editor (la ultima es la vigente). */
+  versiones?: IVersionVideo[];
+  /** Cambios pedidos por el cliente, por ronda y segundo. */
+  correccionesVideo?: ICorreccionVideo[];
+  /** Rondas de correccion ya usadas (maximo 2 por video). */
+  rondasUsadas?: number;
+  /**
+   * Fechas de cada etapa, para medir cuanto tarda cada cosa (reporte
+   * semanal). Se estampan en la transicion; lo historico no las tiene y el
+   * reporte lo muestra como "sin dato", no se inventa.
+   */
+  guionCreadoEn?: Date;
+  /** El cliente aprobo el guion. */
+  guionAprobadoEn?: Date;
+  grabadoEn?: Date;
+  /** Cuando el editor entrego (marco EDITADO) la version vigente. */
+  editadoEn?: Date;
+  publicadoEn?: Date;
+  /** Cuando el cliente aprobo el video terminado. */
+  videoAprobadoEn?: Date;
   fechaPublicacion?: Date;
   copyPublicacion?: string;
   order: number;
@@ -296,6 +345,43 @@ const VideoItemSchema = new Schema<IVideoItem>(
     },
     videoClienteMotivo: { type: String, trim: true },
     videoClienteRevisadoEn: { type: Date },
+    versiones: {
+      type: [
+        {
+          _id: false,
+          n: { type: Number, required: true },
+          driveFileId: { type: String, trim: true, required: true },
+          driveLink: { type: String, trim: true },
+          nombreArchivo: { type: String, trim: true },
+          subidoPorId: { type: Schema.Types.ObjectId, ref: "User" },
+          subidoPorNombre: { type: String, trim: true },
+          en: { type: Date, default: Date.now },
+        },
+      ],
+      default: undefined,
+    },
+    correccionesVideo: {
+      type: [
+        {
+          _id: false,
+          ronda: { type: Number, required: true },
+          version: { type: Number },
+          segundo: { type: Number, required: true, min: 0 },
+          texto: { type: String, trim: true, required: true, maxlength: 1500 },
+          porId: { type: Schema.Types.ObjectId, ref: "User" },
+          porNombre: { type: String, trim: true },
+          en: { type: Date, default: Date.now },
+        },
+      ],
+      default: undefined,
+    },
+    rondasUsadas: { type: Number, min: 0 },
+    guionCreadoEn: { type: Date },
+    guionAprobadoEn: { type: Date },
+    grabadoEn: { type: Date },
+    publicadoEn: { type: Date },
+    editadoEn: { type: Date },
+    videoAprobadoEn: { type: Date },
     fechaPublicacion: { type: Date },
     copyPublicacion: { type: String, trim: true },
     order: { type: Number, default: 0 },
@@ -450,7 +536,7 @@ const VideoPlanningSchema = new Schema<IVideoPlanning>(
     avisosRevision: {
       type: [
         {
-          canal: { type: String, enum: ["whatsapp", "email"], required: true },
+          canal: { type: String, enum: ["whatsapp", "email", "telegram"], required: true },
           enviadoEn: { type: Date, default: Date.now },
           porNombre: { type: String, trim: true },
           exito: { type: Boolean, default: true },

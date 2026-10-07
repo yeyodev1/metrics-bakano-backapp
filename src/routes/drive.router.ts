@@ -14,4 +14,11 @@ driveRouter.post("/upload-session", controller.createUploadSession);
 // POST /api/drive/confirm  { itemId, fileId }
 driveRouter.post("/confirm", controller.confirmUpload);
 
+// Subida masiva por planificacion: el editor suelta todos los videos y despues
+// los conecta con sus guiones, sin entrar a Drive.
+driveRouter.get("/planificaciones", controller.listarPlanificaciones);
+driveRouter.post("/planificaciones/:planningId/sesion", controller.sesionPlanificacion);
+driveRouter.post("/planificaciones/:planningId/sugerencias", controller.sugerirConexiones);
+driveRouter.post("/planificaciones/:planningId/conectar", controller.conectarVideos);
+
 export default driveRouter;

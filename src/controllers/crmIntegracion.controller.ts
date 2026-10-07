@@ -3,6 +3,7 @@ import { AuthRequest } from "../types/AuthRequest";
 import { CustomError } from "../errors/customError.error";
 import { crmIntegracionService, esEquipoBakano } from "../services/crmIntegracion.service";
 import { crmRevisionService } from "../services/crmRevision.service";
+import { crmMetricasService } from "../services/crmMetricas.service";
 
 const esEquipo = (req: AuthRequest) => esEquipoBakano(req.user);
 
@@ -95,5 +96,32 @@ export async function revisarCrmManual(req: AuthRequest, res: Response): Promise
     res.status(200).json(r);
   } catch (error) {
     handleError(res, error, "No se pudo revisar el CRM.");
+  }
+}
+
+/** GET /api/workspaces/:workspaceId/integraciones/crm/metricas?dias=7 — dashboard del CRM (dias cerrados hasta ayer). */
+export async function getMetricasCrm(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const r = await crmMetricasService.rango(String(req.params.workspaceId), req.query.dias);
+    res.status(200).json(r);
+  } catch (error) {
+    handleError(res, error, "No se pudieron obtener las métricas del CRM.");
+  }
+}
+
+/**
+ * POST /api/workspaces/:workspaceId/integraciones/crm/metricas/recalcular
+ * body: { desde: "YYYY-MM-DD", hasta: "YYYY-MM-DD" } — solo equipo, máx. 31 días.
+ */
+export async function recalcularMetricasCrm(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    if (!esEquipo(req)) {
+      res.status(403).json({ message: "Solo el equipo de Bakano puede recalcular las métricas del CRM" });
+      return;
+    }
+    const r = await crmMetricasService.recalcular(String(req.params.workspaceId), req.body?.desde, req.body?.hasta);
+    res.status(200).json(r);
+  } catch (error) {
+    handleError(res, error, "No se pudieron recalcular las métricas del CRM.");
   }
 }

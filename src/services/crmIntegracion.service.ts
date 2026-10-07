@@ -10,7 +10,7 @@ import type {
   RevisionCrmConfig,
 } from "../models/crmIntegration.model";
 import { cifrarTokenCrm, descifrarTokenCrm, exigirCifradoCrm } from "../utils/cifradoCrm";
-import { agenciaConfigurada, CrmCliente, fuenteAgencia, permisosQueFaltan, probarCrm } from "./crmCliente.service";
+import { advertenciasPermisos, agenciaConfigurada, CrmCliente, fuenteAgencia, permisosQueFaltan, probarCrm } from "./crmCliente.service";
 
 /**
  * El CRM de cada cliente conectado a su entorno: guardar, probar, mostrar y
@@ -79,9 +79,11 @@ export interface CrmVista {
   ultimoError: string | null;
   /** Lo que mira la revision diaria (solo el equipo lo cambia). */
   revision: RevisionCrmConfig;
+  /** Permisos opcionales que faltan (no impiden la conexion). */
+  advertencias: string[];
 }
 
-export function vistaCrm(doc: Partial<Pick<ICrmIntegration, keyof CrmVista>> | null): CrmVista | null {
+export function vistaCrm(doc: Partial<Pick<ICrmIntegration, Exclude<keyof CrmVista, "advertencias">>> | null): CrmVista | null {
   if (!doc) return null;
   const modo = modoCrm(doc);
   return {
@@ -95,6 +97,7 @@ export function vistaCrm(doc: Partial<Pick<ICrmIntegration, keyof CrmVista>> | n
       mensajes: Boolean(doc.permisos?.mensajes),
       oportunidades: Boolean(doc.permisos?.oportunidades),
       contactos: Boolean(doc.permisos?.contactos),
+      usuarios: Boolean(doc.permisos?.usuarios),
     },
     conectadoPor: doc.conectadoPor
       ? { nombre: doc.conectadoPor.nombre, esEquipo: Boolean(doc.conectadoPor.esEquipo), en: doc.conectadoPor.en }
@@ -102,6 +105,7 @@ export function vistaCrm(doc: Partial<Pick<ICrmIntegration, keyof CrmVista>> | n
     ultimaRevision: doc.ultimaRevision ?? null,
     ultimoError: doc.ultimoError ?? null,
     revision: configRevision(doc),
+    advertencias: advertenciasPermisos({ usuarios: Boolean(doc.permisos?.usuarios) }),
   };
 }
 

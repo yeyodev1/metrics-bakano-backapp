@@ -8,6 +8,7 @@ import {
   driveSharedDriveId,
   sanitizeDriveName,
 } from "../services/googleDrive.service";
+import { ErrorEntrega, sugerirGuion, videoEntregaService } from "../services/videoEntrega.service";
 
 /**
  * Entrega de videos maestros a Drive.
@@ -202,6 +203,88 @@ export async function confirmUpload(req: AuthRequest, res: Response, next: NextF
   } catch (error: any) {
     if (mapDriveError(error, res)) return;
     console.error("confirmUpload error:", error?.response?.data || error);
+    next(error);
+  }
+}
+
+// ── Entrega por planificacion (subida masiva) ──────────────────────────────
+function errorEntrega(error: any, res: Response): boolean {
+  if (error instanceof ErrorEntrega) {
+    res.status(error.status).json({ message: error.message, codigo: error.codigo });
+    return true;
+  }
+  return mapDriveError(error, res);
+}
+
+function actorDe(req: AuthRequest) {
+  return {
+    id: String(req.user?._id),
+    nombre: (req.user as any)?.name,
+    internalRole: req.user?.internalRole,
+    role: (req.user as any)?.role,
+  };
+}
+
+// GET /drive/planificaciones
+export async function listarPlanificaciones(req: AuthRequest, res: Response, next: NextFunction) {
+  try {
+    res.status(HttpStatusCode.Ok).json({ planificaciones: await videoEntregaService.planificaciones(actorDe(req)) });
+  } catch (error: any) {
+    if (errorEntrega(error, res)) return;
+    next(error);
+  }
+}
+
+// POST /drive/planificaciones/:planningId/sesion  { fileName, mimeType, size }
+export async function sesionPlanificacion(req: AuthRequest, res: Response, next: NextFunction) {
+  try {
+    const r = await videoEntregaService.sesionSubida(String(req.params["planningId"]), req.body ?? {}, req.headers.origin as string | undefined);
+    res.status(HttpStatusCode.Ok).json(r);
+  } catch (error: any) {
+    if (errorEntrega(error, res)) return;
+    console.error("sesionPlanificacion error:", error?.response?.data || error);
+    next(error);
+  }
+}
+
+// POST /drive/planificaciones/:planningId/sugerencias  { archivos: [{ fileId, nombre }] }
+export async function sugerirConexiones(req: AuthRequest, res: Response, next: NextFunction) {
+  try {
+    const planningId = String(req.params["planningId"]);
+    if (!Types.ObjectId.isValid(planningId)) {
+      res.status(HttpStatusCode.BadRequest).json({ message: "Planificación inválida." });
+      return;
+    }
+    const planning = await models.videoPlanning.findById(planningId).select("items._id items.numero items.tema items.estadoIdea").lean();
+    if (!planning) {
+      res.status(HttpStatusCode.NotFound).json({ message: "Planificación no encontrada." });
+      return;
+    }
+    const items = planning.items
+      .filter((i) => i.estadoIdea !== "RECHAZADO")
+      .map((i) => ({ itemId: String(i._id), numero: i.numero, tema: i.tema }));
+    const archivos: { fileId: string; nombre: string }[] = Array.isArray(req.body?.archivos) ? req.body.archivos : [];
+    const usados = new Set<string>();
+    const sugerencias = archivos.map((a) => {
+      const libres = items.filter((i) => !usados.has(i.itemId));
+      const itemId = sugerirGuion(String(a.nombre || ""), libres);
+      if (itemId) usados.add(itemId);
+      return { fileId: a.fileId, itemId };
+    });
+    res.status(HttpStatusCode.Ok).json({ sugerencias });
+  } catch (error: any) {
+    next(error);
+  }
+}
+
+// POST /drive/planificaciones/:planningId/conectar  { asignaciones: [{ itemId, fileId }] }
+export async function conectarVideos(req: AuthRequest, res: Response, next: NextFunction) {
+  try {
+    const r = await videoEntregaService.conectar(String(req.params["planningId"]), req.body?.asignaciones, actorDe(req));
+    res.status(HttpStatusCode.Ok).json(r);
+  } catch (error: any) {
+    if (errorEntrega(error, res)) return;
+    console.error("conectarVideos error:", error?.response?.data || error);
     next(error);
   }
 }

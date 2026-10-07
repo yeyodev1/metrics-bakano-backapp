@@ -36,6 +36,8 @@ export interface PermisosCrm {
   mensajes: boolean;
   oportunidades: boolean;
   contactos: boolean;
+  /** users.readonly: opcional, para ver los nombres de los asesores. Documentos viejos no lo tienen. */
+  usuarios?: boolean;
 }
 
 export interface ICrmIntegration extends Document {
@@ -84,6 +86,7 @@ const CrmIntegrationSchema = new Schema<ICrmIntegration>(
       mensajes: { type: Boolean, default: false },
       oportunidades: { type: Boolean, default: false },
       contactos: { type: Boolean, default: false },
+      usuarios: { type: Boolean, default: false },
     },
     whatsapp: { type: String, enum: ["conectado", "no_detectado", "desconocido"], default: "desconocido" },
     revision: {

@@ -75,6 +75,14 @@
     {
       "path": "/api/cron/crm-cierres",
       "schedule": "0,15,30,45 14 * * *"
+    },
+    {
+      "path": "/api/cron/crm-metricas",
+      "schedule": "5,35 * * * *"
+    },
+    {
+      "path": "/api/cron/reporte-semanal",
+      "schedule": "0,10,20,30,40,50 23 * * 5"
     }
   ]
 }
