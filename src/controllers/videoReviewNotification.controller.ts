@@ -2,6 +2,7 @@ import { NextFunction, Response } from "express";
 import { HttpStatusCode } from "axios";
 import { AuthRequest } from "../types/AuthRequest";
 import { ErrorRevisionVideo, videoReviewNotificationService } from "../services/videoReviewNotification.service";
+import { ErrorEntrega, videoEntregaService } from "../services/videoEntrega.service";
 
 /**
  * POST /api/video-planning/:planningId/notify-review
@@ -147,6 +148,28 @@ export async function historialAvisosRevision(
   } catch (error: any) {
     if (error.message === "NOT_FOUND") {
       res.status(HttpStatusCode.NotFound).send({ message: "Planificacion no encontrada." });
+      return;
+    }
+    next(error);
+  }
+}
+
+/**
+ * POST /api/video-planning/:planningId/notify-producer
+ * El editor le pide al productor que revise los videos editados que aun no
+ * pasan la revision interna (correo, in-app y Telegram).
+ */
+export async function notificarProductorVideos(req: AuthRequest, res: Response, next: NextFunction) {
+  try {
+    const planningId = String(req.params["planningId"]);
+    const resultado = await videoEntregaService.avisarProductor(planningId, {
+      id: req.user?._id ? String(req.user._id) : undefined,
+      email: req.user?.email,
+    });
+    res.status(HttpStatusCode.Ok).send({ message: "Aviso enviado al productor.", resultado });
+  } catch (error: any) {
+    if (error instanceof ErrorEntrega) {
+      res.status(error.status).send({ message: error.message, codigo: error.codigo });
       return;
     }
     next(error);

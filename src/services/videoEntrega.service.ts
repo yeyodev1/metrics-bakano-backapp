@@ -395,8 +395,8 @@ class VideoEntregaService {
     planning: { _id: unknown; workspaceId: unknown },
     videos: { numero: number; tema: string; version?: number; driveLink?: string | null }[],
     editorNombre?: string
-  ): Promise<void> {
-    if (!videos.length) return;
+  ): Promise<{ productores: number }> {
+    if (!videos.length) return { productores: 0 };
     const workspaceId = String(planning.workspaceId);
     const [workspace, revisores] = await Promise.all([
       models.workspaces.findById(workspaceId).select("name").lean(),
@@ -442,6 +442,46 @@ class VideoEntregaService {
           .catch(() => {});
       }
     }
+    return { productores: revisores.filter((r) => r.internalRole === "productor").length };
+  }
+
+  /**
+   * El editor pide a mano que el productor revise: mismo aviso que al subir,
+   * con los videos editados que aun no pasan la revision interna. Sirve para
+   * insistir o para los que se marcaron editados con un enlace pegado.
+   */
+  async avisarProductor(planningId: string, actor: { id?: string; email?: string }) {
+    if (!Types.ObjectId.isValid(planningId)) throw new ErrorEntrega("ID_INVALIDO", "Planificación inválida.");
+    const planning = await models.videoPlanning
+      .findById(planningId)
+      .select("workspaceId items.numero items.tema items.edicion items.edicionRevisada items.estadoIdea items.driveLink items.linkVideo items.versiones")
+      .lean();
+    if (!planning) throw new ErrorEntrega("NO_ENCONTRADA", "Planificación no encontrada.", 404);
+
+    const pendientes = planning.items
+      .filter((i) => i.estadoIdea !== "RECHAZADO" && i.edicion === "EDITADO" && i.edicionRevisada !== true)
+      .sort((a, b) => a.numero - b.numero);
+    if (!pendientes.length) {
+      throw new ErrorEntrega("SIN_PENDIENTES", "No hay videos editados esperando la revisión del productor.", 409);
+    }
+
+    const editor = actor.id && Types.ObjectId.isValid(actor.id)
+      ? await models.users.findById(actor.id).select("name email").lean()
+      : null;
+    const { productores } = await this.avisarRevisores(
+      planning,
+      pendientes.map((i) => ({
+        numero: i.numero,
+        tema: i.tema,
+        version: i.versiones?.length || undefined,
+        driveLink: i.driveLink || i.linkVideo || null,
+      })),
+      editor?.name || editor?.email || actor.email
+    );
+    if (!productores) {
+      throw new ErrorEntrega("SIN_PRODUCTOR", "No hay ningún productor activo en el equipo para avisar.", 409);
+    }
+    return { videos: pendientes.length, productores };
   }
 
   /** Editor del video, o los editores del entorno si no quedo registrado. */
