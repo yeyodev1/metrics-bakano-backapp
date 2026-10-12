@@ -87,4 +87,67 @@ export const toolsFinanzas: ToolMcp[] = [
     },
     correr: (a, u) => finanzas(u, "post", "pagos", a),
   },
+  {
+    nombre: "finanzas_bloqueos",
+    titulo: "Fechas de bloqueo de los que deben",
+    descripcion:
+      "Todos los clientes con cobros vencidos y CUÁNDO se les bloquea el entorno: fecha de bloqueo (vencimiento + días de gracia + 1), si ya está bloqueado, si tiene acceso abierto por excepción (hasta cuándo, por qué y quién lo dio) o si el bloqueo automático está apagado. Ordenado por el bloqueo más cercano. Solo superadmin.",
+    perfiles: ["direccion"],
+    soloSuperadmin: true,
+    entrada: {},
+    correr: (_a, u) => finanzas(u, "get", "bloqueos"),
+  },
+  {
+    nombre: "finanzas_vincular_entorno",
+    titulo: "Vincular un cliente de Finanzas con su entorno",
+    descripcion:
+      "Vincula un cliente de Finanzas con su entorno de Metrics (así el bloqueo por mora y el estado de pagos se aplican a ese entorno). Sin workspace_id devuelve a qué está vinculado y las 5 sugerencias más parecidas. desvincular=true lo suelta. Sin confirmar=true solo muestra lo que hará. Solo superadmin.",
+    perfiles: ["direccion"],
+    soloSuperadmin: true,
+    escribe: true,
+    entrada: {
+      cliente: z.string().describe("Nombre o id del cliente en Finanzas"),
+      workspace_id: z.string().optional().describe("Id del entorno de Metrics (de buscar_clientes)"),
+      desvincular: z.boolean().optional(),
+      confirmar: z.boolean().optional(),
+    },
+    correr: (a, u) => finanzas(u, "post", "vincular", { cliente: a.cliente, workspaceId: a.workspace_id, desvincular: a.desvincular, confirmar: a.confirmar }),
+  },
+  {
+    nombre: "finanzas_acceso",
+    titulo: "Liberar o cerrar el acceso de un cliente que debe",
+    descripcion:
+      "accion=abrir: le abre el entorno a un cliente en mora por excepción, con el MOTIVO (obligatorio, queda registrado y se avisa) y hasta qué fecha (hasta=AAAA-MM-DD; sin fecha no se vuelve a bloquear solo). Al vencer, el cron lo bloquea si sigue debiendo. " +
+      "accion=cerrar: quita la excepción y lo vuelve a bloquear si sigue debiendo. Sin confirmar=true solo muestra lo que hará. Solo superadmin.",
+    perfiles: ["direccion"],
+    soloSuperadmin: true,
+    escribe: true,
+    entrada: {
+      cliente: z.string(),
+      accion: z.enum(["abrir", "cerrar"]),
+      motivo: z.string().optional().describe("Por qué (obligatorio para abrir)"),
+      hasta: z.string().optional().describe("AAAA-MM-DD: hasta cuándo queda abierto"),
+      confirmar: z.boolean().optional(),
+    },
+    correr: (a, u) => finanzas(u, "post", "acceso", a),
+  },
+  {
+    nombre: "finanzas_plazo",
+    titulo: "Dar plazo de pago (nueva fecha de bloqueo)",
+    descripcion:
+      "Acuerdo de pago: mueve el vencimiento de un cobro (el más viejo abierto si no das cobro_id, de finanzas_bloqueos o finanzas_cliente) a nueva_fecha, con su MOTIVO. La fecha de bloqueo pasa a nueva_fecha + días de gracia. " +
+      "Si el cliente ya estaba bloqueado, se le abre el acceso hasta esa nueva fecha de bloqueo (reabrir=false para no abrirlo). Finanzas le manda al cliente el correo del acuerdo. Sin confirmar=true solo muestra lo que hará. Solo superadmin.",
+    perfiles: ["direccion"],
+    soloSuperadmin: true,
+    escribe: true,
+    entrada: {
+      cliente: z.string(),
+      nueva_fecha: z.string().describe("AAAA-MM-DD: nuevo vencimiento"),
+      motivo: z.string(),
+      cobro_id: z.string().optional(),
+      reabrir: z.boolean().optional(),
+      confirmar: z.boolean().optional(),
+    },
+    correr: (a, u) => finanzas(u, "post", "plazo", a),
+  },
 ];
