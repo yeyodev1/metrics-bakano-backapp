@@ -1,7 +1,7 @@
 import axios from "axios";
 import { z } from "zod";
 import type { UsuarioMcp } from "../perfiles";
-import type { ToolMcp } from "./base";
+import { resolverCliente, type ToolMcp } from "./base";
 
 /**
  * Bakano Finanzas (finances.bakano.ec) dentro del MCP.
@@ -149,5 +149,36 @@ export const toolsFinanzas: ToolMcp[] = [
       confirmar: z.boolean().optional(),
     },
     correr: (a, u) => finanzas(u, "post", "plazo", a),
+  },
+  {
+    nombre: "finanzas_crear_cliente",
+    titulo: "Crear un cliente en Finanzas",
+    descripcion:
+      "Da de alta un cliente en Finanzas como 'Nuevo cliente' de la plataforma: nombre, cuánto paga, tipo de cobro (monthly = cada mes, special = pago único / a convenir, no_charge = no paga), método, día de cobro y contacto. " +
+      "Con `entorno` (nombre o id del entorno de Metrics) lo vincula a ese; SIN entorno Finanzas crea un entorno NUEVO en Metrics, así que si el cliente ya tiene entorno, pásalo siempre. " +
+      "No registra venta ni cobro: el pago va después con finanzas_registrar_pago. Sin confirmar=true solo muestra lo que hará. Solo superadmin.",
+    perfiles: ["direccion"],
+    soloSuperadmin: true,
+    escribe: true,
+    entrada: {
+      nombre: z.string().min(2),
+      monto: z.number().min(0).describe("Lo que paga (mensual si monthly)"),
+      tipo_cobro: z.enum(["monthly", "special", "no_charge"]),
+      metodo: z.enum(METODOS).optional(),
+      dia_cobro: z.number().int().min(1).max(31).optional().describe("Día del mes en que se cobra; sin esto, sin día fijo"),
+      desde: z.string().optional().describe("AAAA-MM-DD: inicio como cliente. Por defecto hoy"),
+      entorno: z.string().optional().describe("Nombre o id del entorno de Metrics para vincular"),
+      contacto_nombre: z.string().optional(),
+      contacto_correo: z.string().optional(),
+      contacto_telefono: z.string().optional(),
+      razon_social: z.string().optional(),
+      notas: z.string().optional(),
+      confirmar: z.boolean().optional(),
+    },
+    async correr(a, u) {
+      const { entorno, ...resto } = a;
+      const ws = entorno ? await resolverCliente(entorno) : null;
+      return finanzas(u, "post", "clientes", { ...resto, ...(ws ? { workspaceId: String(ws._id), workspaceName: ws.name } : {}) });
+    },
   },
 ];
