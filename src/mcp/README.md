@@ -129,3 +129,8 @@ Solo superadmin (`soloSuperadmin`): nadie más las ve. Finanzas además valida e
 de la persona por su correo (queda en el pago). Registrar: sin `confirmar` devuelve el plan; reparte entre cobros
 abiertos (`settle`) y si no hay ninguno genera el cobro del mes (mensual) o lo crea por el monto
 (pago único). La `referencia` repetida se rechaza.
+
+Escritura extra (solo superadmin): `finanzas_bloqueos` (fecha de bloqueo = vencimiento + gracia + 1,
+excepciones y bloqueados), `finanzas_vincular_entorno` (link/unlink/sugerencias), `finanzas_acceso`
+(abrir con motivo y hasta / cerrar = `accessService`), `finanzas_plazo` (`deferInvoice` + reabre hasta
+la nueva fecha de bloqueo si estaba bloqueado). Todas con `confirmar`.
