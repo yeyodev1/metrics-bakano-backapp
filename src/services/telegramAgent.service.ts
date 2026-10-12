@@ -438,6 +438,7 @@ Revisión de videos terminados:
 
 Onboarding (arranque del cliente):
 - Son cuatro sesiones, en este orden: 1) la reunión de guía con Genesis Benalcazar (15 minutos), 2) especialización con Joel Jimenez (sus cuentas de Meta), 3) configuración del CRM con David Robles (se ofrece apenas agenda con Joel, a la par) y 4) levantamiento con Ariana Vera. Después viene la primera producción.
+- Lo que se le pide depende de su SERVICIO (verOnboarding y verPendientesOnboarding lo traen): "Guiones, producción, edición y pautas" necesita toda la información; "Guiones y pautas" solo su perfil de marca y su histórico de facturación (no hay producción ni grabación); "Solo pautas" solo su histórico de facturación (sin perfil de marca, guiones ni producción). Las sesiones y envíos que vienen como "no_aplica" o que no aparecen NO se los pidas ni se los ofrezcas.
 - La reunión de guía con Genesis es CLAVE y va primero: ahí Genesis le explica todo el proceso y deja su entorno listo con él. Si no la tiene agendada, ofrécesela antes que cualquier otra y dile que es clave tomarla. Si verOnboarding la trae cumplida, no se la vuelvas a ofrecer.
 - Tú no resuelves la configuración técnica por chat: cada tema se ve en su sesión. Tu trabajo es decirle en qué paso va, qué necesita tener listo y agendarle la sesión que le toca.
 - Usa verOnboarding para saber el estado real, verHorariosOnboarding para ofrecer 3 o 4 horarios y agendarSesionOnboarding cuando elija uno.
@@ -920,7 +921,8 @@ Reglas:
               requisitos: s.requisitos,
               correoResponsable: SESIONES_ONBOARDING[s.sesion].responsable.email,
             })),
-            envios: PROCESO_ONBOARDING.envios,
+            servicio: estado.servicioEtiqueta,
+            envios: "Lo que debe mandar según su servicio sale en verPendientesOnboarding (solo eso).",
             siguiente: estado.siguiente ?? null,
             completo: estado.completo,
             produccion: {

@@ -191,6 +191,13 @@ export interface IWorkspace extends Document {
   /** Correo de arranque del onboarding (el que manda al bot de Telegram). */
   onboardingBienvenidaEnviadaEn?: Date;
   /**
+   * Qué servicio le damos: completo, guiones_pautas o solo_pautas. Decide qué
+   * le pide el bot. Sin dato = completo (ver onboardingSesiones.SERVICIOS).
+   */
+  servicio?: "completo" | "guiones_pautas" | "solo_pautas" | null;
+  servicioPor?: string;
+  servicioEn?: Date;
+  /**
    * Envios del onboarding (logos, facturacion, catalogo, invitacion a Meta).
    * El cliente los "declara" por el bot; el responsable los verifica.
    */
@@ -443,6 +450,9 @@ const WorkspaceSchema = new Schema<IWorkspace>(
       type: Date,
       default: null,
     },
+    servicio: { type: String, enum: ["completo", "guiones_pautas", "solo_pautas", null], default: null },
+    servicioPor: { type: String },
+    servicioEn: { type: Date },
     onboardingEntregables: {
       type: Schema.Types.Mixed,
       default: undefined,

@@ -16,6 +16,7 @@ import { toolsEdicion } from "./edicion";
 import { toolsPauta } from "./pauta";
 import { toolsCrearProduccion } from "./crearProduccion";
 import { toolsCalendarioCrm } from "./calendarioCrm";
+import { toolsFinanzas } from "./finanzas";
 
 /** Todas las tools del MCP. Cada una declara qué perfiles la ven. */
-export const TOOLS: ToolMcp[] = [...toolsPendientes, ...toolsComunes, ...toolsTelegram, ...toolsContenido, ...toolsOnboarding, ...toolsEntornos, ...toolsCorreos, ...toolsLucas, ...toolsClienteDirecto, ...toolsProduccionCliente, ...toolsDestacar, ...toolsPagos, ...toolsEstadoMetrics, ...toolsEdicion, ...toolsPauta, ...toolsCrearProduccion, ...toolsCalendarioCrm];
+export const TOOLS: ToolMcp[] = [...toolsPendientes, ...toolsComunes, ...toolsTelegram, ...toolsContenido, ...toolsOnboarding, ...toolsEntornos, ...toolsCorreos, ...toolsLucas, ...toolsClienteDirecto, ...toolsProduccionCliente, ...toolsDestacar, ...toolsPagos, ...toolsEstadoMetrics, ...toolsEdicion, ...toolsPauta, ...toolsCrearProduccion, ...toolsCalendarioCrm, ...toolsFinanzas];
