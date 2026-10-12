@@ -7,7 +7,7 @@ import { telegramService } from "./telegram.service";
 import { atencionClienteService, fechaEcuador } from "./atencionCliente.service";
 import { equipoAtencionService } from "./equipoAtencion.service";
 import { puedeMarcarPaso } from "./permisoOnboarding.service";
-import { BIENVENIDA, ORDEN_SESIONES, SESIONES_ONBOARDING, type SesionOnboarding } from "./onboardingSesiones.service";
+import { BIENVENIDA, ORDEN_SESIONES, SESIONES_ONBOARDING, bienvenidaYaPaso, type SesionOnboarding } from "./onboardingSesiones.service";
 
 /**
  * Progreso del onboarding visto desde adentro: cada responsable mueve su paso
@@ -102,12 +102,19 @@ class OnboardingProgresoService {
           models.telegramChats.exists({ workspaceId: workspace._id, estado: "listo" }),
         ]);
 
+    const guiaYaPaso = bienvenidaYaPaso(sesiones);
     const pasos: PasoProgreso[] = PASOS.map((paso) => {
       const s = paso === "produccion" ? sesiones.produccion : sesiones[paso as SesionOnboarding];
       const fecha = paso === "produccion" ? (produccionEstado.proxima ?? s?.fecha) : s?.fecha;
       // El estado guardado manda; si nadie lo movio, se deduce de la agenda.
       const estado: EstadoSesionOnboarding =
-        s?.estado && s.estado !== "pendiente" ? s.estado : fecha ? "agendada" : "pendiente";
+        s?.estado && s.estado !== "pendiente"
+          ? s.estado
+          : fecha
+            ? "agendada"
+            : paso === "bienvenida" && guiaYaPaso
+              ? "cumplida"
+              : "pendiente";
       return {
         paso,
         etiqueta: ETIQUETA_PASO[paso],

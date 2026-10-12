@@ -4,7 +4,7 @@ import models from "../../models";
 import { planningNotificationService } from "../../services/planningNotification.service";
 import { telegramService } from "../../services/telegram.service";
 import { usuarioBloqueado } from "../../utils/contactosBloqueados";
-import type { PerfilMcp } from "../perfiles";
+import { TODOS, type PerfilMcp } from "../perfiles";
 import { recortar, resolverCliente, type ToolMcp } from "./base";
 
 /**
@@ -13,7 +13,14 @@ import { recortar, resolverCliente, type ToolMcp } from "./base";
  * hacerlo en el momento, sin pedirselo a otro ni abrir Telegram.
  */
 
-const HABLAN_CON_EL_CLIENTE: PerfilMcp[] = ["direccion", "pm", "contenido"];
+/** Mandarle los guiones: quienes los escriben y coordinan. */
+const MANDAN_PLANIFICACION: PerfilMcp[] = ["direccion", "pm", "contenido"];
+
+/**
+ * Escribirle por el bot: todo el equipo menos Producción (pedido de Diego
+ * 2026-10-12). Lo de la grabación con el cliente lo coordinan PM y el bot.
+ */
+const HABLAN_CON_EL_CLIENTE: PerfilMcp[] = TODOS.filter((p) => p !== "produccion");
 
 function escaparHtml(texto: string): string {
   return texto.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -44,7 +51,7 @@ export const toolsClienteDirecto: ToolMcp[] = [
       "Le avisa al cliente que su planificación (sus guiones) está lista para revisar: por Telegram (bot), WhatsApp y correo, igual que el botón 'Notificar al cliente' de Metrics. " +
       "Si no estaba marcada como lista, la marca. Sin planning_id usa la más reciente sin aprobar. " +
       "Si el cliente tiene pagos vencidos, el aviso le dice que primero tiene que pagar para verlos. Confirma con la persona antes.",
-    perfiles: HABLAN_CON_EL_CLIENTE,
+    perfiles: MANDAN_PLANIFICACION,
     escribe: true,
     entrada: {
       cliente: z.string(),

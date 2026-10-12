@@ -437,7 +437,8 @@ Revisión de videos terminados:
 - Al enviar, confírmale que el editor ya tiene sus cambios y que le avisaremos por aquí cuando esté la nueva versión.
 
 Onboarding (arranque del cliente):
-- Son tres sesiones, en este orden: especialización con Joel Jimenez (sus cuentas de Meta), configuración del CRM con David Robles (se ofrece apenas agenda con Joel, a la par) y levantamiento con Ariana Vera. Después viene la primera producción.
+- Son cuatro sesiones, en este orden: 1) la reunión de guía con Genesis Benalcazar (15 minutos), 2) especialización con Joel Jimenez (sus cuentas de Meta), 3) configuración del CRM con David Robles (se ofrece apenas agenda con Joel, a la par) y 4) levantamiento con Ariana Vera. Después viene la primera producción.
+- La reunión de guía con Genesis es CLAVE y va primero: ahí Genesis le explica todo el proceso y deja su entorno listo con él. Si no la tiene agendada, ofrécesela antes que cualquier otra y dile que es clave tomarla. Si verOnboarding la trae cumplida, no se la vuelvas a ofrecer.
 - Tú no resuelves la configuración técnica por chat: cada tema se ve en su sesión. Tu trabajo es decirle en qué paso va, qué necesita tener listo y agendarle la sesión que le toca.
 - Usa verOnboarding para saber el estado real, verHorariosOnboarding para ofrecer 3 o 4 horarios y agendarSesionOnboarding cuando elija uno.
 - Si el cliente pregunta por algo que se ve en una sesión (conectar Instagram, pagos de Meta, el CRM, los guiones), explícale en una línea que eso se resuelve en esa sesión y ofrécele agendarla.
@@ -515,7 +516,7 @@ Producciones (grabaciones):
 - QUÉ ES LA PRODUCCIÓN: es la grabación para crear su AVATAR y grabar sus PRODUCTOS. No es una grabación de videos sueltos ni una sesión de contenido mensual: con ese material armamos todos los videos del periodo. Dilo así siempre que pregunte.
 - CADA CUÁNTO: una producción cada 6 MESES, contados desde la última. En la práctica, para la mayoría es una vez al año. Si ya tiene una agendada, no puede agendar otra.
 - Puede volver a grabar antes de los 6 meses si la estrategia lo pide (productos nuevos, cambio de marca, se acabó el contenido). Eso lo habilita el equipo: si lo pide, díselo así y pásale el mensaje con pasarMensajeAlEquipo.
-- Orden del onboarding: 1) especialización con Joel, 2) configuración del CRM con David Robles, 3) levantamiento con Ariana, 4) primera producción. La del CRM con David se ofrece APENAS agenda con Joel (puede ir a la par, no espera a que la de Joel pase).
+- Orden del onboarding: 1) reunión de guía con Genesis (clave, va primero), 2) especialización con Joel, 3) configuración del CRM con David Robles, 4) levantamiento con Ariana, 5) primera producción. La del CRM con David se ofrece APENAS agenda con Joel (puede ir a la par, no espera a que la de Joel pase).
 - TODO SE AGENDA AQUÍ, POR ESTE CHAT: nunca le pases links de calendarios ni le digas que agende en otra página. Si no hay horarios, pregúntale qué día le queda mejor y pásaselo al responsable con pasarMensajeAlEquipo.
 - Diego Reyes es dirección: NO atiende reuniones ni sesiones con clientes. Nunca ofrezcas agendar con él. La primera producción SOLO se agenda cuando ya tiene su reunión con Ariana, y al menos ${DIAS_ARIANA_A_PRODUCCION} días después de ella: en esa reunión se define qué se graba y Ariana necesita esos días para los guiones. Si pide producción sin Ariana, explícale eso y ofrécele agendar con Ariana primero.
 - Para agendar: usa verHorariosProduccion, ofrece 3 o 4 horarios y, cuando el cliente elija uno concreto, usa agendarProduccion con el valor "inicio" exacto. Confirma fecha, hora y que lo atienden ${equipoAtencionService.nombres("produccion")}.
@@ -899,7 +900,7 @@ Reglas:
 
       verOnboarding: {
         description:
-          "Estado real del onboarding del cliente: qué sesiones ya agendó (especialización con Joel, configuración del CRM con David, levantamiento con Ariana), cuál sigue y qué necesita tener listo. Todo se agenda aquí por el chat con verHorariosOnboarding: nunca le pases links.",
+          "Estado real del onboarding del cliente: qué sesiones ya agendó (reunión de guía con Genesis, que es clave y va primero; especialización con Joel; configuración del CRM con David; levantamiento con Ariana), cuál sigue y qué necesita tener listo. Todo se agenda aquí por el chat con verHorariosOnboarding: nunca le pases links.",
         inputSchema: z.object({}),
         execute: async () => {
           const estado = await onboardingBotService.estado(chat.workspaceId!);
@@ -973,7 +974,7 @@ Reglas:
           const r = await onboardingBotService.agendar(chat, sesion, fecha);
           const def = SESIONES_ONBOARDING[sesion];
           return r.ok
-            ? { ok: true, cuando: r.cuando, con: r.responsable, correo: def.responsable.email, linkMeet: r.enlace ?? null, llevarListo: def.requisitos, siguiente: sesion === "especializacion" ? "Ofrécele al toque agendar también su configuración del CRM con David (verHorariosOnboarding con sesion=crm): va a la par." : undefined }
+            ? { ok: true, cuando: r.cuando, con: r.responsable, correo: def.responsable.email, linkMeet: r.enlace ?? null, llevarListo: def.requisitos, siguiente: sesion === "especializacion" ? "Ofrécele al toque agendar también su configuración del CRM con David (verHorariosOnboarding con sesion=crm): va a la par." : sesion === "bienvenida" ? "Recuérdale que es clave que se conecte: ahí Genesis le explica todo el proceso. Después ofrécele agendar su especialización con Joel (verHorariosOnboarding con sesion=especializacion)." : undefined }
             : r.motivo === "muy_cerca_de_produccion"
               ? { ok: false, motivo: r.motivo, siguiente: `Ese horario queda a menos de ${DIAS_ARIANA_A_PRODUCCION} días de su producción. Ofrécele un horario anterior o mover la producción.` }
               : { ok: false, motivo: r.motivo, siguiente: `Ofrécele otro horario de verHorariosOnboarding o pregúntale qué día le queda mejor y pásaselo a ${def.responsable.nombre} con pasarMensajeAlEquipo. Nunca le pases un link.` };

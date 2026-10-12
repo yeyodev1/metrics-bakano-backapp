@@ -79,7 +79,8 @@ export interface IOnboardingStatus {
 }
 
 /**
- * Una de las tres sesiones tecnicas del onboarding (Meta, CRM, Estrategia).
+ * Una sesion del onboarding: guia con Genesis, especializacion, CRM o levantamiento
+ * (y las claves del proceso anterior, Meta y Estrategia).
  * El cliente la agenda por el bot o por el link del CRM; el cron reconoce las
  * del link y las marca igual, para que el estado nunca mienta.
  */

@@ -15,6 +15,7 @@ import {
   ORDEN_SESIONES,
   SESIONES_ONBOARDING,
   SESION_POR_CALENDARIO,
+  bienvenidaYaPaso,
   type SesionOnboarding,
 } from "./onboardingSesiones.service";
 
@@ -22,7 +23,7 @@ import {
  * Onboarding por Telegram.
  *
  * El bot no configura nada tecnico: dice en que paso va el cliente, le agenda
- * la sesion con el responsable (Joel, David o Ariana) y avisa. Las citas que
+ * la sesion con el responsable (Genesis primero, luego Joel, David y Ariana) y avisa. Las citas que
  * el cliente agende por el link del CRM las reconoce el cron y quedan igual
  * de marcadas, para que el estado que ve el cliente nunca mienta.
  */
@@ -84,9 +85,10 @@ class OnboardingBotService {
       atencionClienteService.estadoProduccion(workspaceId),
     ]);
 
+    const guiaYaPaso = bienvenidaYaPaso(workspace?.onboardingSesiones as any);
     const sesiones: EstadoSesion[] = ORDEN_SESIONES.map((s) => {
       const def = SESIONES_ONBOARDING[s];
-      const guardada = workspace?.onboardingSesiones?.[s];
+      const guardada: any = s === "bienvenida" && guiaYaPaso ? { estado: "cumplida" } : workspace?.onboardingSesiones?.[s];
       return {
         sesion: s,
         etiqueta: def.etiqueta,
@@ -470,6 +472,12 @@ class OnboardingBotService {
         descartar("ya estaba marcada o resuelta");
         continue;
       }
+      // El calendario de Genesis tambien es el de atencion al cliente: una cita
+      // de alguien que ya paso el arranque no es su reunion de guia.
+      if (sesion === "bienvenida" && bienvenidaYaPaso(workspace?.onboardingSesiones as any)) {
+        descartar("cita con Genesis de un cliente que ya pasó el arranque");
+        continue;
+      }
 
       await this.marcar(workspaceId, sesion, { fecha: inicio, appointmentId: evento.id, origen: "link" });
       marcadas++;
@@ -751,6 +759,8 @@ class OnboardingBotService {
           // Al bot, no al CRM: todo se agenda por Telegram.
           link: `${BOT_URL}?start=onb_${s}`,
           resumen: SESIONES_ONBOARDING[s].resumen,
+          duracion: SESIONES_ONBOARDING[s].duracion,
+          clave: SESIONES_ONBOARDING[s].clave,
         })),
       });
       console.log(`[Onboarding] bienvenida enviada a ${workspace.name} (${destinatarios.length} destinatarios)`);

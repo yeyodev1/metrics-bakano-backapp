@@ -2,6 +2,7 @@ import { Types } from "mongoose";
 import models from "../models";
 import { onboardingBotService } from "./onboardingBot.service";
 import type { PasoOnboarding } from "../models/onboardingEvento.model";
+import { ORDEN_SESIONES } from "./onboardingSesiones.service";
 
 /**
  * Nuevo o de siempre: el bot no se lo pregunta al cliente, lo deduce.
@@ -76,7 +77,7 @@ class PerfilClienteService {
       return `Cliente en marcha: ya tiene ${perfil.tieneProducciones ? "producciones" : "guiones"} con nosotros. No lo trates como si empezara; ayúdalo con lo que pida.`;
     }
     if (perfil.tipo === "en_onboarding") {
-      return `Cliente en pleno arranque: ya agendó ${perfil.sesionesAgendadas} de 3 sesiones y todavía no graba. Guíalo al siguiente paso sin repetirle lo que ya hizo.`;
+      return `Cliente en pleno arranque: ya agendó ${perfil.sesionesAgendadas} de ${ORDEN_SESIONES.length} sesiones y todavía no graba. Guíalo al siguiente paso sin repetirle lo que ya hizo.`;
     }
     return "Cliente nuevo: todavía no agenda ninguna sesión ni tiene producciones. Guíalo desde el principio, paso por paso, y agéndale su primera sesión.";
   }

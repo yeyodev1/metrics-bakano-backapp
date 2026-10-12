@@ -12,12 +12,12 @@
  * TODO se agenda desde el chat: al cliente no se le pasan links del CRM.
  */
 /**
- * Las sesiones que el cliente AGENDA. La bienvenida no esta aqui a proposito:
- * si el cliente ya esta hablando con el bot es porque la bienvenida se dio
- * (ahi Genesis creo el entorno, sumo su correo y salio la invitacion).
- * Ofrecerle agendarla seria pedirle que repita lo que acaba de pasar.
+ * Las sesiones que el cliente AGENDA, en orden. La primera es la reunion de
+ * guia con Genesis (pedido de Diego 2026-10-12): es clave, va antes que todo y
+ * el correo de arranque la pide primero. A quien ya avanzo (agendo o cumplio
+ * otra sesion) se le da por hecha: no se le pide volver al principio.
  */
-export type SesionOnboarding = "especializacion" | "crm" | "levantamiento";
+export type SesionOnboarding = "bienvenida" | "especializacion" | "crm" | "levantamiento";
 
 export interface DefinicionSesion {
   orden: number;
@@ -38,24 +38,32 @@ export interface DefinicionSesion {
   resumen: string;
   /** Temas exactos de la sesion segun el documento de proceso. */
   temas: string[];
+  /** Imprescindible: el correo y el bot la destacan para que nadie la salte. */
+  clave?: boolean;
 }
 
-/**
- * La bienvenida no se agenda desde el bot: cuando el cliente llega al chat ya
- * paso. Vive aqui para poder contarla en el recorrido y nombrar a Genesis.
- */
-export const BIENVENIDA = {
-  etiqueta: "Bienvenida y creación de tu entorno",
-  emoji: "🤝",
-  responsable: { nombre: "Genesis Benalcazar", email: "gbenalcazar@bakano.ec" },
-  duracion: "15 minutos",
-  resumen:
-    "Creamos tu entorno contigo en pantalla, te damos los accesos y te dejamos conectado al bot para que sigas el proceso desde el chat.",
-};
-
 export const SESIONES_ONBOARDING: Record<SesionOnboarding, DefinicionSesion> = {
-  especializacion: {
+  bienvenida: {
     orden: 1,
+    etiqueta: "Reunión de guía con Genesis",
+    emoji: "🤝",
+    responsable: { nombre: "Genesis Benalcazar", email: "gbenalcazar@bakano.ec" },
+    calendarioId: "FWL0e2jCKpbamtlj31io",
+    link: "https://api.leadconnectorhq.com/widget/booking/FWL0e2jCKpbamtlj31io",
+    duracion: "15 minutos",
+    requisitos: ["Conéctate desde una computadora", "Ten a la mano los correos de las personas de tu equipo que van a usar Metrics"],
+    resumen:
+      "Genesis te guía por todo el proceso, deja tu entorno listo contigo y te explica cómo vamos a trabajar paso a paso.",
+    temas: [
+      "Cómo es el proceso completo, del pago a la salida a ventas, y quién responde en cada paso",
+      "Tu entorno en Metrics y las personas de tu equipo con acceso",
+      "Cómo usar el bot de Telegram para agendar, aprobar y preguntar",
+      "Qué sigue: tus reuniones con Joel, David y Ariana",
+    ],
+    clave: true,
+  },
+  especializacion: {
+    orden: 2,
     etiqueta: "Especialización con Joel",
     emoji: "📣",
     responsable: { nombre: "Joel Jimenez", email: "jjimenez@bakano.ec" },
@@ -82,7 +90,7 @@ export const SESIONES_ONBOARDING: Record<SesionOnboarding, DefinicionSesion> = {
     ],
   },
   crm: {
-    orden: 2,
+    orden: 3,
     etiqueta: "Configuración de tu CRM con David",
     emoji: "🗂️",
     responsable: { nombre: "David Robles", email: "drobles@bakano.ec" },
@@ -105,7 +113,7 @@ export const SESIONES_ONBOARDING: Record<SesionOnboarding, DefinicionSesion> = {
     ],
   },
   levantamiento: {
-    orden: 3,
+    orden: 4,
     etiqueta: "Levantamiento de información con Ariana",
     emoji: "📝",
     responsable: { nombre: "Ariana Vera", email: "avera@bakano.ec" },
@@ -175,14 +183,17 @@ const JOEL = { nombre: "Joel Jimenez", email: "jjimenez@bakano.ec" };
 const GENESIS = { nombre: "Genesis Benalcazar", email: "gbenalcazar@bakano.ec" };
 const DAVID = { nombre: "David Robles", email: "drobles@bakano.ec" };
 
+/** La reunion de guia, con el nombre corto que usan el recorrido y el tablero. */
+export const BIENVENIDA = SESIONES_ONBOARDING.bienvenida;
+
 export const RECORRIDO: Record<EtapaRecorrido, DefinicionEtapa> = {
   bienvenida: {
     orden: 1,
-    etiqueta: "Bienvenida y creación de tu entorno",
+    etiqueta: "Reunión de guía con Genesis",
     emoji: "🤝",
     deQuien: "cliente",
     responsable: GENESIS,
-    que: "15 minutos con Genesis: creamos tu entorno contigo en pantalla y te conectamos al bot.",
+    que: "15 minutos con Genesis, y es clave: te guía por todo el proceso y deja tu entorno listo contigo.",
     seMarca: "automatico",
   },
   accesos: {
@@ -352,7 +363,7 @@ export const PROCESO_ONBOARDING = {
       numero: 1,
       nombre: "Arranque",
       pasos: [
-        "Bienvenida de 15 minutos con Genesis: se crea tu entorno frente a ti",
+        "Reunión de guía con Genesis Benalcazar (15 min, es clave y va primero): se crea tu entorno frente a ti",
         "Te llega la invitación por correo para las personas con acceso",
         "Conectas tu cuenta con el bot de Telegram",
         "Nos cuentas los datos de tu marca por el chat",
@@ -398,7 +409,7 @@ export function procesoOnboardingEnTexto(): string {
   const sesiones = (Object.keys(SESIONES_ONBOARDING) as SesionOnboarding[])
     .map((s) => {
       const d = SESIONES_ONBOARDING[s];
-      return `${d.etiqueta} con ${d.responsable.nombre} (${d.responsable.email}), ${d.duracion}:\n  Requisitos: ${d.requisitos.join("; ")}\n  Temas: ${d.temas.join("; ")}\n  Se agenda aquí mismo por el chat (nunca con un link).`;
+      return `${d.etiqueta} con ${d.responsable.nombre}${d.clave ? " (CLAVE: va primero y no se salta)" : ""} (${d.responsable.email}), ${d.duracion}:\n  Requisitos: ${d.requisitos.join("; ")}\n  Temas: ${d.temas.join("; ")}\n  Se agenda aquí mismo por el chat (nunca con un link).`;
     })
     .join("\n");
   const recorrido = ORDEN_RECORRIDO.map((e) => {
@@ -419,3 +430,19 @@ export const SESION_POR_CALENDARIO: Record<string, SesionOnboarding> = Object.fr
 
 /** Correos que también deben enterarse del avance del onboarding. */
 export const CORREOS_SEGUIMIENTO_ONBOARDING = ["gbenalcazar@bakano.ec"];
+
+/**
+ * La reunion de guia entro como sesion agendable el 2026-10-12. Quien ya
+ * agendo o cumplio otra sesion (o un paso del proceso anterior) paso por ese
+ * arranque: se le da por cumplida para no mandarlo de vuelta al principio.
+ * Si el responsable la marco a mano, eso manda.
+ */
+export function bienvenidaYaPaso(sesiones: Record<string, any> | null | undefined): boolean {
+  if (!sesiones) return false;
+  const b = sesiones.bienvenida;
+  if (b?.agendada || (b?.estado && b.estado !== "pendiente")) return false;
+  return ["especializacion", "crm", "levantamiento", "meta", "estrategia", "produccion"].some((k) => {
+    const s = sesiones[k];
+    return s?.agendada || ["agendada", "cumplida", "no_aplica", "bloqueada"].includes(s?.estado);
+  });
+}

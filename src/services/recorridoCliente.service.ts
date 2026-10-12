@@ -55,8 +55,7 @@ class RecorridoClienteService {
         .sort({ date: -1 })
         .select("date cumplida")
         .lean(),
-      // Si el cliente ya esta en el chat, la bienvenida ocurrio: fue ahi donde
-      // Genesis creo el entorno y salio su invitacion.
+      // Si el cliente ya esta en el chat, ya se logueo en Telegram.
       models.telegramChats.exists({ workspaceId, estado: "listo" }),
       // Quien del entorno ya recibio su invitacion y su acceso a la academia.
       models.users
@@ -103,11 +102,7 @@ class RecorridoClienteService {
         const conAcceso = (accesos as any[]).filter((u) => u.accesoBakanologyEn).length;
         estado = !accesos.length ? "pendiente" : conAcceso >= accesos.length ? "listo" : conAcceso ? "en_curso" : "pendiente";
         detalle = accesos.length ? `${conAcceso} de ${accesos.length} con acceso` : undefined;
-      } else if (clave === "bienvenida") {
-        const s = sesion("bienvenida");
-        estado = chatVinculado || s?.estado === "cumplida" ? "listo" : s?.estado === "no_aplica" ? "no_aplica" : "en_curso";
-        detalle = chatVinculado ? "Ya estás conectado al bot" : undefined;
-      } else if (clave === "especializacion" || clave === "crm" || clave === "levantamiento") {
+      } else if (clave === "bienvenida" || clave === "especializacion" || clave === "crm" || clave === "levantamiento") {
         const s = sesion(clave);
         estado = s?.estado === "cumplida" ? "listo" : s?.estado === "no_aplica" ? "no_aplica" : s?.agendada ? "en_curso" : "pendiente";
         detalle = s?.fecha ? fechaEcuador(new Date(s.fecha)) : undefined;

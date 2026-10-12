@@ -1200,7 +1200,8 @@ export class TelegramBotService {
     const pasada = estado.sesiones.find((s) => s.pasada && !hecha(s));
     const ahora = siguiente
       ? `👉 <b>Ahora:</b> agenda tu sesión de <b>${siguiente.etiqueta}</b> con <b>${escaparHtml(siguiente.responsable)}</b>.\n` +
-        `${siguiente.resumen}\n\nTen listo:\n${siguiente.requisitos.map((r) => `• ${r}`).join("\n")}`
+        `${siguiente.resumen}\n\nTen listo:\n${siguiente.requisitos.map((r) => `• ${r}`).join("\n")}` +
+        (SESIONES_ONBOARDING[siguiente.sesion].clave ? "\n\n⚠️ <b>Esta reunión es clave:</b> tómala sí o sí, de aquí sale todo lo demás." : "")
       : agendada
         ? `👉 <b>Ahora:</b> tu sesión de <b>${agendada.etiqueta}</b> es el <b>${agendada.fecha ? fechaEcuador(agendada.fecha) : "día agendado"}</b>. ` +
           `Cuando ${escaparHtml(agendada.responsable)} la dé por cerrada, te aviso y seguimos.`
@@ -2312,7 +2313,7 @@ export class TelegramBotService {
         chat.chatId,
         `Perfecto, estamos en <b>${escaparHtml(entorno.name)}</b> 💛\n\n` +
           (perfil.tipo === "nuevo"
-            ? "Te acompaño desde el inicio: son tres sesiones cortas, todas se agendan aquí, y después grabamos tu primera producción."
+            ? "Te acompaño desde el inicio: son cuatro sesiones, empezando por la reunión de guía con Genesis (que es clave), todas se agendan aquí, y después grabamos tu primera producción."
             : "Sigamos donde quedamos, te falta poco para grabar tu primera producción.")
       );
       return this.mostrarOnboarding(chat);
