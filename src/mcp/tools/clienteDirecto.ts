@@ -16,11 +16,8 @@ import { recortar, resolverCliente, type ToolMcp } from "./base";
 /** Mandarle los guiones: quienes los escriben y coordinan. */
 const MANDAN_PLANIFICACION: PerfilMcp[] = ["direccion", "pm", "contenido"];
 
-/**
- * Escribirle por el bot: todo el equipo menos Producción (pedido de Diego
- * 2026-10-12). Lo de la grabación con el cliente lo coordinan PM y el bot.
- */
-const HABLAN_CON_EL_CLIENTE: PerfilMcp[] = TODOS.filter((p) => p !== "produccion");
+/** Escribirle por el bot: absolutamente todo el equipo (pedido de Diego 2026-10-12). */
+const HABLAN_CON_EL_CLIENTE: PerfilMcp[] = TODOS;
 
 function escaparHtml(texto: string): string {
   return texto.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
