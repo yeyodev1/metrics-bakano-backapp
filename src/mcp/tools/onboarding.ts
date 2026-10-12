@@ -3,6 +3,8 @@ import { onboardingProgresoService, PASOS } from "../../services/onboardingProgr
 import type { PasoOnboarding } from "../../models/onboardingEvento.model";
 import { fecha, resolverCliente, type ToolMcp } from "./base";
 import { TODOS } from "../perfiles";
+import models from "../../models";
+import { SERVICIOS, SERVICIOS_CLIENTE, servicioDe, type ServicioCliente } from "../../services/onboardingSesiones.service";
 
 const PASO = z.enum(PASOS as [PasoOnboarding, ...PasoOnboarding[]]);
 
@@ -91,6 +93,44 @@ export const toolsOnboarding: ToolMcp[] = [
       return r.enviado
         ? `Listo, se le escribió a ${ws.name} por Telegram.`
         : `No se envió: ${ws.name} no tiene el bot conectado o no hay nada pendiente que recordarle en ese paso.`;
+    },
+  },
+  {
+    nombre: "servicio_cliente",
+    titulo: "Servicio del cliente (qué le pide el bot)",
+    descripcion:
+      "Ve o cambia qué servicio le damos a un cliente, que decide qué le pide el bot de Telegram en su onboarding: " +
+      "completo = guiones, producción, edición y pautas (toda la información); guiones_pautas = perfil de marca + histórico de facturación, sin producción; " +
+      "solo_pautas = solo histórico de facturación. Sin servicio = completo. Cambiarlo no le avisa al cliente.",
+    perfiles: ["direccion", "pm"],
+    escribe: true,
+    entrada: {
+      cliente: z.string(),
+      servicio: z.enum(SERVICIOS_CLIENTE).optional().describe("Sin esto solo muestra el actual"),
+    },
+    async correr(a, u) {
+      const ws = await resolverCliente(a.cliente);
+      const actual: any = await models.workspaces.findById(ws._id).select("servicio servicioPor servicioEn").lean();
+      const antes = servicioDe(actual?.servicio);
+      const describir = (s: ServicioCliente) => {
+        const d = SERVICIOS[s];
+        return {
+          servicio: s,
+          es: d.etiqueta,
+          reuniones: d.sesiones,
+          envios: d.entregables,
+          perfilDeMarca: d.perfilMarca,
+          produccion: d.produccion,
+        };
+      };
+      if (!a.servicio) {
+        return { cliente: ws.name, ...describir(antes.clave), definidoPor: actual?.servicioPor ?? null, en: fecha(actual?.servicioEn) };
+      }
+      await models.workspaces.updateOne(
+        { _id: ws._id },
+        { $set: { servicio: a.servicio, servicioPor: u.nombre, servicioEn: new Date() } }
+      );
+      return { cliente: ws.name, antes: antes.etiqueta, ahora: describir(a.servicio as ServicioCliente) };
     },
   },
 ];

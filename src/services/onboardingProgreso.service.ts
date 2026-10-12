@@ -7,7 +7,7 @@ import { telegramService } from "./telegram.service";
 import { atencionClienteService, fechaEcuador } from "./atencionCliente.service";
 import { equipoAtencionService } from "./equipoAtencion.service";
 import { puedeMarcarPaso } from "./permisoOnboarding.service";
-import { BIENVENIDA, ORDEN_SESIONES, SESIONES_ONBOARDING, bienvenidaYaPaso, type SesionOnboarding } from "./onboardingSesiones.service";
+import { BIENVENIDA, ORDEN_SESIONES, SESIONES_ONBOARDING, bienvenidaYaPaso, servicioDe, type SesionOnboarding } from "./onboardingSesiones.service";
 
 /**
  * Progreso del onboarding visto desde adentro: cada responsable mueve su paso
@@ -103,12 +103,16 @@ class OnboardingProgresoService {
         ]);
 
     const guiaYaPaso = bienvenidaYaPaso(sesiones);
+    const servicio = servicioDe(workspace.servicio);
+    const aplica = (paso: PasoOnboarding) =>
+      paso === "produccion" ? servicio.produccion : servicio.sesiones.includes(paso as SesionOnboarding);
     const pasos: PasoProgreso[] = PASOS.map((paso) => {
       const s = paso === "produccion" ? sesiones.produccion : sesiones[paso as SesionOnboarding];
       const fecha = paso === "produccion" ? (produccionEstado.proxima ?? s?.fecha) : s?.fecha;
       // El estado guardado manda; si nadie lo movio, se deduce de la agenda.
-      const estado: EstadoSesionOnboarding =
-        s?.estado && s.estado !== "pendiente"
+      const estado: EstadoSesionOnboarding = !aplica(paso)
+        ? "no_aplica"
+        : s?.estado && s.estado !== "pendiente"
           ? s.estado
           : fecha
             ? "agendada"
@@ -153,7 +157,7 @@ class OnboardingProgresoService {
   async resumen(opts: { soloBloqueados?: boolean; soloPendientes?: boolean } = {}): Promise<ProgresoEntorno[]> {
     const workspaces = await models.workspaces
       .find({ isActive: true })
-      .select("name onboardingSesiones createdAt")
+      .select("name onboardingSesiones createdAt servicio")
       .lean();
 
     // Todo lo que las filas necesitan, en dos consultas para todos los
@@ -186,7 +190,7 @@ class OnboardingProgresoService {
   }
 
   async detalle(workspaceId: string): Promise<{ progreso: ProgresoEntorno; bitacora: any[] } | null> {
-    const workspace = await models.workspaces.findById(workspaceId).select("name onboardingSesiones createdAt").lean();
+    const workspace = await models.workspaces.findById(workspaceId).select("name onboardingSesiones createdAt servicio").lean();
     if (!workspace) return null;
     const [progreso, bitacora] = await Promise.all([
       this.progresoDe(workspace),
@@ -217,7 +221,7 @@ class OnboardingProgresoService {
     if (datos.estado === "bloqueada" && !datos.motivo?.trim()) {
       throw new Error("MOTIVO_REQUERIDO");
     }
-    const workspace = await models.workspaces.findById(workspaceId).select("name onboardingSesiones createdAt");
+    const workspace = await models.workspaces.findById(workspaceId).select("name onboardingSesiones createdAt servicio");
     if (!workspace) throw new Error("NOT_FOUND");
 
     const ruta = `onboardingSesiones.${paso}`;
@@ -264,7 +268,7 @@ class OnboardingProgresoService {
         .catch((error) => console.error("[Onboarding] Slack bloqueo:", error?.message || error));
     }
 
-    const actualizado = await models.workspaces.findById(workspace._id).select("name onboardingSesiones createdAt").lean();
+    const actualizado = await models.workspaces.findById(workspace._id).select("name onboardingSesiones createdAt servicio").lean();
     return this.progresoDe(actualizado);
   }
 

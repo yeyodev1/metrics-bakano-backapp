@@ -446,3 +446,70 @@ export function bienvenidaYaPaso(sesiones: Record<string, any> | null | undefine
     return s?.agendada || ["agendada", "cumplida", "no_aplica", "bloqueada"].includes(s?.estado);
   });
 }
+
+/**
+ * Qué servicio le damos al cliente. Decide qué le pide el bot (pedido de
+ * Ariana/Diego 2026-10-12):
+ *  - completo: guiones, producción, edición y pautas → toda la información.
+ *  - guiones_pautas: perfil de marca + histórico de facturación (sin producción).
+ *  - solo_pautas: solo el histórico de facturación.
+ * Sin dato = completo, que es como funcionaba todo hasta ahora.
+ */
+export type ServicioCliente = "completo" | "guiones_pautas" | "solo_pautas";
+export const SERVICIOS_CLIENTE = ["completo", "guiones_pautas", "solo_pautas"] as const;
+
+export interface DefinicionServicio {
+  etiqueta: string;
+  /** Reuniones que tiene que agendar. */
+  sesiones: SesionOnboarding[];
+  /** Lo que tiene que mandar (claves de ENTREGABLES en onboardingDatos). */
+  entregables: ("archivosMarca" | "facturacion" | "catalogo" | "invitacionMeta")[];
+  /** Si se le piden los datos del perfil de marca. */
+  perfilMarca: boolean;
+  /** Si le grabamos y editamos (producción, avatares, escenas, edición). */
+  produccion: boolean;
+  /** Si le escribimos guiones. */
+  guiones: boolean;
+}
+
+export const SERVICIOS: Record<ServicioCliente, DefinicionServicio> = {
+  completo: {
+    etiqueta: "Guiones, producción, edición y pautas",
+    sesiones: ["bienvenida", "especializacion", "crm", "levantamiento"],
+    entregables: ["archivosMarca", "facturacion", "catalogo", "invitacionMeta"],
+    perfilMarca: true,
+    produccion: true,
+    guiones: true,
+  },
+  guiones_pautas: {
+    etiqueta: "Guiones y pautas",
+    sesiones: ["bienvenida", "especializacion", "crm", "levantamiento"],
+    entregables: ["facturacion", "invitacionMeta"],
+    perfilMarca: true,
+    produccion: false,
+    guiones: true,
+  },
+  solo_pautas: {
+    etiqueta: "Solo pautas",
+    sesiones: ["bienvenida", "especializacion", "crm"],
+    entregables: ["facturacion", "invitacionMeta"],
+    perfilMarca: false,
+    produccion: false,
+    guiones: false,
+  },
+};
+
+export function servicioDe(valor: unknown): DefinicionServicio & { clave: ServicioCliente } {
+  const clave = (SERVICIOS_CLIENTE as readonly string[]).includes(String(valor)) ? (valor as ServicioCliente) : "completo";
+  return { clave, ...SERVICIOS[clave] };
+}
+
+/** Etapas del recorrido que no aplican a un servicio. */
+export function etapasNoAplican(servicio: DefinicionServicio): EtapaRecorrido[] {
+  const fuera: EtapaRecorrido[] = [];
+  if (!servicio.perfilMarca) fuera.push("datosMarca");
+  for (const s of ["especializacion", "crm", "levantamiento"] as const) if (!servicio.sesiones.includes(s)) fuera.push(s);
+  if (!servicio.guiones) fuera.push("guiones", "aprobacionGuiones");
+  if (!servicio.produccion) fuera.push("produccion", "avatares", "escenas", "edicion", "aprobacionVideos");
+  return fuera;
+}

@@ -6,6 +6,7 @@ import { resendService } from "./resend.service";
 import { notificationService } from "./notification.service";
 import { atencionClienteService } from "./atencionCliente.service";
 import { onboardingBotService } from "./onboardingBot.service";
+import { servicioDe } from "./onboardingSesiones.service";
 
 /**
  * Lo que el cliente tiene que entregar en el onboarding y los datos de su
@@ -148,7 +149,7 @@ class OnboardingDatosService {
   /** Todo lo que le falta al cliente para arrancar, en el orden del proceso. */
   async pendientes(workspaceId: Types.ObjectId) {
     const [workspace, estado, diasFacturacion] = await Promise.all([
-      models.workspaces.findById(workspaceId).select("name brandProfile onboardingEntregables metaAds resources").lean(),
+      models.workspaces.findById(workspaceId).select("name brandProfile onboardingEntregables metaAds resources servicio").lean(),
       onboardingBotService.estado(workspaceId),
       models.dailyBilling
         .distinct("date", { workspaceId, date: { $gte: new Date(Date.now() - 180 * 86_400_000) } })
@@ -167,12 +168,16 @@ class OnboardingDatosService {
       facturacion: diasFacturacion > 0,
     };
 
+    // Solo se pide lo que es parte de su servicio (completo, guiones y pautas, solo pautas).
+    const servicio = servicioDe((workspace as any)?.servicio);
+
     return {
       entorno: workspace?.name,
+      servicio: servicio.etiqueta,
       sesionesPendientes: estado.sesiones
         .filter((s) => !s.agendada && s.estado !== "cumplida" && s.estado !== "no_aplica")
         .map((s) => ({ sesion: s.sesion, etiqueta: s.etiqueta, con: s.responsable, link: s.link })),
-      entregables: (Object.keys(ENTREGABLES) as Entregable[]).map((k) => ({
+      entregables: (Object.keys(ENTREGABLES) as Entregable[]).filter((k) => (servicio.entregables as string[]).includes(k)).map((k) => ({
         clave: k,
         etiqueta: ENTREGABLES[k].etiqueta,
         que: ENTREGABLES[k].que,
@@ -183,7 +188,7 @@ class OnboardingDatosService {
       })),
       perfilDeMarca: `${APP_URL}/app/workspaces/${workspaceId}/brand-profile`,
       datosMarcaFaltantes: Object.keys(CAMPOS_MARCA)
-        .filter((c) => !String(marca[c] ?? "").trim())
+        .filter((c) => servicio.perfilMarca && !String(marca[c] ?? "").trim())
         .map((c) => ({ campo: c, que: CAMPOS_MARCA[c] })),
       datosMarcaCompletos: Object.keys(CAMPOS_MARCA).filter((c) => String(marca[c] ?? "").trim()),
       diasDeFacturacionEnPlataforma: diasFacturacion,

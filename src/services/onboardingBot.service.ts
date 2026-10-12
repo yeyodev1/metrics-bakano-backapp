@@ -16,6 +16,7 @@ import {
   SESIONES_ONBOARDING,
   SESION_POR_CALENDARIO,
   bienvenidaYaPaso,
+  servicioDe,
   type SesionOnboarding,
 } from "./onboardingSesiones.service";
 
@@ -65,6 +66,9 @@ export interface EstadoOnboarding {
   /** Siguiente sesion por agendar, en orden. */
   siguiente?: SesionOnboarding;
   completo: boolean;
+  /** Servicio del cliente: decide qué sesiones y envíos aplican. */
+  servicio: string;
+  servicioEtiqueta: string;
   produccion: { agendada?: Date; puedeAgendar: boolean; desde?: Date };
 }
 
@@ -81,14 +85,20 @@ class OnboardingBotService {
 
   async estado(workspaceId: Types.ObjectId): Promise<EstadoOnboarding> {
     const [workspace, produccion] = await Promise.all([
-      models.workspaces.findById(workspaceId).select("onboardingSesiones").lean(),
+      models.workspaces.findById(workspaceId).select("onboardingSesiones servicio").lean(),
       atencionClienteService.estadoProduccion(workspaceId),
     ]);
 
     const guiaYaPaso = bienvenidaYaPaso(workspace?.onboardingSesiones as any);
+    // Lo que no es parte de su servicio no se le pide: queda "no aplica".
+    const servicio = servicioDe((workspace as any)?.servicio);
     const sesiones: EstadoSesion[] = ORDEN_SESIONES.map((s) => {
       const def = SESIONES_ONBOARDING[s];
-      const guardada: any = s === "bienvenida" && guiaYaPaso ? { estado: "cumplida" } : workspace?.onboardingSesiones?.[s];
+      const guardada: any = !servicio.sesiones.includes(s)
+        ? { estado: "no_aplica" }
+        : s === "bienvenida" && guiaYaPaso
+          ? { estado: "cumplida" }
+          : workspace?.onboardingSesiones?.[s];
       return {
         sesion: s,
         etiqueta: def.etiqueta,
@@ -111,9 +121,11 @@ class OnboardingBotService {
       sesiones,
       siguiente: sesiones.find((s) => !resuelta(s))?.sesion,
       completo: sesiones.every(resuelta),
+      servicio: servicio.clave,
+      servicioEtiqueta: servicio.etiqueta,
       produccion: {
         agendada: produccion.proxima,
-        puedeAgendar: produccion.puedeAgendar,
+        puedeAgendar: servicio.produccion && produccion.puedeAgendar,
         desde: produccion.habilitadaDesde,
       },
     };
@@ -727,7 +739,7 @@ class OnboardingBotService {
    */
   async enviarBienvenida(workspaceId: Types.ObjectId | string, opts: { forzar?: boolean } = {}): Promise<boolean> {
     const id = new Types.ObjectId(String(workspaceId));
-    const workspace = await models.workspaces.findById(id).select("name isActive onboardingBienvenidaEnviadaEn").lean();
+    const workspace = await models.workspaces.findById(id).select("name isActive onboardingBienvenidaEnviadaEn servicio").lean();
     if (!workspace || !workspace.isActive) return false;
     if (workspace.onboardingBienvenidaEnviadaEn && !opts.forzar) return false;
 
@@ -753,7 +765,7 @@ class OnboardingBotService {
         workspaceName: workspace.name,
         botUrl: BOT_URL,
         correoCliente: destinatarios[0],
-        sesiones: ORDEN_SESIONES.map((s) => ({
+        sesiones: ORDEN_SESIONES.filter((s) => servicioDe((workspace as any).servicio).sesiones.includes(s)).map((s) => ({
           etiqueta: SESIONES_ONBOARDING[s].etiqueta,
           responsable: SESIONES_ONBOARDING[s].responsable.nombre,
           // Al bot, no al CRM: todo se agenda por Telegram.

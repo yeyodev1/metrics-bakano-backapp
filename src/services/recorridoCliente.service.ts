@@ -3,7 +3,7 @@ import models from "../models";
 import { fechaEcuador } from "./atencionCliente.service";
 import { onboardingBotService } from "./onboardingBot.service";
 import { CAMPOS_MARCA } from "./onboardingDatos.service";
-import { ORDEN_RECORRIDO, RECORRIDO, type EtapaRecorrido } from "./onboardingSesiones.service";
+import { ORDEN_RECORRIDO, RECORRIDO, etapasNoAplican, servicioDe, type EtapaRecorrido } from "./onboardingSesiones.service";
 import { telegramService } from "./telegram.service";
 
 /**
@@ -39,6 +39,8 @@ export interface EtapaCliente {
   nota?: string;
   /** Lo que deduce el sistema, cuando alguien marcó algo distinto a mano. */
   segunElSistema?: EstadoEtapa;
+  /** No es parte del servicio del cliente: no se le muestra en el chat. */
+  fueraDeServicio?: boolean;
 }
 
 const ESTADOS: EstadoEtapa[] = ["pendiente", "en_curso", "listo", "no_aplica"];
@@ -47,7 +49,7 @@ class RecorridoClienteService {
   /** El recorrido completo con el estado real de cada etapa. */
   async de(workspaceId: Types.ObjectId | string): Promise<{ etapas: EtapaCliente[]; actual?: EtapaRecorrido; listas: number }> {
     const [workspace, estadoOnb, planes, produccion, chatVinculado, accesos] = await Promise.all([
-      models.workspaces.findById(workspaceId).select("brandProfile recorrido").lean(),
+      models.workspaces.findById(workspaceId).select("brandProfile recorrido servicio").lean(),
       onboardingBotService.estado(workspaceId as Types.ObjectId).catch(() => null),
       models.videoPlanning.find({ workspaceId }).select("items listaParaCliente").lean(),
       models.planning
@@ -81,6 +83,9 @@ class RecorridoClienteService {
     const editados = items.filter((i: any) => i.edicion === "EDITADO").length;
 
     const sesion = (clave: string) => estadoOnb?.sesiones.find((s: any) => s.sesion === clave);
+
+    // Lo que no es parte de su servicio (ej. producción en "solo pautas") no aplica.
+    const fuera = etapasNoAplican(servicioDe((workspace as any)?.servicio));
 
     const etapas: EtapaCliente[] = ORDEN_RECORRIDO.map((clave) => {
       const def = RECORRIDO[clave];
@@ -131,6 +136,10 @@ class RecorridoClienteService {
         estado = guardada.estado;
         if (guardada.nota) detalle = guardada.nota;
       }
+      if (fuera.includes(clave)) {
+        estado = "no_aplica";
+        detalle = "No es parte de tu servicio";
+      }
 
       return {
         etapa: clave,
@@ -148,6 +157,7 @@ class RecorridoClienteService {
         porNombre: guardada?.porNombre,
         en: guardada?.en,
         nota: guardada?.nota,
+        ...(fuera.includes(clave) ? { fueraDeServicio: true } : {}),
       };
     });
 
@@ -284,6 +294,7 @@ class RecorridoClienteService {
   enTexto(etapas: EtapaCliente[]): string {
     const icono: Record<EstadoEtapa, string> = { listo: "✅", en_curso: "🔄", pendiente: "⬜", no_aplica: "➖" };
     return etapas
+      .filter((e) => !e.fueraDeServicio)
       .map((e) => {
         const quien = e.responsable ? ` · ${e.responsable}` : "";
         const detalle = e.detalle ? ` · ${e.detalle}` : "";
