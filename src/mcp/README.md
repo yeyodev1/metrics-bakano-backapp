@@ -125,7 +125,7 @@ o dice de qué cliente es un locationId.
 
 `finanzas_clientes`, `finanzas_cliente`, `finanzas_resumen`, `finanzas_registrar_pago` llaman a
 finances-bakano-backapp `/api/portal/mcp/*` con `x-metrics-key` y `x-actor-email` = correo de la persona.
-El permiso lo decide Finanzas con SU usuario (sin cuenta activa → 403; `viewer` solo lee; registrar
-pago = superadmin/admin/vendedor). Registrar: sin `confirmar` devuelve el plan; reparte entre cobros
+Solo superadmin (`soloSuperadmin`): nadie más las ve. Finanzas además valida el usuario de Finanzas
+de la persona por su correo (queda en el pago). Registrar: sin `confirmar` devuelve el plan; reparte entre cobros
 abiertos (`settle`) y si no hay ninguno genera el cobro del mes (mensual) o lo crea por el monto
 (pago único). La `referencia` repetida se rechaza.

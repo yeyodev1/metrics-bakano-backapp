@@ -1,16 +1,14 @@
 import axios from "axios";
 import { z } from "zod";
-import { TODOS } from "../perfiles";
 import type { UsuarioMcp } from "../perfiles";
 import type { ToolMcp } from "./base";
 
 /**
  * Bakano Finanzas (finances.bakano.ec) dentro del MCP.
  *
- * El permiso NO lo decide el perfil del MCP sino el usuario de Finanzas de la
- * persona (por su correo): sin cuenta activa no ve nada, `viewer` solo
- * consulta y registrar pagos es de superadmin, admin y vendedor. Por eso las
- * tools aparecen para todos: Finanzas responde quién puede.
+ * Solo superadmin (pedido de Diego 2026-10-12): nadie más ve estas tools.
+ * Leen y escriben todo. Finanzas además valida el usuario de Finanzas de la
+ * persona por su correo, así cada pago queda con su nombre.
  */
 
 const METODOS = ["transferencia", "stripe", "cheque", "transferencia_o_cheque", "efectivo", "no_paga", "otro"] as const;
@@ -39,8 +37,9 @@ export const toolsFinanzas: ToolMcp[] = [
     titulo: "Clientes en Finanzas",
     descripcion:
       "Clientes de Bakano Finanzas (finances.bakano.ec): mensualidad, método, día de cobro, responsable de cobro y cuánto tienen vencido. Filtra por nombre o solo los que deben. " +
-      "Solo responde si la persona tiene usuario activo en Finanzas.",
-    perfiles: TODOS,
+      "Solo superadmin.",
+    perfiles: ["direccion"],
+    soloSuperadmin: true,
     entrada: {
       texto: z.string().optional().describe("Parte del nombre"),
       solo_deben: z.boolean().optional(),
@@ -52,7 +51,8 @@ export const toolsFinanzas: ToolMcp[] = [
     titulo: "Ficha financiera de un cliente",
     descripcion:
       "La ficha de un cliente en Finanzas: total cobrado histórico, lo vencido, sus últimos cobros (período, monto, pagado, estado), sus últimos pagos (fecha, método, referencia, quién lo registró) y sus ventas con cuotas. Acepta nombre, id de Finanzas o id del entorno de Metrics.",
-    perfiles: TODOS,
+    perfiles: ["direccion"],
+    soloSuperadmin: true,
     entrada: { cliente: z.string() },
     correr: (a, u) => finanzas(u, "get", "cliente", { cliente: a.cliente }),
   },
@@ -61,7 +61,8 @@ export const toolsFinanzas: ToolMcp[] = [
     titulo: "Resumen de cobranza del mes",
     descripcion:
       "Cobrado, por cobrar y esperado del mes en Finanzas, tasa de cobro, ideal mensual, meta de ventas y la lista de cobros vencidos. periodo = AAAA-MM (por defecto el mes actual).",
-    perfiles: TODOS,
+    perfiles: ["direccion"],
+    soloSuperadmin: true,
     entrada: { periodo: z.string().optional() },
     correr: (a, u) => finanzas(u, "get", "resumen", { periodo: a.periodo }),
   },
@@ -71,8 +72,9 @@ export const toolsFinanzas: ToolMcp[] = [
     descripcion:
       "Registra un pago de un cliente en Finanzas, como 'Registrar pago' de la plataforma: se reparte entre sus cobros abiertos (el más viejo primero) y, si no tiene ninguno, crea el cobro del mes del pago. " +
       "Si con el pago queda al día, Finanzas reactiva su entorno y manda el correo de pago registrado. No registra dos veces la misma referencia (número de comprobante). " +
-      "Sin confirmar=true solo muestra lo que va a hacer: enséñaselo a la persona y confirma antes. Necesita usuario de Finanzas superadmin, admin o vendedor.",
-    perfiles: TODOS,
+      "Sin confirmar=true solo muestra lo que va a hacer: enséñaselo a la persona y confirma antes. Solo superadmin.",
+    perfiles: ["direccion"],
+    soloSuperadmin: true,
     escribe: true,
     entrada: {
       cliente: z.string(),
