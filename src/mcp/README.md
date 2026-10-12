@@ -134,3 +134,5 @@ Escritura extra (solo superadmin): `finanzas_bloqueos` (fecha de bloqueo = venci
 excepciones y bloqueados), `finanzas_vincular_entorno` (link/unlink/sugerencias), `finanzas_acceso`
 (abrir con motivo y hasta / cerrar = `accessService`), `finanzas_plazo` (`deferInvoice` + reabre hasta
 la nueva fecha de bloqueo si estaba bloqueado). Todas con `confirmar`.
+
+`finanzas_crear_cliente`: alta como en la plataforma (sin venta ni cobro). Con `entorno` se vincula el de Metrics; sin él Finanzas crea uno nuevo (`clientService.create`).
