@@ -27,6 +27,9 @@ El rol se relee de Mongo en cada llamada: cambiar o desactivar a alguien corta e
 | Campañas | trafficker | Pendientes, métricas, clientes sin Meta |
 | Equipo | el resto | Pendientes, clientes, calendario, notificaciones |
 
+`escribir_cliente_telegram` (escribirle al cliente por el bot, firmado) la tienen todos los perfiles menos Producción.
+`enviar_planificacion` sigue en Dirección, PM y Contenido.
+
 Una tool que no es del perfil no aparece en `tools/list`. Cada llamada queda en `mcpauditoria`.
 Si cambias el perfil de una tool, cambia también `mcp-bakano-frontapp/src/data/perfiles.ts`.
 

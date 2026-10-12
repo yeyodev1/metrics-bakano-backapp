@@ -1977,7 +1977,7 @@ export class ResendService {
     botUrl: string;
     /** Con cuál correo se conecta al bot y a la plataforma. */
     correoCliente?: string;
-    sesiones: { etiqueta: string; responsable: string; link: string; resumen: string }[];
+    sesiones: { etiqueta: string; responsable: string; link: string; resumen: string; duracion?: string; clave?: boolean }[];
   }): Promise<void> {
     const { to, recipientName, workspaceName, botUrl, correoCliente, sesiones } = params;
     if (!to.length) return;
@@ -1988,12 +1988,13 @@ export class ResendService {
       .map(
         (s, i) => `
       <tr><td style="padding:0 0 14px;">
-        <table width="100%" cellpadding="0" cellspacing="0" style="background:#f8fafc;border:1.5px solid #e2e8f0;border-radius:12px;">
+        <table width="100%" cellpadding="0" cellspacing="0" style="background:${s.clave ? "#fff5f8" : "#f8fafc"};border:${s.clave ? "2px solid #e6285c" : "1.5px solid #e2e8f0"};border-radius:12px;">
           <tr><td style="padding:16px 20px;">
-            <p style="margin:0 0 4px;font-size:12px;font-weight:800;color:#e6285c;letter-spacing:1px;">PASO ${i + 1}</p>
+            <p style="margin:0 0 4px;font-size:12px;font-weight:800;color:#e6285c;letter-spacing:1px;">PASO ${i + 1}${s.clave ? " · CLAVE, VA PRIMERO" : ""}${s.duracion ? ` · ${esc(s.duracion.toUpperCase())}` : ""}</p>
             <p style="margin:0 0 6px;font-size:16px;font-weight:700;color:#1e293b;">${esc(s.etiqueta)} · con ${esc(s.responsable)}</p>
-            <p style="margin:0 0 12px;font-size:14px;color:#475569;line-height:1.6;">${esc(s.resumen)}</p>
-            <a href="${s.link}" style="display:inline-block;background:#1e293b;color:#ffffff;text-decoration:none;padding:9px 18px;border-radius:8px;font-size:13px;font-weight:700;">Agendar por Telegram</a>
+            <p style="margin:0 0 ${s.clave ? "8" : "12"}px;font-size:14px;color:#475569;line-height:1.6;">${esc(s.resumen)}</p>
+            ${s.clave ? `<p style="margin:0 0 12px;font-size:14px;color:#be123c;font-weight:700;line-height:1.6;">Es indispensable que la tomes: sin esta reunión no arrancan las demás.</p>` : ""}
+            <a href="${s.link}" style="display:inline-block;background:${s.clave ? "linear-gradient(135deg,#e6285c 0%,#85529c 100%)" : "#1e293b"};color:#ffffff;text-decoration:none;padding:9px 18px;border-radius:8px;font-size:13px;font-weight:700;">${s.clave ? "Agendar mi reunión con " + esc(s.responsable.split(" ")[0]) : "Agendar por Telegram"}</a>
           </td></tr>
         </table>
       </td></tr>`
@@ -2054,7 +2055,7 @@ export class ResendService {
 
             <p style="margin:20px 0 16px;font-size:15px;color:#1e293b;font-weight:700;">Tus sesiones de arranque</p>
             <p style="margin:0 0 14px;font-size:14px;color:#475569;line-height:1.7;">
-              Todo se agenda por el chat de Telegram, sin salir de ahí. Toca el botón de cada sesión y el asistente te muestra los horarios:
+              Todo se agenda por el chat de Telegram, sin salir de ahí. Empieza por la primera: <strong>la reunión de guía con Genesis es clave</strong>. Toca el botón de cada sesión y el asistente te muestra los horarios:
             </p>
             <table width="100%" cellpadding="0" cellspacing="0">${filas}</table>
           </td>
