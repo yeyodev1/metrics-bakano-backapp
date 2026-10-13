@@ -16,9 +16,9 @@ import { ghlService } from "./ghl.service";
 const GHL_API_BASE = "https://services.leadconnectorhq.com";
 
 export const TITULO_POR_CALENDARIO: Record<string, { emoji: string; que: string }> = {
-  GNizdekhY5SQaYTPdKPP: { emoji: "📣", que: "Especialización en Meta con Joel" },
-  aaHn06pmWuNFuF7tjDST: { emoji: "🗂️", que: "Configuración del CRM con David" },
-  JDzGl2qjoWwAk5TvBNUp: { emoji: "📝", que: "Estrategia de contenido con Ariana" },
+  cshem7qqgmmWAX7DXE6l: { emoji: "📣", que: "Especialización en Meta con Joel" },
+  BzlKMqUQpPJI3rfVFyBD: { emoji: "🗂️", que: "Configuración del CRM con David" },
+  rl18Cy1kllz1tWCawmlR: { emoji: "📝", que: "Estrategia de contenido con Ariana" },
   FWL0e2jCKpbamtlj31io: { emoji: "🤝", que: "Atención al cliente con Genesis" },
 };
 
