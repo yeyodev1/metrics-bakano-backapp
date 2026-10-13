@@ -39,7 +39,7 @@ export const EQUIPO_ATENCION: Record<TemaAtencion, EquipoTema> = {
   guiones: {
     etiqueta: "revisión de guiones",
     personas: [{ nombre: "Ariana Vera", email: "avera@bakano.ec" }],
-    calendarioId: "JDzGl2qjoWwAk5TvBNUp", // "Ariana Vera · Estrategia de contenido y guiones"
+    calendarioId: "rl18Cy1kllz1tWCawmlR", // "Ariana Vera · Estrategia de contenido y guiones"
   },
   publicidad: {
     etiqueta: "publicidad y anuncios en Meta",

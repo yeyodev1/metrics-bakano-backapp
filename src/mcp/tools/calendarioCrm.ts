@@ -24,9 +24,9 @@ const POR_CORREO: Record<string, CalendarioPersona> = {
   "jortega@bakano.ec": { nombre: "Jean Ortega", ids: Object.values(CALENDARIOS_PRODUCCION) },
   "kmunoz@bakano.ec": { nombre: "Karen Muñoz", ids: Object.values(CALENDARIOS_PRODUCCION) },
   "jleon@bakano.ec": { nombre: "Javier León", patron: /alfa\s*lobo/i },
-  "jjimenez@bakano.ec": { nombre: "Joel Jimenez", ids: ["GNizdekhY5SQaYTPdKPP"] },
-  "drobles@bakano.ec": { nombre: "David Robles", ids: ["aaHn06pmWuNFuF7tjDST"] },
-  "avera@bakano.ec": { nombre: "Ariana Vera", ids: ["JDzGl2qjoWwAk5TvBNUp"] },
+  "jjimenez@bakano.ec": { nombre: "Joel Jimenez", ids: ["cshem7qqgmmWAX7DXE6l"] },
+  "drobles@bakano.ec": { nombre: "David Robles", ids: ["BzlKMqUQpPJI3rfVFyBD"] },
+  "avera@bakano.ec": { nombre: "Ariana Vera", ids: ["rl18Cy1kllz1tWCawmlR"] },
   "gbenalcazar@bakano.ec": { nombre: "Genesis Benalcazar", ids: ["FWL0e2jCKpbamtlj31io"] },
 };
 
