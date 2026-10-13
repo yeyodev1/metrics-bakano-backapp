@@ -21,8 +21,8 @@ export const toolsLucas: ToolMcp[] = [
     },
     async correr(a) {
       const ws = await resolverCliente(a.cliente);
-      const llave = process.env.METRICS_PROXY_KEY;
-      if (!llave) throw new Error("Falta METRICS_PROXY_KEY en el servidor: no puedo hablar con Lucas.");
+      const llave = (process.env.LUCAS_SYNC_KEY || process.env.METRICS_PROXY_KEY)?.trim();
+      if (!llave) throw new Error("Falta LUCAS_SYNC_KEY en el servidor: no puedo hablar con Lucas.");
       let r: any;
       try {
         const res = await axios.get(`${LUCAS_API}/metrics/entornos/${ws._id}/resumen`, {

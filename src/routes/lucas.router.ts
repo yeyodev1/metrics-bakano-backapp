@@ -10,14 +10,15 @@ import { ventasCrmService } from "../services/ventasCrm.service";
  * cuenta con /negocio, /pago y /regla, para que Metrics y Lucas tengan la
  * misma información. Lucas lee directo de la base; solo escribe por aquí.
  *
- * Servidor a servidor: la misma llave que ya comparten para Finanzas
- * (METRICS_PROXY_KEY aquí, FINANCES_PORTAL_KEY en Lucas).
+ * Servidor a servidor: LUCAS_SYNC_KEY (METRICS_SYNC_KEY en Lucas), su propia
+ * llave para no depender de la de Finanzas. METRICS_PROXY_KEY sigue valiendo.
  */
 const lucasRouter = Router();
 
 lucasRouter.use((req, res, next) => {
-  const llave = process.env.METRICS_PROXY_KEY;
-  if (!llave || req.headers["x-metrics-key"] !== llave) {
+  const llaves = [process.env.LUCAS_SYNC_KEY, process.env.METRICS_PROXY_KEY].map((k) => k?.trim()).filter(Boolean);
+  const recibida = String(req.headers["x-metrics-key"] || "").trim();
+  if (!recibida || !llaves.includes(recibida)) {
     res.status(401).send({ message: "Llave inválida." });
     return;
   }
