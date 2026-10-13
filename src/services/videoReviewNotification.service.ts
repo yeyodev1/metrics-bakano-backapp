@@ -60,6 +60,8 @@ export interface ReviewVideo {
 
 /** Video que espera el veredicto del cliente (la version vigente). */
 export function esperaVeredicto(item: any): boolean {
+  // Programado o publicado = el cliente ya lo aprobó (aunque haya sido fuera de Metrics).
+  if (item.estadoPublicacion === "PROGRAMADO" || item.estadoPublicacion === "PUBLICADO") return false;
   return item.edicion === "EDITADO" && (!item.videoClienteAprobacion || item.videoClienteAprobacion === "PENDIENTE");
 }
 
