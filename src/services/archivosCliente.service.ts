@@ -236,6 +236,13 @@ class ArchivosClienteService {
   private async marcarEntregable(chat: ITelegramChat, categoria: CategoriaRecurso, nombre: string): Promise<void> {
     const clave = ENTREGABLE_DE[categoria];
     if (!clave) return;
+    // El logo no espera revisión de nadie: queda aprobado al subirlo.
+    if (categoria === "logo") {
+      await onboardingDatosService
+        .logoAprobado(chat.workspaceId!, nombre, "Telegram")
+        .catch((error: any) => console.error("[Archivos] no se pudo aprobar el logo:", error?.message || error));
+      return;
+    }
     await onboardingDatosService
       .registrarEntregable(chat, clave, `Subido por Telegram: ${nombre}`)
       .catch((error: any) => console.error("[Archivos] no se pudo registrar el entregable:", error?.message || error));

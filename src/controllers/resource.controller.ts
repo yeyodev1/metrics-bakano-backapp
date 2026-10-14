@@ -3,6 +3,7 @@ import { WorkspaceModel } from "../models/workspace.model";
 import cloudinary from "../config/cloudinary";
 import { AuthRequest } from "../types/AuthRequest";
 import { esTipoDeLogo, nombrePng, subirLogoComoPng } from "../services/logoPng.service";
+import { onboardingDatosService } from "../services/onboardingDatos.service";
 
 export const uploadResource = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
@@ -70,6 +71,12 @@ export const uploadResource = async (req: AuthRequest, res: Response, next: Next
     await workspace.save();
 
     const saved = workspace.resources[workspace.resources.length - 1];
+    // El logo se aprueba solo: el cliente sigue sin esperar a nadie.
+    if (esLogo) {
+      await onboardingDatosService
+        .logoAprobado(workspace._id as any, resource.nombre, "Metrics")
+        .catch((error: any) => console.error("[Recursos] no se pudo aprobar el logo:", error?.message || error));
+    }
     res.status(201).send({ message: "Resource uploaded", resource: saved });
   } catch (error) {
     console.error("Error in uploadResource:", error);
