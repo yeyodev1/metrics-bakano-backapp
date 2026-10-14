@@ -259,7 +259,9 @@ export class TelegramBotService {
       chat.chatId,
       `Listo, guardé tu <b>${ETIQUETA_CATEGORIA[r.categoria]}</b> en tu entorno ✅` +
         (r.convertidoAPng ? "\n\nMe llegó en otro formato, así que lo convertí a <b>PNG</b> por ti 🙌" : "") +
-        "\n\nYa le avisé al equipo para que lo revise.\n\nSeguimos con lo que falta 👇",
+        (r.categoria === "logo"
+          ? "\n\nTu logo quedó <b>aprobado</b>, no tienes que esperar a nadie.\n\nSeguimos con lo que falta 👇"
+          : "\n\nYa le avisé al equipo para que lo revise.\n\nSeguimos con lo que falta 👇"),
       await this.botonesDeLoQueFalta(chat)
     );
   }
@@ -734,7 +736,9 @@ export class TelegramBotService {
       await telegramService.sendMessage(
         chat.chatId,
         r.ok
-          ? `Perfecto, lo dejé como <b>${ETIQUETA_CATEGORIA[categoria as CategoriaRecurso]}</b> ✅ ya le avisé al equipo.`
+          ? categoria === "logo"
+            ? "Perfecto, lo dejé como tu <b>logo</b> ✅ quedó aprobado, seguimos."
+            : `Perfecto, lo dejé como <b>${ETIQUETA_CATEGORIA[categoria as CategoriaRecurso]}</b> ✅ ya le avisé al equipo.`
           : r.motivo === "logo_no_png"
             ? `No pude convertir "${escaparHtml(r.nombre || "ese archivo")}" a PNG 😕 lo dejé guardado igual. Mándame tu logo como imagen (JPG, PNG o foto) y lo convierto yo.`
             : "No encontré ese archivo 😕 me lo reenvías?",

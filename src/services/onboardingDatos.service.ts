@@ -307,13 +307,56 @@ class OnboardingDatosService {
     return { ok: true as const, responsable: ayuda.responsable.nombre, donde: ayuda.donde, yaAvisado };
   }
 
+  /**
+   * El logo se aprueba solo, siempre (pedido de Diego 2026-10-14): el cliente
+   * no puede quedar esperando a que alguien lo revise para seguir con su
+   * onboarding. Queda verificado al subirlo y al responsable solo le llega el
+   * aviso, para que lo vea si quiere.
+   */
+  async logoAprobado(workspaceId: Types.ObjectId | string, nombre: string, origen: "Telegram" | "Metrics") {
+    const id = new Types.ObjectId(String(workspaceId));
+    const workspace = await models.workspaces.findById(id).select("name onboardingEntregables").lean();
+    const yaEstaba = (workspace as any)?.onboardingEntregables?.archivosMarca?.estado === "verificado";
+    await models.workspaces.updateOne(
+      { _id: id },
+      {
+        $set: {
+          "onboardingEntregables.archivosMarca": {
+            estado: "verificado",
+            declaradoEn: new Date(),
+            nota: `Logo subido por ${origen}: ${nombre}. Aprobado automáticamente.`.slice(0, 500),
+          },
+        },
+      }
+    );
+    if (yaEstaba) return { ok: true as const, yaEstaba: true };
+
+    const def = ENTREGABLES.archivosMarca;
+    const titulo = `🎨 ${workspace?.name || "Un cliente"} subió su logo (aprobado automáticamente)`;
+    const detalle = `Subido por ${origen}: ${nombre}. Quedó aprobado solo y el cliente sigue con su onboarding. Lo ves en ${linkEntregable("archivosMarca", id)}.`;
+    const internos = await models.users.find({ email: def.responsable.email, isActive: true }).select("_id").lean();
+    await Promise.allSettled([
+      slackService.avisarEquipo({ titulo, detalle, correos: [def.responsable.email] }),
+      ...internos.map((u) =>
+        notificationService.create(u._id as Types.ObjectId, "solicitud_cliente", titulo, detalle, { workspaceId: id })
+      ),
+    ]);
+    return { ok: true as const, yaEstaba: false };
+  }
+
   /** El cliente dice que ya envio algo: queda declarado y se avisa al responsable para verificar. */
   async registrarEntregable(chat: ITelegramChat, clave: string, nota?: string) {
     const def = ENTREGABLES[clave as Entregable];
     if (!def) return { ok: false as const, motivo: `entregable desconocido: ${clave}` };
-    const workspace = await models.workspaces.findById(chat.workspaceId).select("onboardingEntregables").lean();
+    const workspace = await models.workspaces.findById(chat.workspaceId).select("onboardingEntregables resources").lean();
     const actual = (workspace as any)?.onboardingEntregables?.[clave]?.estado;
     if (actual === "declarado" || actual === "verificado") return { ok: true as const, yaEstaba: actual, etiqueta: def.etiqueta };
+    // Con el logo ya en su entorno no hay nada que verificar: se aprueba solo.
+    const logo = ((workspace as any)?.resources || []).find((r: any) => r.categoria === "logo");
+    if (clave === "archivosMarca" && logo) {
+      await this.logoAprobado(chat.workspaceId!, logo.nombre, "Telegram");
+      return { ok: true as const, etiqueta: def.etiqueta, aprobadoAutomaticamente: true };
+    }
 
     await models.workspaces.updateOne(
       { _id: chat.workspaceId },
