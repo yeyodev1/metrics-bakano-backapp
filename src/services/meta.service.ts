@@ -239,10 +239,21 @@ export class MetaService {
       const longTokenResponse = await axios.get(`${this.graphUrl}/oauth/access_token`, { params: { grant_type: "fb_exchange_token", client_id: appId, client_secret: appSecret, fb_exchange_token: shortTokenResponse.data.access_token } });
       const token = longTokenResponse.data.access_token;
       const profileResponse = await axios.get(`${this.graphUrl}/me`, { params: { access_token: token, fields: "id,name" } });
-      const expiresAt = longTokenResponse.data.expires_in ? new Date(Date.now() + Number(longTokenResponse.data.expires_in) * 1000) : undefined;
+      const expiresAt = await this.vencimientoDelToken(token, longTokenResponse.data.expires_in, appId, appSecret);
+      // Sin vencimiento hay que BORRAR el anterior: Mongoose descarta las
+      // claves undefined del $set, y la fecha vieja (ya vencida) se quedaba
+      // guardada. Reconectar "funcionaba" pero el perfil seguia expirado.
       await models.metaGlobalIntegration.findOneAndUpdate(
         { key: "facebook-profile" },
-        { $set: { encryptedAccessToken: this.encrypt(token), facebookUserId: profileResponse.data.id, facebookUserName: profileResponse.data.name, expiresAt } },
+        {
+          $set: {
+            encryptedAccessToken: this.encrypt(token),
+            facebookUserId: profileResponse.data.id,
+            facebookUserName: profileResponse.data.name,
+            ...(expiresAt ? { expiresAt } : {}),
+          },
+          ...(expiresAt ? {} : { $unset: { expiresAt: 1 } }),
+        },
         { upsert: true, new: true, setDefaultsOnInsert: true }
       );
 
@@ -255,6 +266,25 @@ export class MetaService {
       return { name: profileResponse.data.name, expiresAt, refreshedWorkspaces: refreshed };
     } catch (error: any) {
       throw this.metaError(error, "No fue posible conectar el perfil de Facebook.");
+    }
+  }
+
+  /**
+   * Cuando vence el token, de verdad. Facebook no siempre manda `expires_in`
+   * al cambiarlo por uno largo; ahi se le pregunta a debug_token
+   * (`expires_at` 0 = no vence). Si eso tambien falla, se asume sin vencimiento.
+   */
+  private async vencimientoDelToken(token: string, expiresIn: unknown, appId: string, appSecret: string): Promise<Date | undefined> {
+    if (Number(expiresIn) > 0) return new Date(Date.now() + Number(expiresIn) * 1000);
+    try {
+      const { data } = await axios.get(`${this.graphUrl}/debug_token`, {
+        params: { input_token: token, access_token: `${appId}|${appSecret}` },
+      });
+      const expiresAt = Number(data?.data?.expires_at);
+      return expiresAt > 0 ? new Date(expiresAt * 1000) : undefined;
+    } catch (error: any) {
+      console.error("[MetaService] debug_token fallo:", error?.response?.data?.error?.message || error?.message || error);
+      return undefined;
     }
   }
 
