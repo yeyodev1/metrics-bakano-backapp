@@ -170,16 +170,24 @@ export async function getGlobalOAuthUrl(_req: AuthRequest, res: Response, next: 
   }
 }
 
-export async function completeGlobalOAuth(req: Request, res: Response, next: NextFunction): Promise<void> {
+export async function completeGlobalOAuth(req: Request, res: Response, _next: NextFunction): Promise<void> {
+  // Siempre se vuelve a la vista: si algo falla, con el motivo. Antes el error
+  // quedaba en un JSON del backend (o el cliente cancelaba en Facebook) y la
+  // vista volvia igual, sin decir nada.
+  const appUrl = process.env.APP_URL || "https://metrics.bakano.ec";
+  const vista = `${appUrl}/app/superadmin/meta-integrations`;
   try {
+    const fbError = (req.query.error_description || req.query.error_reason || req.query.error) as string | undefined;
+    if (fbError) throw new Error(`Facebook no autorizó la conexión: ${fbError}`);
     const code = req.query.code as string | undefined;
     const state = req.query.state as string | undefined;
     if (!code || !state) throw new Error("Facebook no devolvió los datos de autorización requeridos.");
     await metaService.completeOAuth(code, state);
-    const appUrl = process.env.APP_URL || "https://metrics.bakano.ec";
-    res.redirect(`${appUrl}/app/superadmin/meta-integrations?meta=connected`);
-  } catch (error) {
-    next(error);
+    res.redirect(`${vista}?meta=connected`);
+  } catch (error: any) {
+    console.error("[Meta OAuth] callback fallo:", error?.message || error);
+    const motivo = String(error?.message || "No fue posible conectar el perfil de Facebook.").slice(0, 300);
+    res.redirect(`${vista}?meta=error&motivo=${encodeURIComponent(motivo)}`);
   }
 }
 
